@@ -13,7 +13,7 @@ from app.models.project import Project
 from app.models.asset import Asset, VerificationStatus
 from app.models.scan_task import ScanTask, ScanTaskType, ScanTaskStatus, TriggeredBy
 from app.models.finding import Finding
-from app.agent.dispatcher import agent_dispatcher
+from app.orchestrator import orchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,47 @@ class ScanService:
         Returns:
             Updated ScanTask
         """
-        return await agent_dispatcher.run_scan(db, scan_task_id)
+        # Get scan task
+        result = await db.execute(
+            select(ScanTask).where(ScanTask.id == scan_task_id)
+        )
+        scan_task = result.scalar_one_or_none()
+        if not scan_task:
+            raise ValueError("Scan task not found")
+        
+        # Get project
+        result = await db.execute(
+            select(Project).where(Project.id == scan_task.project_id)
+        )
+        project = result.scalar_one_or_none()
+        if not project:
+            raise ValueError("Project not found")
+        
+        # Get asset if specified
+        asset_value = None
+        if scan_task.asset_id:
+            result = await db.execute(
+                select(Asset).where(Asset.id == scan_task.asset_id)
+            )
+            asset = result.scalar_one_or_none()
+            if asset:
+                asset_value = asset.value
+        
+        # Use orchestrator to execute scan
+        # Note: orchestrator returns immediately, scan runs in background
+        await orchestrator.handle_user_input(
+            user_input="执行等保合规检测",
+            project_id=project.id,
+            user_id=project.user_id,
+            asset=asset_value or "unknown",
+        )
+        
+        # Update scan task status
+        scan_task.status = ScanTaskStatus.RUNNING
+        scan_task.started_at = datetime.utcnow()
+        await db.commit()
+        
+        return scan_task
 
     async def get_scan_task(
         self,

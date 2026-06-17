@@ -1,79 +1,43 @@
 """
 Nuclei MCP Server - CertiProof
 Exposes nuclei vulnerability scanning as an MCP tool.
+Uses standardized /execute endpoint for gateway integration.
 """
 
 import asyncio
 import json
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import time
 
-app = FastAPI(title="Nuclei MCP Server", version="0.1.0")
+app = FastAPI(title="Nuclei MCP Server", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# --- Models ---
-
-class NucleiScanRequest(BaseModel):
-    target: str = Field(..., description="Target URL or IP")
-    templates: Optional[str] = Field(None, description="Template tags to use (e.g. 'cve,misconfig')")
-    severity: Optional[str] = Field(None, description="Filter by severity: critical,high,medium,low,info")
-    rate_limit: Optional[int] = Field(150, description="Requests per second")
-    timeout: Optional[int] = Field(600, description="Timeout in seconds")
+class ExecuteRequest(BaseModel):
+    """Standardized execute request"""
+    tool: str
+    params: Dict[str, Any]
 
 
-class VulnFinding(BaseModel):
-    template_id: str
-    name: str
-    severity: str
-    type: str  # vulnerability type
-    host: str
-    matched_at: Optional[str] = None
-    description: Optional[str] = None
-    reference: Optional[List[str]] = None
-    curl_command: Optional[str] = None
-    extracted_results: Optional[List[str]] = None
-    timestamp: str = ""
-
-
-class NucleiScanResult(BaseModel):
-    target: str
-    scan_time: str
-    findings: List[VulnFinding] = []
-    total_findings: int = 0
-    critical_count: int = 0
-    high_count: int = 0
-    medium_count: int = 0
-    low_count: int = 0
-    info_count: int = 0
-    error: Optional[str] = None
-
-
-# Severity mapping for compliance
-SEVERITY_TO_COMPLIANCE = {
-    "critical": ("critical", "8.1.3.3", "入侵防范"),
-    "high": ("high", "8.1.3.3", "入侵防范"),
-    "medium": ("medium", "8.1.4.4", "入侵防范"),
-    "low": ("low", "8.1.4.4", "入侵防范"),
-    "info": ("info", None, None),
-}
-
-
-def parse_nuclei_jsonl(jsonl_output: str, target: str) -> NucleiScanResult:
+def parse_nuclei_jsonl(jsonl_output: str, target: str) -> Dict[str, Any]:
     """Parse nuclei JSONL output into structured result."""
-    result = NucleiScanResult(
-        target=target,
-        scan_time=datetime.utcnow().isoformat(),
-    )
+    findings = []
+    critical_count = 0
+    high_count = 0
+    medium_count = 0
+    low_count = 0
+    info_count = 0
 
     for line in jsonl_output.strip().split("\n"):
         if not line.strip():
@@ -88,121 +52,75 @@ def parse_nuclei_jsonl(jsonl_output: str, target: str) -> NucleiScanResult:
             continue
 
         severity = data.get("info", {}).get("severity", "info").lower()
-        finding = VulnFinding(
-            template_id=data.get("template-id", data.get("templateID", "unknown")),
-            name=data.get("info", {}).get("name", "Unknown"),
-            severity=severity,
-            type=data.get("type", "unknown"),
-            host=data.get("host", target),
-            matched_at=data.get("matched-at"),
-            description=data.get("info", {}).get("description"),
-            reference=data.get("info", {}).get("reference"),
-            curl_command=data.get("curl-command"),
-            extracted_results=data.get("extracted-results"),
-            timestamp=data.get("timestamp", datetime.utcnow().isoformat()),
-        )
-        result.findings.append(finding)
+        finding = {
+            "template_id": data.get("template-id", data.get("templateID", "unknown")),
+            "name": data.get("info", {}).get("name", "Unknown"),
+            "severity": severity,
+            "type": data.get("type", "unknown"),
+            "host": data.get("host", target),
+            "matched_at": data.get("matched-at"),
+            "description": data.get("info", {}).get("description"),
+            "reference": data.get("info", {}).get("reference"),
+            "curl_command": data.get("curl-command"),
+            "extracted_results": data.get("extracted-results"),
+            "timestamp": data.get("timestamp", datetime.utcnow().isoformat()),
+        }
+        findings.append(finding)
 
         if severity == "critical":
-            result.critical_count += 1
+            critical_count += 1
         elif severity == "high":
-            result.high_count += 1
+            high_count += 1
         elif severity == "medium":
-            result.medium_count += 1
+            medium_count += 1
         elif severity == "low":
-            result.low_count += 1
+            low_count += 1
         else:
-            result.info_count += 1
+            info_count += 1
 
-    result.total_findings = len(result.findings)
-    return result
-
-
-def generate_compliance_findings(scan_result: NucleiScanResult) -> list:
-    """Generate compliance findings from nuclei scan results."""
-    findings = []
-
-    # Group by severity
-    critical_vulns = [f for f in scan_result.findings if f.severity == "critical"]
-    high_vulns = [f for f in scan_result.findings if f.severity == "high"]
-
-    if critical_vulns:
-        vuln_names = ", ".join([f.name for f in critical_vulns[:5]])
-        if len(critical_vulns) > 5:
-            vuln_names += f" 等共{len(critical_vulns)}个"
-        findings.append({
-            "clause_id": "8.1.3.3",
-            "clause_name": "入侵防范",
-            "severity": "critical",
-            "judgment": "fail",
-            "description": f"发现{len(critical_vulns)}个严重漏洞: {vuln_names}。存在被入侵的高风险。",
-            "remediation": "立即修复严重漏洞，升级相关组件到最新版本。",
-            "evidence": {
-                "tool": "nuclei",
-                "target": scan_result.target,
-                "vulns": [{"name": f.name, "template": f.template_id, "matched_at": f.matched_at} for f in critical_vulns],
-            },
-        })
-
-    if high_vulns:
-        vuln_names = ", ".join([f.name for f in high_vulns[:5]])
-        if len(high_vulns) > 5:
-            vuln_names += f" 等共{len(high_vulns)}个"
-        findings.append({
-            "clause_id": "8.1.3.3",
-            "clause_name": "入侵防范",
-            "severity": "high",
-            "judgment": "fail",
-            "description": f"发现{len(high_vulns)}个高危漏洞: {vuln_names}。",
-            "remediation": "尽快修复高危漏洞，制定修复计划。",
-            "evidence": {
-                "tool": "nuclei",
-                "target": scan_result.target,
-                "vulns": [{"name": f.name, "template": f.template_id, "matched_at": f.matched_at} for f in high_vulns],
-            },
-        })
-
-    return findings
+    return {
+        "target": target,
+        "findings": findings,
+        "total_findings": len(findings),
+        "critical_count": critical_count,
+        "high_count": high_count,
+        "medium_count": medium_count,
+        "low_count": low_count,
+        "info_count": info_count,
+    }
 
 
-# --- API ---
-
-@app.get("/")
-async def root():
-    return {"name": "Nuclei MCP Server", "version": "0.1.0", "status": "running"}
-
-
-@app.get("/health")
-async def health():
-    return {"status": "healthy"}
-
-
-@app.post("/scan", response_model=NucleiScanResult)
-async def scan(request: NucleiScanRequest):
+async def nuclei_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute nuclei scan against target."""
-    target = request.target.strip()
-
+    target = params.get("target")
     if not target:
-        raise HTTPException(status_code=400, detail="Target is required")
+        raise ValueError("Missing required parameter: target")
+
+    templates = params.get("templates")
+    severity = params.get("severity")
+    rate_limit = params.get("rate_limit", 150)
+    timeout = params.get("timeout", 600)
 
     # Build nuclei command
     cmd = ["nuclei", "-target", target, "-jsonl", "-silent"]
 
     # Templates
-    if request.templates:
-        cmd.extend(["-tags", request.templates])
+    if templates:
+        cmd.extend(["-tags", templates])
 
     # Severity filter
-    if request.severity:
-        cmd.extend(["-severity", request.severity])
+    if severity:
+        cmd.extend(["-severity", severity])
 
     # Rate limit
-    if request.rate_limit:
-        cmd.extend(["-rate-limit", str(request.rate_limit)])
+    if rate_limit:
+        cmd.extend(["-rate-limit", str(rate_limit)])
 
     # Timeout
-    cmd.extend(["-timeout", str(min(request.timeout, 30))])
+    cmd.extend(["-timeout", str(min(timeout, 30))])
     cmd.extend(["-retries", "2"])
+
+    start_time = time.time()
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -212,45 +130,81 @@ async def scan(request: NucleiScanRequest):
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(),
-            timeout=request.timeout + 60,
+            timeout=timeout + 60,
         )
 
         output = stdout.decode("utf-8", errors="replace")
-        result = parse_nuclei_jsonl(output, target)
+        parsed = parse_nuclei_jsonl(output, target)
 
-        if proc.returncode != 0 and not result.findings:
-            error_msg = stderr.decode("utf-8", errors="replace")
-            if error_msg:
-                result.error = error_msg[:500]
+        duration_ms = int((time.time() - start_time) * 1000)
 
-        return result
+        # Return standardized format
+        return {
+            "tool": "nuclei_scan",
+            "version": "1.0",
+            "status": "success",
+            "data": parsed,
+            "metadata": {
+                "duration_ms": duration_ms,
+                "scan_time": datetime.utcnow().isoformat(),
+            },
+        }
 
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail=f"nuclei scan timed out after {request.timeout}s")
+        raise ValueError(f"nuclei scan timeout after {timeout}s")
     except FileNotFoundError:
-        raise HTTPException(
-            status_code=500,
-            detail="nuclei is not installed. Install from: https://github.com/projectdiscovery/nuclei",
+        raise ValueError("nuclei is not installed")
+    except Exception as e:
+        raise ValueError(f"nuclei scan error: {e}")
+
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "name": "Nuclei MCP Server",
+        "version": "1.0.0",
+        "tools": ["nuclei_scan", "vuln_scan"],
+    }
+
+
+@app.get("/health")
+async def health():
+    """Health check"""
+    # Check if nuclei is available
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "nuclei", "-version",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-
-
-@app.post("/scan/analyze")
-async def scan_and_analyze(request: NucleiScanRequest):
-    """Execute nuclei scan and return compliance analysis."""
-    scan_result = await scan(request)
-    findings = generate_compliance_findings(scan_result)
+        await proc.communicate()
+        nuclei_available = True
+    except:
+        nuclei_available = False
 
     return {
-        "scan_result": scan_result.model_dump(),
-        "findings": findings,
-        "summary": {
-            "total_findings": len(findings),
-            "critical": len([f for f in findings if f["severity"] == "critical"]),
-            "high": len([f for f in findings if f["severity"] == "high"]),
-        },
+        "status": "healthy" if nuclei_available else "degraded",
+        "tools": ["nuclei_scan", "vuln_scan"],
+        "nuclei_available": nuclei_available,
     }
+
+
+@app.post("/execute")
+async def execute(request: ExecuteRequest):
+    """Execute tool - standardized endpoint for gateway"""
+    tool_name = request.tool
+    params = request.params
+
+    if tool_name in ["nuclei_scan", "vuln_scan"]:
+        return await nuclei_scan(params)
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"Unknown tool: {tool_name}"
+    )
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    uvicorn.run(app, host="0.0.0.0", port=8003)

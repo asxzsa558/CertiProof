@@ -11,6 +11,7 @@ import {
   PlusOutlined,
 } from '@ant-design/icons'
 import ToolCardComponent from './ToolCard'
+import AgentStatusCard from './AgentStatusCard'
 import api from '../services/api'
 import './ChatWorkspace.css'
 
@@ -79,6 +80,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         actions: response.data.actions || [],
         context: response.data.context,
         model_used: response.data.model_used,
+        task_ids: response.data.task_ids || [],  // 保存 task_ids
       }
       setMessages((prev) => [...prev, assistantMessage])
 
@@ -175,6 +177,20 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
                     />
                   ))}
                 </div>
+              )}
+              {/* 显示 Agent 执行状态 */}
+              {msg.task_ids && msg.task_ids.length > 0 && (
+                <AgentStatusCard 
+                  taskIds={msg.task_ids}
+                  onComplete={(results) => {
+                    const totalEvidence = results.reduce((sum, r) => sum + (r.evidence_count || 0), 0)
+                    const summaryMessage = {
+                      role: 'assistant',
+                      content: `✅ 所有检测任务已完成！共收集 ${totalEvidence} 条证据。`,
+                    }
+                    setMessages(prev => [...prev, summaryMessage])
+                  }}
+                />
               )}
             </div>
           </div>

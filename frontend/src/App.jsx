@@ -4,12 +4,6 @@ import { useAuthStore } from './store/authStore'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import ChatPage from './pages/ChatPage'
-import Dashboard from './pages/Dashboard'
-import Projects from './pages/Projects'
-import ProjectDetail from './pages/ProjectDetail'
-import Remediation from './pages/Remediation'
-import ScanResults from './pages/ScanResults'
-import Monitoring from './pages/Monitoring'
 import ModelSettings from './pages/ModelSettings'
 import './index.css'
 
@@ -86,56 +80,6 @@ function App() {
             element={
               <ProtectedRoute>
                 <ChatPage />
-              </ProtectedRoute>
-            }
-          />
-          
-          {/* Legacy pages - accessible via direct URL */}
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects"
-            element={
-              <ProtectedRoute>
-                <Projects />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects/:projectId"
-            element={
-              <ProtectedRoute>
-                <ProjectDetail />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects/:projectId/remediation"
-            element={
-              <ProtectedRoute>
-                <Remediation />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects/:projectId/scans/:scanId"
-            element={
-              <ProtectedRoute>
-                <ScanResults />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects/:projectId/monitoring"
-            element={
-              <ProtectedRoute>
-                <Monitoring />
               </ProtectedRoute>
             }
           />
