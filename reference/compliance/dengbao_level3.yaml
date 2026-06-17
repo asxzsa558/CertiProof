@@ -1,0 +1,165 @@
+name: "等保三级测评"
+standard: "GB/T 22239-2019"
+level: 3
+description: "等保三级合规测评完整流程"
+version: "1.0"
+
+# 工作流定义
+workflow:
+  # 并行组：同一组内的检查可以并行执行
+  parallel_groups:
+    # 第一组：基础扫描（可并行）
+    - id: "group_1_basic_scan"
+      name: "基础扫描"
+      description: "端口扫描、SSL检测、漏洞扫描"
+      steps:
+        - id: "check_8.1.3.1"
+          clause: "8.1.3.1"
+          clause_name: "边界访问控制"
+          weight: 2.5
+          tools:
+            - name: "nmap_scan"
+              params:
+                target: "{{asset}}"
+                port_range: "1-65535"
+                service_detection: true
+                os_detection: false
+              output_key: "port_scan_result"
+          pass_condition: "no_critical_ports_exposed"
+          depends_on: []
+
+        - id: "check_8.1.2.2"
+          clause: "8.1.2.2"
+          clause_name: "通信传输加密"
+          weight: 2.0
+          tools:
+            - name: "testssl_scan"
+              params:
+                target: "{{asset}}"
+                port: 443
+              output_key: "ssl_result"
+          pass_condition: "tls_version >= '1.2' and no_weak_ciphers"
+          depends_on: []
+
+        - id: "check_8.1.3.3"
+          clause: "8.1.3.3"
+          clause_name: "入侵防范"
+          weight: 2.0
+          tools:
+            - name: "nuclei_scan"
+              params:
+                target: "{{asset}}"
+                severity: "critical,high"
+                templates: "cve,misconfig,exposure"
+              output_key: "vuln_result"
+          pass_condition: "no_critical_vulns"
+          depends_on: []
+
+    # 第二组：依赖第一组结果
+    - id: "group_2_deep_check"
+      name: "深度检查"
+      description: "弱口令检测、SSH配置检查"
+      steps:
+        - id: "check_8.1.4.1"
+          clause: "8.1.4.1"
+          clause_name: "身份鉴别"
+          weight: 3.0
+          tools:
+            - name: "nmap_scan"
+              params:
+                target: "{{asset}}"
+                port_range: "22"
+                service_detection: true
+              output_key: "ssh_info"
+            - name: "hydra_bruteforce"
+              params:
+                target: "{{asset}}"
+                service: "ssh"
+                port: 22
+                max_attempts: 3
+              output_key: "brute_result"
+              depends_on: "ssh_info"
+          pass_condition: "no_weak_passwords"
+          depends_on: ["check_8.1.3.1"]
+
+        - id: "check_8.1.4.3"
+          clause: "8.1.4.3"
+          clause_name: "安全审计"
+          weight: 2.0
+          tools:
+            - name: "nmap_scan"
+              params:
+                target: "{{asset}}"
+                port_range: "514,1514"
+                service_detection: true
+              output_key: "syslog_info"
+          pass_condition: "syslog_service_detected"
+          depends_on: ["check_8.1.3.1"]
+
+# 安全红线
+safety_boundaries:
+  - id: "no_db_pentest"
+    rule: "禁止对数据库端口(3306,5432,1433,6379,27017)进行渗透测试"
+    ports: [3306, 5432, 1433, 6379, 27017]
+    action: "skip"
+  
+  - id: "max_brute_attempts"
+    rule: "密码暴力破解不能超过 3 次尝试"
+    max_attempts: 3
+    action: "limit"
+  
+  - id: "authorized_time_window"
+    rule: "扫描必须在授权时间窗口内执行"
+    check: "authorization_valid"
+    action: "abort"
+  
+  - id: "verified_ownership"
+    rule: "禁止对未验证所有权的资产执行任何扫描"
+    check: "ownership_verified"
+    action: "abort"
+
+# 评分规则
+scoring:
+  pass: 1.0
+  partial: 0.5
+  fail: 0.0
+  formula: "SUM(clause_score * weight) / SUM(weight) * 100"
+  
+  # 分数等级
+  levels:
+    - min: 90
+      max: 100
+      name: "优秀"
+      color: "#10b981"
+    - min: 75
+      max: 89
+      name: "良好"
+      color: "#6366f1"
+    - min: 60
+      max: 74
+      name: "一般"
+      color: "#f59e0b"
+    - min: 40
+      max: 59
+      name: "较差"
+      color: "#f97316"
+    - min: 0
+      max: 39
+      name: "危险"
+      color: "#ef4444"
+
+# 输出配置
+output:
+  evidence_format: "json"
+  report_types: ["pdf", "csv", "json"]
+  
+  # 证据链结构
+  evidence_schema:
+    required_fields:
+      - clause_id
+      - clause_name
+      - check_time
+      - tool_used
+      - raw_result
+      - judgment
+      - evidence_data

@@ -1,0 +1,80 @@
+.agent-status-card {
+  margin: 16px 0;
+  border-radius: 12px;
+  background: rgba(17, 17, 19, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.agent-status-card .ant-card-head {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px 16px;
+}
+
+.agent-status-card .ant-card-head-title {
+  color: #fff;
+  font-size: 14px;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.agent-item {
+  padding: 12px 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+.agent-item:last-child {
+  border-bottom: none !important;
+}
+
+.agent-info {
+  width: 100%;
+}
+
+.agent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.agent-name {
+  color: #fff;
+  font-size: 14px;
+  flex: 1;
+}
+
+.agent-progress {
+  margin-left: 24px;
+}
+
+.agent-progress .ant-progress {
+  margin-bottom: 4px;
+}
+
+.current-step {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.evidence-count {
+  margin-left: 24px;
+  font-size: 12px;
+}
+
+.error-message {
+  margin-left: 24px;
+  font-size: 12px;
+}
+
+/* Progress bar colors */
+.agent-progress .ant-progress-bg {
+  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%) !important;
+}
+
+.agent-progress .ant-progress-outer {
+  margin-right: 0 !important;
+}

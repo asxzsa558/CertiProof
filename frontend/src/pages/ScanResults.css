@@ -1,0 +1,239 @@
+/* Scan Results Detail Page Styles */
+
+.scan-results-layout {
+  min-height: 100vh;
+  background: #0a0a0b;
+}
+
+.scan-results-sider {
+  background: #111113 !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  position: fixed;
+  height: 100vh;
+  left: 0;
+  top: 0;
+  z-index: 100;
+}
+
+.scan-results-main {
+  margin-left: 260px;
+  background: #0a0a0b;
+}
+
+.scan-results-header {
+  background: rgba(17, 17, 19, 0.8) !important;
+  backdrop-filter: blur(20px);
+  padding: 1.25rem 2rem !important;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  position: sticky;
+  top: 0;
+  z-index: 99;
+  height: auto !important;
+  line-height: normal !important;
+}
+
+.scan-results-header .header-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.scan-results-content {
+  padding: 2rem;
+}
+
+.scan-results-loading {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a0a0b;
+}
+
+/* Summary Card */
+.summary-card {
+  background: rgba(17, 17, 19, 0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 16px !important;
+  margin-bottom: 1.5rem;
+}
+
+.summary-card .ant-card-body {
+  padding: 1.5rem;
+}
+
+.summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.summary-header h3 {
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.summary-descriptions .ant-descriptions-item-label {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+.summary-descriptions .ant-descriptions-item-content {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Findings Card */
+.findings-card {
+  background: rgba(17, 17, 19, 0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 16px !important;
+}
+
+.findings-card .ant-card-head {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.findings-card .ant-card-head-title {
+  color: #fff !important;
+  font-weight: 600;
+}
+
+.findings-card .ant-card-body {
+  padding: 0;
+}
+
+/* Collapse Styles */
+.findings-collapse {
+  background: transparent !important;
+  border: none !important;
+}
+
+.findings-collapse .ant-collapse-item {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  background: transparent !important;
+}
+
+.findings-collapse .ant-collapse-header {
+  padding: 1.25rem 1.5rem !important;
+  color: #fff !important;
+}
+
+.findings-collapse .ant-collapse-content {
+  background: rgba(0, 0, 0, 0.2) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+
+.findings-collapse .ant-collapse-content-box {
+  padding: 1.5rem !important;
+}
+
+.finding-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.finding-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.finding-clause {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.finding-name {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Finding Content */
+.finding-content {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.finding-section {
+  margin-bottom: 1.5rem;
+}
+
+.finding-section h4 {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.finding-section p {
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Evidence */
+.evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.evidence-card {
+  background: rgba(0, 0, 0, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+}
+
+.evidence-card .ant-card-body {
+  padding: 1rem !important;
+}
+
+.evidence-content {
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+  padding: 1rem;
+  color: #10b981;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.8125rem;
+  overflow-x: auto;
+  margin: 0;
+}
+
+/* Finding Meta */
+.finding-meta {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .scan-results-sider {
+    display: none;
+  }
+
+  .scan-results-main {
+    margin-left: 0;
+  }
+
+  .scan-results-content {
+    padding: 1rem;
+  }
+
+  .finding-meta {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}

@@ -1,0 +1,142 @@
+.model-settings-layout {
+  min-height: 100vh;
+  background: #0a0a0b;
+}
+
+.model-settings-header {
+  background: rgba(17, 17, 19, 0.95) !important;
+  backdrop-filter: blur(20px);
+  padding: 16px 24px !important;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  height: auto !important;
+  line-height: normal !important;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.back-btn {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.back-btn:hover {
+  color: #fff !important;
+}
+
+.model-settings-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.model-settings-content {
+  padding: 24px;
+}
+
+.settings-tabs {
+  background: transparent;
+}
+
+.settings-tabs .ant-tabs-nav {
+  margin-bottom: 24px;
+}
+
+.settings-tabs .ant-tabs-tab {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.settings-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #fff !important;
+}
+
+.settings-tabs .ant-tabs-ink-bar {
+  background: #6366f1 !important;
+}
+
+.model-settings-content .ant-card {
+  background: rgba(17, 17, 19, 0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 12px !important;
+}
+
+.model-settings-content .ant-card-head {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  color: #fff !important;
+}
+
+.model-settings-content .ant-card-head-title {
+  color: #fff !important;
+  font-weight: 600;
+}
+
+.model-settings-content .ant-table {
+  background: transparent !important;
+}
+
+.model-settings-content .ant-table-thead > tr > th {
+  background: rgba(255, 255, 255, 0.03) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.model-settings-content .ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.model-settings-content .ant-table-tbody > tr:hover > td {
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+.model-settings-content .ant-statistic-title {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+.model-settings-content .ant-statistic-content {
+  color: #fff !important;
+}
+
+.model-settings-content .ant-modal-content {
+  background: #1a1a1c !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.model-settings-content .ant-modal-header {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.model-settings-content .ant-modal-title {
+  color: #fff !important;
+}
+
+.model-settings-content .ant-form-item-label > label {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.model-settings-content .ant-input,
+.model-settings-content .ant-select-selector {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+}
+
+.model-settings-content .ant-input:focus,
+.model-settings-content .ant-select-focused .ant-select-selector {
+  border-color: #6366f1 !important;
+}
+
+.model-settings-content .ant-btn-primary {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+  border: none !important;
+}
+
+.model-settings-content .ant-btn-primary:hover {
+  background: linear-gradient(135deg, #818cf8, #a78bfa) !important;
+}

@@ -1,0 +1,172 @@
+version: "3.8"
+
+services:
+  # 数据库
+  db:
+    image: postgres:15-alpine
+    container_name: certiproof-db
+    environment:
+      POSTGRES_USER: certiproof
+      POSTGRES_PASSWORD: certiproof
+      POSTGRES_DB: certiproof
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U certiproof"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - certiproof-net
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: certiproof-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - certiproof-net
+
+  # 前端
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: certiproof-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # 后端（包含 Orchestrator）
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: certiproof-backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://certiproof:certiproof@db:5432/certiproof
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: your-secret-key-change-in-production
+      MCP_GATEWAY_URL: http://mcp-gateway:9000
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - ./backend:/app
+      - ./reference:/reference
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mcp-gateway:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # MCP Gateway
+  mcp-gateway:
+    build:
+      context: ./mcp-servers/gateway
+      dockerfile: Dockerfile
+    container_name: certiproof-mcp-gateway
+    ports:
+      - "9000:9000"
+    depends_on:
+      - nmap-server
+      - testssl-server
+      - nuclei-server
+      - hydra-server
+      - ocr-server
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # nmap MCP Server
+  nmap-server:
+    build:
+      context: ./mcp-servers/nmap-server
+      dockerfile: Dockerfile
+    container_name: certiproof-nmap-server
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # testssl MCP Server
+  testssl-server:
+    build:
+      context: ./mcp-servers/testssl-server
+      dockerfile: Dockerfile
+    container_name: certiproof-testssl-server
+    ports:
+      - "8002:8002"
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # nuclei MCP Server
+  nuclei-server:
+    build:
+      context: ./mcp-servers/nuclei-server
+      dockerfile: Dockerfile
+    container_name: certiproof-nuclei-server
+    ports:
+      - "8003:8003"
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # hydra MCP Server
+  hydra-server:
+    build:
+      context: ./mcp-servers/hydra-server
+      dockerfile: Dockerfile
+    container_name: certiproof-hydra-server
+    ports:
+      - "8004:8004"
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # OCR MCP Server
+  ocr-server:
+    build:
+      context: ./mcp-servers/ocr-server
+      dockerfile: Dockerfile
+    container_name: certiproof-ocr-server
+    ports:
+      - "8005:8005"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  certiproof-net:
+    driver: bridge

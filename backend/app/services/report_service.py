@@ -1,0 +1,364 @@
+"""
+Report Service - CertiProof
+Generates PDF compliance reports.
+"""
+
+import io
+from datetime import datetime
+from typing import List
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm, mm
+from reportlab.lib.colors import HexColor, white, black
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    PageBreak, Image
+)
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.graphics.shapes import Drawing, Rect, String
+from reportlab.graphics.charts.piecharts import Pie
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.models.project import Project
+from app.models.scan_task import ScanTask
+from app.models.finding import Finding, Severity
+from app.models.evidence import Evidence
+
+
+# Register Chinese font
+try:
+    pdfmetrics.registerFont(TTFont('PingFang', '/System/Library/Fonts/PingFang.ttc', subfontIndex=0))
+    CHINESE_FONT = 'PingFang'
+except:
+    try:
+        pdfmetrics.registerFont(TTFont('PingFang', '/System/Library/Fonts/STHeiti Light.ttc', subfontIndex=0))
+        CHINESE_FONT = 'PingFang'
+    except:
+        CHINESE_FONT = 'Helvetica'
+
+
+# Colors
+PRIMARY_COLOR = HexColor('#6366f1')
+SUCCESS_COLOR = HexColor('#10b981')
+WARNING_COLOR = HexColor('#f59e0b')
+DANGER_COLOR = HexColor('#ef4444')
+CRITICAL_COLOR = HexColor('#dc2626')
+DARK_BG = HexColor('#1e293b')
+LIGHT_BG = HexColor('#f8fafc')
+GRAY_TEXT = HexColor('#64748b')
+
+
+def get_severity_color(severity: str) -> HexColor:
+    """Get color for severity level."""
+    colors = {
+        'critical': CRITICAL_COLOR,
+        'high': DANGER_COLOR,
+        'medium': WARNING_COLOR,
+        'low': HexColor('#3b82f6'),
+        'info': GRAY_TEXT,
+    }
+    return colors.get(severity, GRAY_TEXT)
+
+
+def get_severity_label(severity: str) -> str:
+    """Get Chinese label for severity."""
+    labels = {
+        'critical': '严重',
+        'high': '高危',
+        'medium': '中危',
+        'low': '低危',
+        'info': '信息',
+    }
+    return labels.get(severity, severity)
+
+
+def get_judgment_label(judgment: str) -> str:
+    """Get Chinese label for judgment."""
+    labels = {
+        'pass': '符合',
+        'fail': '不符合',
+        'partial': '部分符合',
+        'not_tested': '未检测',
+        'paper_compliant': '纸上合规',
+    }
+    return labels.get(judgment, judgment)
+
+
+async def generate_report(db: AsyncSession, project_id: int) -> io.BytesIO:
+    """Generate PDF report for a project."""
+    
+    # Fetch project data
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise ValueError("Project not found")
+    
+    # Fetch latest scan
+    result = await db.execute(
+        select(ScanTask)
+        .where(ScanTask.project_id == project_id)
+        .order_by(ScanTask.created_at.desc())
+        .limit(1)
+    )
+    scan_task = result.scalar_one_or_none()
+    
+    # Fetch findings
+    findings = []
+    if scan_task:
+        result = await db.execute(
+            select(Finding)
+            .where(Finding.scan_task_id == scan_task.id)
+            .order_by(Finding.severity)
+        )
+        findings = result.scalars().all()
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=2*cm,
+        leftMargin=2*cm,
+        topMargin=2*cm,
+        bottomMargin=2*cm,
+    )
+    
+    # Styles
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Title'],
+        fontName=CHINESE_FONT,
+        fontSize=28,
+        textColor=PRIMARY_COLOR,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading1'],
+        fontName=CHINESE_FONT,
+        fontSize=18,
+        textColor=DARK_BG,
+        spaceBefore=20,
+        spaceAfter=12,
+    )
+    
+    subheading_style = ParagraphStyle(
+        'CustomSubHeading',
+        parent=styles['Heading2'],
+        fontName=CHINESE_FONT,
+        fontSize=14,
+        textColor=DARK_BG,
+        spaceBefore=15,
+        spaceAfter=8,
+    )
+    
+    body_style = ParagraphStyle(
+        'CustomBody',
+        parent=styles['Normal'],
+        fontName=CHINESE_FONT,
+        fontSize=10,
+        textColor=GRAY_TEXT,
+        spaceBefore=6,
+        spaceAfter=6,
+        leading=16,
+    )
+    
+    # Build content
+    elements = []
+    
+    # Cover page
+    elements.append(Spacer(1, 4*cm))
+    elements.append(Paragraph('CertiProof', title_style))
+    elements.append(Spacer(1, 1*cm))
+    elements.append(Paragraph('等保合规检测报告', ParagraphStyle(
+        'Subtitle',
+        parent=styles['Title'],
+        fontName=CHINESE_FONT,
+        fontSize=20,
+        textColor=GRAY_TEXT,
+        alignment=TA_CENTER,
+    )))
+    elements.append(Spacer(1, 3*cm))
+    
+    # Project info table
+    compliance_level = str(project.compliance_level.value) if hasattr(project.compliance_level, 'value') else str(project.compliance_level)
+    scan_time = scan_task.completed_at.strftime('%Y-%m-%d %H:%M') if scan_task and scan_task.completed_at else '未检测'
+    
+    project_info = [
+        ['项目名称', project.name],
+        ['等保等级', compliance_level],
+        ['检测时间', scan_time],
+        ['合规分数', f"{project.compliance_score or 0} 分"],
+        ['报告生成时间', datetime.utcnow().strftime('%Y-%m-%d %H:%M')],
+    ]
+    
+    info_table = Table(project_info, colWidths=[4*cm, 10*cm])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), CHINESE_FONT),
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('TEXTCOLOR', (0, 0), (0, -1), GRAY_TEXT),
+        ('TEXTCOLOR', (1, 0), (1, -1), DARK_BG),
+        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+        ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.5, HexColor('#e2e8f0')),
+    ]))
+    elements.append(info_table)
+    
+    elements.append(PageBreak())
+    
+    # Executive Summary
+    elements.append(Paragraph('执行摘要', heading_style))
+    elements.append(Spacer(1, 0.5*cm))
+    
+    # Summary stats
+    critical_count = 0
+    high_count = 0
+    medium_count = 0
+    low_count = 0
+    
+    for f in findings:
+        severity = f.severity.value if hasattr(f.severity, 'value') else str(f.severity)
+        if severity == 'critical':
+            critical_count += 1
+        elif severity == 'high':
+            high_count += 1
+        elif severity == 'medium':
+            medium_count += 1
+        elif severity == 'low':
+            low_count += 1
+    
+    summary_text = f"""
+    本次检测共发现 <b>{len(findings)}</b> 个安全问题，其中：
+    <br/>• 严重问题：<b>{critical_count}</b> 个
+    <br/>• 高危问题：<b>{high_count}</b> 个
+    <br/>• 中危问题：<b>{medium_count}</b> 个
+    <br/>• 低危问题：<b>{low_count}</b> 个
+    <br/><br/>
+    综合合规分数为 <b>{project.compliance_score or 0}</b> 分，
+    建议优先处理严重和高危问题，尽快完成整改。
+    """
+    elements.append(Paragraph(summary_text, body_style))
+    elements.append(Spacer(1, 1*cm))
+    
+    # Score gauge
+    score = project.compliance_score or 0
+    if score >= 90:
+        score_status = '优秀'
+        score_color = SUCCESS_COLOR
+    elif score >= 75:
+        score_status = '良好'
+        score_color = PRIMARY_COLOR
+    elif score >= 60:
+        score_status = '一般'
+        score_color = WARNING_COLOR
+    else:
+        score_status = '危险'
+        score_color = DANGER_COLOR
+    
+    score_text = f"""
+    <font size="14" color="{score_color.hexval()}"><b>{score_status}</b></font>
+    <br/>
+    合规分数：<b>{score}</b> / 100
+    """
+    elements.append(Paragraph(score_text, ParagraphStyle(
+        'ScoreStyle',
+        parent=body_style,
+        alignment=TA_CENTER,
+        fontSize=12,
+    )))
+    
+    elements.append(PageBreak())
+    
+    # Findings Detail
+    elements.append(Paragraph('问题详情', heading_style))
+    elements.append(Spacer(1, 0.5*cm))
+    
+    if not findings:
+        elements.append(Paragraph('暂无检测数据', body_style))
+    else:
+        for i, finding in enumerate(findings, 1):
+            severity = finding.severity.value if hasattr(finding.severity, 'value') else str(finding.severity)
+            judgment = finding.judgment.value if hasattr(finding.judgment, 'value') else str(finding.judgment)
+            
+            # Finding header
+            elements.append(Paragraph(
+                f'{i}. [{get_severity_label(severity)}] {finding.clause_id} {finding.clause_name or ""}',
+                subheading_style
+            ))
+            
+            # Finding details table
+            finding_data = [
+                ['条款编号', finding.clause_id],
+                ['严重等级', get_severity_label(severity)],
+                ['判定结果', get_judgment_label(judgment)],
+                ['问题描述', finding.description or '无'],
+                ['整改建议', finding.remediation_suggestion or '无'],
+            ]
+            
+            finding_table = Table(finding_data, colWidths=[3*cm, 11*cm])
+            finding_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), CHINESE_FONT),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('TEXTCOLOR', (0, 0), (0, -1), GRAY_TEXT),
+                ('TEXTCOLOR', (1, 0), (1, -1), DARK_BG),
+                ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('BACKGROUND', (0, 0), (-1, -1), LIGHT_BG),
+            ]))
+            elements.append(finding_table)
+            elements.append(Spacer(1, 0.8*cm))
+    
+    elements.append(PageBreak())
+    
+    # Recommendations
+    elements.append(Paragraph('整改建议', heading_style))
+    elements.append(Spacer(1, 0.5*cm))
+    
+    recommendations = """
+    <b>1. 立即整改（严重/高危问题）</b>
+    <br/>• 关闭不必要的公网端口，特别是数据库端口（3306, 5432, 6379 等）
+    <br/>• 修改所有弱口令，启用强密码策略（≥12位，含大小写+数字+特殊字符）
+    <br/>• 修复已知高危漏洞，升级相关组件到最新版本
+    <br/><br/>
+    <b>2. 短期整改（中危问题）</b>
+    <br/>• 启用 HTTPS，配置有效的 SSL 证书
+    <br/>• 禁用不安全的协议版本（TLS 1.0/1.1）
+    <br/>• 配置访问控制策略，限制管理后台访问 IP
+    <br/><br/>
+    <b>3. 长期改进</b>
+    <br/>• 建立定期安全扫描机制，建议每月至少一次
+    <br/>• 完善安全管理制度，确保人员职责明确
+    <br/>• 加强安全培训，提高全员安全意识
+    <br/>• 考虑部署 WAF、IDS 等安全防护设备
+    """
+    elements.append(Paragraph(recommendations, body_style))
+    
+    # Footer
+    elements.append(Spacer(1, 2*cm))
+    elements.append(Paragraph(
+        '本报告由 CertiProof 等保合规智能平台自动生成',
+        ParagraphStyle(
+            'Footer',
+            parent=body_style,
+            fontSize=8,
+            textColor=GRAY_TEXT,
+            alignment=TA_CENTER,
+        )
+    ))
+    
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    return buffer
