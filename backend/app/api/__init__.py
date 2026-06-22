@@ -9,6 +9,8 @@ from app.api.chat import router as chat_router
 from app.api.models import router as models_router
 from app.api.results import router as results_router
 from app.api.websocket import router as websocket_router
+from app.api.diagnostics import router as diagnostics_router
+from app.api.tasks import router as tasks_router
 
 api_router = APIRouter()
 
@@ -22,5 +24,7 @@ api_router.include_router(chat_router)
 api_router.include_router(models_router)
 api_router.include_router(results_router)
 api_router.include_router(websocket_router)
+api_router.include_router(diagnostics_router)
+api_router.include_router(tasks_router)
 
 __all__ = ["api_router"]

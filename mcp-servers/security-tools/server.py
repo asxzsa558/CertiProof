@@ -100,6 +100,79 @@ async def nmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"nmap scan error: {e}")
 
 
+# ============== Ping 工具 ==============
+
+async def ping_host(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Ping 主机检测可达性"""
+    target = params.get("target")
+    if not target:
+        raise ValueError("Missing required parameter: target")
+    
+    count = params.get("count", 3)
+    timeout = params.get("timeout", 2)
+    
+    cmd = ["ping", "-c", str(count), "-W", str(timeout), target]
+    
+    start_time = time.time()
+    
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+        
+        output = stdout.decode("utf-8", errors="replace")
+        
+        # 解析 ping 结果
+        reachable = process.returncode == 0
+        packet_loss = 100
+        avg_latency = None
+        
+        # 解析 packet loss
+        for line in output.split("\n"):
+            if "packet loss" in line:
+                # 格式: "3 packets transmitted, 3 received, 0% packet loss"
+                parts = line.split(",")
+                for part in parts:
+                    if "packet loss" in part:
+                        loss_str = part.strip().split()[0]
+                        packet_loss = int(loss_str.replace("%", ""))
+            
+            # 解析 avg latency
+            if "min/avg/max" in line:
+                # 格式: "rtt min/avg/max/mdev = 10.5/10.8/11.2/0.3 ms"
+                parts = line.split("=")
+                if len(parts) > 1:
+                    values = parts[1].strip().split("/")
+                    if len(values) >= 2:
+                        avg_latency = float(values[1])
+        
+        duration_ms = int((time.time() - start_time) * 1000)
+        
+        return {
+            "tool": "ping_host",
+            "version": "1.0",
+            "status": "success",
+            "data": {
+                "target": target,
+                "reachable": reachable,
+                "packet_loss": packet_loss,
+                "avg_latency_ms": avg_latency,
+            },
+            "metadata": {
+                "duration_ms": duration_ms,
+                "ping_time": datetime.utcnow().isoformat(),
+                "count": count,
+            },
+        }
+    except asyncio.TimeoutError:
+        raise ValueError("ping timeout")
+    except Exception as e:
+        raise ValueError(f"ping error: {e}")
+
+
 # ============== TestSSL 工具 ==============
 
 async def testssl_scan(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -336,7 +409,7 @@ async def root():
     return {
         "name": "Security Tools MCP Server",
         "version": "1.0.0",
-        "tools": ["nmap_scan", "testssl_scan", "nuclei_scan", "hydra_bruteforce"],
+        "tools": ["nmap_scan", "testssl_scan", "nuclei_scan", "hydra_bruteforce", "ping_host"],
     }
 
 
@@ -396,6 +469,8 @@ async def execute(request: ExecuteRequest):
         return await nuclei_scan(params)
     elif tool_name == "hydra_bruteforce":
         return await hydra_bruteforce(params)
+    elif tool_name == "ping_host":
+        return await ping_host(params)
     else:
         raise HTTPException(status_code=404, detail=f"Unknown tool: {tool_name}")
 

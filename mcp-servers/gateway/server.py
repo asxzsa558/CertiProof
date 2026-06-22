@@ -33,6 +33,7 @@ TOOL_ROUTES = {
     "vuln_scan": "http://security-tools:8010",
     "hydra_bruteforce": "http://security-tools:8010",
     "password_test": "http://security-tools:8010",
+    "ping_host": "http://security-tools:8010",
     
     # OCR 相关
     "ocr_analyze": "http://ocr-server:8005",

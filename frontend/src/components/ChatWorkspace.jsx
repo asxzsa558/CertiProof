@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Input, Button, Avatar, Spin, Empty, Typography, Progress, Tag, Table } from 'antd'
+import { Input, Button, Avatar, Spin, Empty, Typography, Progress, Tag, Table, message } from 'antd'
 import {
   SendOutlined,
   UserOutlined,
@@ -15,6 +15,8 @@ import {
   ApiOutlined,
   CheckCircleFilled,
   CloseCircleFilled,
+  PauseCircleOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import './ChatWorkspace.css'
@@ -28,15 +30,18 @@ const SUGGESTIONS = [
   { icon: <ThunderboltOutlined />, title: '端口扫描', text: '/scan', color: '#10b981' },
   { icon: <FileSearchOutlined />, title: '查看结果', text: '查看扫描结果', color: '#ef4444' },
   { icon: <SafetyCertificateOutlined />, title: '合规评分', text: '查看合规分数', color: '#f59e0b' },
+  { icon: <ApiOutlined />, title: '连通测试', text: '/diagnose', color: '#8b5cf6' },
 ]
 
 const SLASH_COMMANDS = [
   { command: '/scan', description: '端口扫描', usage: '/scan [目标]', defaultText: '/scan ' },
   { command: '/ssl', description: 'SSL/TLS 检测', usage: '/ssl [目标]', defaultText: '/ssl ' },
   { command: '/vuln', description: '漏洞扫描', usage: '/vuln [目标]', defaultText: '/vuln ' },
+  { command: '/ping', description: 'Ping 检测', usage: '/ping [目标]', defaultText: '/ping ' },
   { command: '/asset', description: '添加资产', usage: '/asset [IP/域名]', defaultText: '/asset ' },
   { command: '/assets', description: '列出项目资产', usage: '/assets', direct: true },
   { command: '/project', description: '列出项目', usage: '/project', defaultText: '列出所有项目' },
+  { command: '/diagnose', description: 'MCP 连通性测试', usage: '/diagnose', direct: true },
   { command: '/clear', description: '清理对话历史', usage: '/clear', direct: true },
   { command: '/help', description: '显示帮助', usage: '/help', direct: true },
 ]
@@ -125,6 +130,26 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     const messageText = text || input.trim()
     if (!messageText || loading) return
 
+    // 检测诊断命令
+    if (messageText === '/diagnose') {
+      await handleDiagnose()
+      return
+    }
+
+    // 检测 ping 命令
+    if (messageText.startsWith('/ping')) {
+      const target = messageText.slice(5).trim()
+      if (target) {
+        await handlePing(target)
+      } else {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: '请指定 ping 目标，例如：/ping 192.168.1.1',
+        }])
+      }
+      return
+    }
+
     // 检测扫描命令（/scan、/ssl、/vuln）
     const scanCommands = ['/scan', '/ssl', '/vuln']
     const matchedCommand = scanCommands.find(cmd => messageText === cmd || messageText.startsWith(cmd + ' '))
@@ -147,6 +172,72 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     }
 
     await handleSendToAI(messageText)
+  }
+
+  const handleDiagnose = async () => {
+    setMessages(prev => [...prev, { role: 'user', content: '/diagnose' }])
+    setInput('')
+    setLoading(true)
+
+    try {
+      const response = await api.get('/diagnostics/mcp/health')
+      const data = response.data
+      
+      const services = data.services || {}
+      const lines = ['MCP 连通性测试结果：', '']
+      
+      for (const [name, info] of Object.entries(services)) {
+        const statusIcon = info.status === 'healthy' ? '✓' : '✗'
+        const statusText = info.status === 'healthy' ? '正常' : '异常'
+        lines.push(`${statusIcon} ${name}: ${statusText}`)
+        if (info.error) {
+          lines.push(`  错误: ${info.error}`)
+        }
+      }
+      
+      lines.push('')
+      lines.push(data.status === 'healthy' ? '所有服务正常' : '部分服务异常')
+      
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: lines.join('\n'),
+      }])
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `诊断失败: ${error.response?.data?.detail || error.message}`,
+        isError: true,
+      }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handlePing = async (target) => {
+    setMessages(prev => [...prev, { role: 'user', content: `/ping ${target}` }])
+    setInput('')
+    setLoading(true)
+
+    try {
+      const response = await api.post('/chat/', {
+        message: `ping ${target}`,
+        project_id: currentProjectId,
+      })
+      
+      const aiResponse = response.data.response
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: aiResponse,
+      }])
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `Ping 失败: ${error.response?.data?.detail || error.message}`,
+        isError: true,
+      }])
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleSendToAI = async (messageText) => {
@@ -797,11 +888,29 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     )
   }
 
+  const handlePauseTask = async (taskId) => {
+    try {
+      await api.post(`/tasks/${taskId}/pause`)
+      message.success('任务已暂停')
+    } catch (error) {
+      message.error('暂停失败')
+    }
+  }
+
+  const handleStopTask = async (taskId) => {
+    try {
+      await api.post(`/tasks/${taskId}/stop`)
+      message.success('任务已停止')
+    } catch (error) {
+      message.error('停止失败')
+    }
+  }
+
   const renderMultiAssetProgress = (msg) => {
     const assetProgress = msg.assetProgress || {}
     const totalAssets = msg.totalAssets || Object.keys(assetProgress).length
     const completedCount = Object.values(assetProgress).filter(a => 
-      a.status === 'completed' || a.status === 'failed' || a.status === 'success'
+      a.status === 'completed' || a.status === 'failed' || a.status === 'success' || a.status === 'cancelled'
     ).length
     
     const progress = totalAssets > 0 ? Math.round((completedCount / totalAssets) * 100) : 0
@@ -822,6 +931,27 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
             </span>
           </div>
           
+          {/* 控制按钮 */}
+          <div className="task-controls">
+            <Button
+              size="small"
+              icon={<PauseCircleOutlined />}
+              onClick={() => handlePauseTask(msg.taskId)}
+              className="task-control-btn"
+            >
+              暂停
+            </Button>
+            <Button
+              size="small"
+              danger
+              icon={<StopOutlined />}
+              onClick={() => handleStopTask(msg.taskId)}
+              className="task-control-btn"
+            >
+              停止
+            </Button>
+          </div>
+          
           {/* 资产列表 */}
           <div className="asset-progress-list">
             {Object.entries(assetProgress).map(([index, asset]) => (
@@ -830,12 +960,17 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
                   <CheckCircleFilled style={{ color: '#10b981' }} />
                 ) : asset.status === 'failed' ? (
                   <CloseCircleFilled style={{ color: '#ef4444' }} />
+                ) : asset.status === 'cancelled' ? (
+                  <StopOutlined style={{ color: '#faad14' }} />
                 ) : (
                   <LoadingOutlined style={{ color: '#6366f1' }} spin />
                 )}
                 <span className="asset-name">{asset.name}</span>
                 {asset.status === 'running' && (
                   <span className="asset-status">扫描中...</span>
+                )}
+                {asset.status === 'cancelled' && (
+                  <span className="asset-status">已取消</span>
                 )}
               </div>
             ))}

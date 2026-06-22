@@ -365,6 +365,20 @@ class CapabilityRegistry:
             category="asset"
         ))
         
+        self.register(Capability(
+            name="ping_asset",
+            description="检测资产是否可达（ping）。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标 IP 或域名"},
+                    "count": {"type": "integer", "description": "ping 次数，默认 3"},
+                },
+                "required": ["target"]
+            },
+            category="asset"
+        ))
+        
         # ========== 整改管理类能力 ==========
         
         self.register(Capability(

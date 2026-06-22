@@ -42,6 +42,49 @@ class Orchestrator:
         
         # 回调管理
         self.task_callbacks: Dict[str, Dict[str, Callable]] = {}
+        
+        # 任务控制
+        self.task_stop_flags: Dict[str, bool] = {}  # 停止标志
+        self.task_status: Dict[str, str] = {}  # running/paused/stopped
+        self.active_tasks: Dict[str, asyncio.Task] = {}  # asyncio Task 引用
+    
+    def pause_task(self, task_id: str) -> bool:
+        """暂停任务"""
+        if task_id in self.task_status and self.task_status[task_id] == "running":
+            self.task_status[task_id] = "paused"
+            logger.info(f"Task {task_id} paused")
+            return True
+        return False
+    
+    def resume_task(self, task_id: str) -> bool:
+        """恢复任务"""
+        if task_id in self.task_status and self.task_status[task_id] == "paused":
+            self.task_status[task_id] = "running"
+            logger.info(f"Task {task_id} resumed")
+            return True
+        return False
+    
+    def stop_task(self, task_id: str) -> bool:
+        """停止任务"""
+        if task_id in self.task_status:
+            self.task_stop_flags[task_id] = True
+            self.task_status[task_id] = "stopped"
+            
+            # 取消 asyncio Task
+            if task_id in self.active_tasks:
+                self.active_tasks[task_id].cancel()
+            
+            logger.info(f"Task {task_id} stopped")
+            return True
+        return False
+    
+    def is_task_stopped(self, task_id: str) -> bool:
+        """检查任务是否被停止"""
+        return self.task_stop_flags.get(task_id, False)
+    
+    def get_task_status(self, task_id: str) -> Optional[str]:
+        """获取任务状态"""
+        return self.task_status.get(task_id)
     
     async def handle_user_input(
         self,
@@ -163,6 +206,14 @@ class Orchestrator:
         ai_response: str = "",
     ):
         """异步执行计划，完成后用 AI 生成结果描述"""
+        # 初始化任务控制状态
+        self.task_stop_flags[task_id] = False
+        self.task_status[task_id] = "running"
+        
+        # 创建停止检查回调
+        def check_stop():
+            return self.is_task_stopped(task_id)
+        
         # 创建新的数据库会话用于异步任务
         async with AsyncSessionLocal() as async_db:
             scan_task_id = None
@@ -211,7 +262,7 @@ class Orchestrator:
                 # 检测是否为多资产扫描
                 is_multi_asset = self._is_multi_asset_scan(plan)
                 
-                # 执行计划
+                # 执行计划（传入停止检查回调）
                 if is_multi_asset:
                     # 多资产并发执行
                     execution_result = await self.execution_engine.execute_plan_concurrent(
@@ -224,6 +275,7 @@ class Orchestrator:
                         progress_callback=self._update_task_progress_multi_asset,
                         max_concurrent=5,
                         max_retries=3,
+                        check_stop=check_stop,
                     )
                 else:
                     # 单资产串行执行

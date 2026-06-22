@@ -14,6 +14,7 @@ RUN apt-get update && \
     procps \
     hydra \
     nmap \
+    iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 testssl.sh

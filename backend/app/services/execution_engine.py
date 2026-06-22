@@ -154,6 +154,7 @@ class ExecutionEngine:
         progress_callback: Callable = None,
         max_concurrent: int = 5,
         max_retries: int = 3,
+        check_stop: Callable = None,
     ) -> Dict:
         """
         并发执行计划（多资产场景）
@@ -162,6 +163,7 @@ class ExecutionEngine:
             plan: 执行计划，每个步骤包含 capability 和 parameters
             max_concurrent: 最大并发数（默认 5）
             max_retries: 最大重试次数（默认 3）
+            check_stop: 检查是否被停止的回调函数
         
         Returns:
             {
@@ -192,6 +194,7 @@ class ExecutionEngine:
                 task_id=task_id,
                 progress_callback=progress_callback,
                 max_retries=max_retries,
+                check_stop=check_stop,
             )
             tasks.append(task)
         
@@ -206,20 +209,31 @@ class ExecutionEngine:
         processed_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                logger.error(f"Task {i} raised exception: {result}", exc_info=result)
-                processed_results.append({
-                    "capability": plan[i].get("capability"),
-                    "target": plan[i].get("parameters", {}).get("target", "unknown"),
-                    "status": "failed",
-                    "error": str(result),
-                    "attempts": 0,
-                })
+                if isinstance(result, asyncio.CancelledError):
+                    logger.info(f"Task {i} was cancelled")
+                    processed_results.append({
+                        "capability": plan[i].get("capability"),
+                        "target": plan[i].get("parameters", {}).get("target", "unknown"),
+                        "status": "cancelled",
+                        "error": "Task was stopped",
+                        "attempts": 0,
+                    })
+                else:
+                    logger.error(f"Task {i} raised exception: {result}", exc_info=result)
+                    processed_results.append({
+                        "capability": plan[i].get("capability"),
+                        "target": plan[i].get("parameters", {}).get("target", "unknown"),
+                        "status": "failed",
+                        "error": str(result),
+                        "attempts": 0,
+                    })
             else:
                 processed_results.append(result)
         
         # 统计结果
         success_count = sum(1 for r in processed_results if r.get("status") == "success")
-        failed_count = len(processed_results) - success_count
+        failed_count = sum(1 for r in processed_results if r.get("status") in ("failed", "cancelled"))
+        cancelled_count = sum(1 for r in processed_results if r.get("status") == "cancelled")
         
         # 按资产分组汇总
         asset_results = {}
@@ -233,8 +247,10 @@ class ExecutionEngine:
             "results": processed_results,
             "success_count": success_count,
             "failed_count": failed_count,
+            "cancelled_count": cancelled_count,
             "asset_results": asset_results,
             "total_assets": total_steps,
+            "was_stopped": cancelled_count > 0,
         }
     
     async def _execute_with_retry(
@@ -298,15 +314,38 @@ class ExecutionEngine:
         task_id: str,
         progress_callback: Callable,
         max_retries: int,
+        check_stop: Callable = None,
     ) -> Dict:
         """执行单个资产任务"""
         capability_name = step.get("capability")
         parameters = step.get("parameters", {})
         target = parameters.get("target", "unknown")
         
+        # 检查是否被停止
+        if check_stop and check_stop():
+            logger.info(f"Task {asset_index} stopped before execution for {capability_name}({target})")
+            return {
+                "capability": capability_name,
+                "target": target,
+                "status": "cancelled",
+                "error": "Task was stopped",
+                "attempts": 0,
+            }
+        
         logger.info(f"Task {asset_index} waiting for semaphore for {capability_name}({target})")
         
         async with semaphore:
+            # 再次检查是否被停止（可能在等待 semaphore 期间被停止）
+            if check_stop and check_stop():
+                logger.info(f"Task {asset_index} stopped after semaphore for {capability_name}({target})")
+                return {
+                    "capability": capability_name,
+                    "target": target,
+                    "status": "cancelled",
+                    "error": "Task was stopped",
+                    "attempts": 0,
+                }
+            
             logger.info(f"Task {asset_index} acquired semaphore, starting {capability_name}({target})")
             
             # 通知开始
@@ -423,6 +462,9 @@ class ExecutionEngine:
         
         elif capability_name == "verify_asset":
             return await self._verify_asset(parameters, user_id, project_id, db)
+        
+        elif capability_name == "ping_asset":
+            return await self._ping_asset(parameters, user_id, project_id, db)
         
         # 整改管理类能力
         elif capability_name == "create_remediation_ticket":
@@ -919,6 +961,41 @@ class ExecutionEngine:
             "verification_token": token,
             "verification_method": "dns_txt",
         }
+    
+    async def _ping_asset(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """Ping 资产检测可达性"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        target = parameters.get("target")
+        if not target:
+            return {"message": "请指定目标地址"}
+        
+        client = MCPGatewayClient()
+        result = await client.call("ping_host", {
+            "target": target,
+            "count": parameters.get("count", 3),
+        })
+        
+        data = result.get("data", {})
+        reachable = data.get("reachable", False)
+        
+        if reachable:
+            latency = data.get("avg_latency_ms")
+            latency_str = f"，平均延迟 {latency:.1f}ms" if latency else ""
+            return {
+                "message": f"{target} 可达{latency_str}",
+                "target": target,
+                "reachable": True,
+                "avg_latency_ms": latency,
+                "packet_loss": data.get("packet_loss", 0),
+            }
+        else:
+            return {
+                "message": f"{target} 不可达",
+                "target": target,
+                "reachable": False,
+                "packet_loss": data.get("packet_loss", 100),
+            }
     
     async def _create_remediation_ticket(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """创建整改工单"""
