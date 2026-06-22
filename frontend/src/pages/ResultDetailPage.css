@@ -1,0 +1,100 @@
+.result-detail-page {
+  min-height: 100vh;
+  background: #0a0a0b;
+}
+
+.result-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  background: rgba(17, 17, 19, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.result-detail-content {
+  padding: 24px;
+}
+
+.result-detail-content .ant-card {
+  background: rgba(17, 17, 19, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+
+.result-detail-content .ant-card-head {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.result-detail-content .ant-card-head-title {
+  color: #fff;
+}
+
+.result-detail-content .ant-descriptions-item-label {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.result-detail-content .ant-descriptions-item-content {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+}
+
+.stat-item {
+  text-align: center;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.stat-item.pass .stat-value {
+  color: #52c41a;
+}
+
+.stat-item.fail .stat-value {
+  color: #ff4d4f;
+}
+
+.stat-item.partial .stat-value {
+  color: #faad14;
+}
+
+.stat-item.score .stat-value {
+  color: #1890ff;
+}
+
+.result-detail-content .ant-table {
+  background: transparent;
+}
+
+.result-detail-content .ant-table-thead > tr > th {
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 255, 255, 0.8);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.result-detail-content .ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.result-detail-content .ant-table-tbody > tr:hover > td {
+  background: rgba(255, 255, 255, 0.02);
+}

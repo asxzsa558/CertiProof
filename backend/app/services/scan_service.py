@@ -119,13 +119,12 @@ class ScanService:
             if asset:
                 asset_value = asset.value
         
-        # Use orchestrator to execute scan
-        # Note: orchestrator returns immediately, scan runs in background
         await orchestrator.handle_user_input(
             user_input="执行等保合规检测",
             project_id=project.id,
             user_id=project.user_id,
             asset=asset_value or "unknown",
+            db=db,
         )
         
         # Update scan task status

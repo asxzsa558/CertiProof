@@ -5,6 +5,8 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import ChatPage from './pages/ChatPage'
 import ModelSettings from './pages/ModelSettings'
+import ResultsPage from './pages/ResultsPage'
+import ResultDetailPage from './pages/ResultDetailPage'
 import './index.css'
 
 function ProtectedRoute({ children }) {
@@ -88,6 +90,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <ModelSettings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects/:projectId/results"
+            element={
+              <ProtectedRoute>
+                <ResultsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects/:projectId/results/:scanTaskId"
+            element={
+              <ProtectedRoute>
+                <ResultDetailPage />
               </ProtectedRoute>
             }
           />

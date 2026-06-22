@@ -6,15 +6,13 @@ services:
     image: postgres:15-alpine
     container_name: certiproof-db
     environment:
-      POSTGRES_USER: certiproof
-      POSTGRES_PASSWORD: certiproof
-      POSTGRES_DB: certiproof
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-certiproof}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-certiproof}
+      POSTGRES_DB: ${POSTGRES_DB:-certiproof}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U certiproof"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-certiproof}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,8 +23,6 @@ services:
   redis:
     image: redis:7-alpine
     container_name: certiproof-redis
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -44,10 +40,7 @@ services:
       dockerfile: Dockerfile
     container_name: certiproof-frontend
     ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - "3000:80"
     depends_on:
       - backend
     restart: unless-stopped
@@ -63,13 +56,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://certiproof:certiproof@db:5432/certiproof
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certiproof}:${POSTGRES_PASSWORD:-certiproof}@db:5432/${POSTGRES_DB:-certiproof}
       REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: your-secret-key-change-in-production
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
       MCP_GATEWAY_URL: http://mcp-gateway:9000
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
-      - ./backend:/app
       - ./reference:/reference
     depends_on:
       db:
@@ -88,62 +80,19 @@ services:
       context: ./mcp-servers/gateway
       dockerfile: Dockerfile
     container_name: certiproof-mcp-gateway
-    ports:
-      - "9000:9000"
     depends_on:
-      - nmap-server
-      - testssl-server
-      - nuclei-server
-      - hydra-server
+      - security-tools
       - ocr-server
     restart: unless-stopped
     networks:
       - certiproof-net
 
-  # nmap MCP Server
-  nmap-server:
+  # 统一安全工具服务 (nmap + testssl + nuclei + hydra)
+  security-tools:
     build:
-      context: ./mcp-servers/nmap-server
+      context: ./mcp-servers/security-tools
       dockerfile: Dockerfile
-    container_name: certiproof-nmap-server
-    ports:
-      - "8001:8001"
-    restart: unless-stopped
-    networks:
-      - certiproof-net
-
-  # testssl MCP Server
-  testssl-server:
-    build:
-      context: ./mcp-servers/testssl-server
-      dockerfile: Dockerfile
-    container_name: certiproof-testssl-server
-    ports:
-      - "8002:8002"
-    restart: unless-stopped
-    networks:
-      - certiproof-net
-
-  # nuclei MCP Server
-  nuclei-server:
-    build:
-      context: ./mcp-servers/nuclei-server
-      dockerfile: Dockerfile
-    container_name: certiproof-nuclei-server
-    ports:
-      - "8003:8003"
-    restart: unless-stopped
-    networks:
-      - certiproof-net
-
-  # hydra MCP Server
-  hydra-server:
-    build:
-      context: ./mcp-servers/hydra-server
-      dockerfile: Dockerfile
-    container_name: certiproof-hydra-server
-    ports:
-      - "8004:8004"
+    container_name: certiproof-security-tools
     restart: unless-stopped
     networks:
       - certiproof-net
@@ -154,8 +103,6 @@ services:
       context: ./mcp-servers/ocr-server
       dockerfile: Dockerfile
     container_name: certiproof-ocr-server
-    ports:
-      - "8005:8005"
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}

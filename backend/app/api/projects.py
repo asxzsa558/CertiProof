@@ -8,7 +8,7 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.models.project import Project
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse
-from app.services.report_service import generate_report
+from app.services.report_service import generate_report, generate_json_report
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
@@ -151,6 +151,42 @@ async def download_report(
         import traceback
         error_detail = traceback.format_exc()
         print(f"Report generation error: {error_detail}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate report: {str(e)}",
+        )
+
+
+@router.get("/{project_id}/report/json")
+async def download_json_report(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate and download JSON compliance report."""
+    # Verify project access
+    result = await db.execute(
+        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+    
+    try:
+        report_data = await generate_json_report(db, project_id)
+        
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            content=report_data,
+            headers={
+                "Content-Disposition": f"attachment; filename=certiproof_report_{project_id}.json"
+            }
+        )
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate report: {str(e)}",

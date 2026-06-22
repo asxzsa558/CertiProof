@@ -136,10 +136,10 @@ function ModelSettings() {
       if (response.data.success) {
         message.success('连接测试成功')
       } else {
-        message.error(`连接失败: ${response.data.error}`)
+        message.error(`连接失败: ${response.data.error || '请检查 API Key 和 API Base 配置'}`)
       }
     } catch (error) {
-      message.error('测试失败')
+      message.error(error.response?.data?.error || error.response?.data?.detail || '测试请求失败')
     }
   }
 

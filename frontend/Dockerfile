@@ -1,18 +1,16 @@
-FROM node:20-alpine
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Install aiohttp for async static file serving
+RUN pip install --no-cache-dir aiohttp
 
-# Install dependencies
-RUN npm install
+# Copy built frontend assets
+COPY dist/ /app/static/
 
-# Copy application
-COPY . .
+# Copy server script
+COPY serve.py /app/
 
-# Expose port
-EXPOSE 3000
+EXPOSE 80
 
-# Run application
-CMD ["npm", "run", "dev"]
+CMD ["python", "serve.py"]

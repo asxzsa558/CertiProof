@@ -362,3 +362,134 @@ async def generate_report(db: AsyncSession, project_id: int) -> io.BytesIO:
     buffer.seek(0)
     
     return buffer
+
+
+async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
+    """Generate JSON report for a project."""
+    
+    # Fetch project data
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise ValueError("Project not found")
+    
+    # Fetch all scan tasks
+    result = await db.execute(
+        select(ScanTask)
+        .where(ScanTask.project_id == project_id)
+        .order_by(ScanTask.created_at.desc())
+    )
+    scan_tasks = result.scalars().all()
+    
+    # Fetch all findings
+    result = await db.execute(
+        select(Finding)
+        .where(Finding.project_id == project_id)
+        .order_by(Finding.severity)
+    )
+    findings = result.scalars().all()
+    
+    # Fetch all evidences
+    finding_ids = [f.id for f in findings]
+    evidences = []
+    if finding_ids:
+        result = await db.execute(
+            select(Evidence)
+            .where(Evidence.finding_id.in_(finding_ids))
+        )
+        evidences = result.scalars().all()
+    
+    # Build report
+    compliance_level = str(project.compliance_level.value) if hasattr(project.compliance_level, 'value') else str(project.compliance_level)
+    
+    severity_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0}
+    judgment_counts = {'pass': 0, 'fail': 0, 'partial': 0, 'not_tested': 0}
+    
+    findings_data = []
+    for f in findings:
+        severity = f.severity.value if hasattr(f.severity, 'value') else str(f.severity)
+        judgment = f.judgment.value if hasattr(f.judgment, 'value') else str(f.judgment)
+        
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+        judgment_counts[judgment] = judgment_counts.get(judgment, 0) + 1
+        
+        # Find related evidences
+        finding_evidences = [e for e in evidences if e.finding_id == f.id]
+        
+        findings_data.append({
+            'id': f.id,
+            'clause_id': f.clause_id,
+            'clause_name': f.clause_name,
+            'severity': severity,
+            'judgment': judgment,
+            'judgment_engine': f.judgment_engine.value if hasattr(f.judgment_engine, 'value') else str(f.judgment_engine),
+            'description': f.description,
+            'remediation_suggestion': f.remediation_suggestion,
+            'status': f.status.value if hasattr(f.status, 'value') else str(f.status),
+            'evidence_count': len(finding_evidences),
+            'created_at': f.created_at.isoformat() if f.created_at else None,
+        })
+    
+    scan_tasks_data = []
+    for st in scan_tasks:
+        scan_tasks_data.append({
+            'id': st.id,
+            'task_type': st.task_type.value if hasattr(st.task_type, 'value') else str(st.task_type),
+            'status': st.status.value if hasattr(st.status, 'value') else str(st.status),
+            'parameters': st.parameters,
+            'findings_count': st.findings_count,
+            'created_at': st.created_at.isoformat() if st.created_at else None,
+            'completed_at': st.completed_at.isoformat() if st.completed_at else None,
+        })
+    
+    score = project.compliance_score or 0
+    if score >= 90:
+        score_status = '优秀'
+    elif score >= 75:
+        score_status = '良好'
+    elif score >= 60:
+        score_status = '一般'
+    else:
+        score_status = '危险'
+    
+    report = {
+        'report_version': '1.0',
+        'generated_at': datetime.utcnow().isoformat(),
+        'project': {
+            'id': project.id,
+            'name': project.name,
+            'description': project.description,
+            'compliance_level': compliance_level,
+            'compliance_score': score,
+            'score_status': score_status,
+            'status': project.status.value if hasattr(project.status, 'value') else str(project.status),
+            'created_at': project.created_at.isoformat() if project.created_at else None,
+        },
+        'summary': {
+            'total_findings': len(findings),
+            'severity_counts': severity_counts,
+            'judgment_counts': judgment_counts,
+            'total_scan_tasks': len(scan_tasks),
+        },
+        'scan_tasks': scan_tasks_data,
+        'findings': findings_data,
+        'recommendations': {
+            'immediate': [
+                '关闭不必要的公网端口，特别是数据库端口（3306, 5432, 6379 等）',
+                '修改所有弱口令，启用强密码策略（≥12位，含大小写+数字+特殊字符）',
+                '修复已知高危漏洞，升级相关组件到最新版本',
+            ],
+            'short_term': [
+                '启用 HTTPS，配置有效的 SSL 证书',
+                '禁用不安全的协议版本（TLS 1.0/1.1）',
+                '配置访问控制策略，限制管理后台访问 IP',
+            ],
+            'long_term': [
+                '建立定期安全扫描机制，建议每月至少一次',
+                '完善安全管理制度，确保人员职责明确',
+                '加强安全培训，提高全员安全意识',
+            ],
+        },
+    }
+    
+    return report

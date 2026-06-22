@@ -1,11 +1,49 @@
 """
 Agent - 独立的 Agent 执行实例
+支持实时进度更新和证据持久化
 """
 
 import asyncio
+import logging
 from typing import List, Dict, Optional, Callable, Any
 from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
 from app.mcp.gateway_client import MCPGatewayClient
+from app.models.evidence import Evidence, EvidenceType
+from app.models.finding import Finding, Severity, Judgment, JudgmentEngine, FindingStatus
+from app.models.scan_task import ScanTask, ScanTaskStatus
+
+logger = logging.getLogger(__name__)
+
+
+# WebSocket 广播函数（延迟导入以避免循环依赖）
+async def _broadcast_status(task_id: str, status: dict):
+    """广播 Agent 状态变化"""
+    try:
+        from app.api.websocket import broadcast_agent_status
+        await broadcast_agent_status(task_id, status)
+    except Exception as e:
+        logger.debug(f"Failed to broadcast status: {e}")
+
+
+async def _broadcast_completed(task_id: str, result: dict):
+    """广播 Agent 完成事件"""
+    try:
+        from app.api.websocket import broadcast_agent_completed
+        await broadcast_agent_completed(task_id, result)
+    except Exception as e:
+        logger.debug(f"Failed to broadcast completion: {e}")
+
+
+async def _broadcast_failed(task_id: str, error: str):
+    """广播 Agent 失败事件"""
+    try:
+        from app.api.websocket import broadcast_agent_failed
+        await broadcast_agent_failed(task_id, error)
+    except Exception as e:
+        logger.debug(f"Failed to broadcast failure: {e}")
 
 
 class Agent:
@@ -21,6 +59,8 @@ class Agent:
         user_id: int,
         asset: str,
         mcp_client: MCPGatewayClient,
+        db: Optional[AsyncSession] = None,
+        scan_task_id: Optional[int] = None,
     ):
         self.agent_id = agent_id
         self.name = name
@@ -30,6 +70,8 @@ class Agent:
         self.user_id = user_id
         self.asset = asset
         self.mcp_client = mcp_client
+        self.db = db
+        self.scan_task_id = scan_task_id
         
         # 独立上下文（隔离）
         self.context = {"asset": asset}
@@ -38,6 +80,13 @@ class Agent:
         self.status = "pending"  # pending, running, completed, failed
         self.current_step = None
         self.error = None
+        
+        # 实时进度信息
+        self.scan_progress = {
+            "total_ports": 0,
+            "scanned_ports": 0,
+            "open_ports_found": 0,
+        }
         
         # 时间戳
         self.created_at = datetime.utcnow()
@@ -62,7 +111,9 @@ class Agent:
         try:
             for i, step in enumerate(self.steps):
                 self.current_step = step
-                self.progress = int((i / total_steps) * 100)
+                # 步骤级别的进度（0-100）
+                step_progress_base = int((i / total_steps) * 100)
+                self.progress = step_progress_base
                 
                 if self.on_status_change:
                     await self._notify_status()
@@ -71,8 +122,11 @@ class Agent:
                 if not self.check_safety(step):
                     continue
                 
-                # 执行检查
-                result = await self.execute_step(step)
+                # 执行检查（支持实时进度）
+                result = await self.execute_step_with_progress(step)
+                
+                # 更新步骤完成后的进度
+                self.progress = int(((i + 1) / total_steps) * 100)
                 
                 # 记录证据
                 evidence = {
@@ -85,6 +139,10 @@ class Agent:
                 }
                 self.evidence.append(evidence)
                 
+                # 持久化证据到数据库
+                if self.db and self.scan_task_id:
+                    await self._persist_evidence(evidence, step)
+                
                 # 通知步骤完成
                 if self.on_step_complete:
                     await self.on_step_complete(self, step, evidence)
@@ -92,6 +150,10 @@ class Agent:
             self.progress = 100
             self.status = "completed"
             self.completed_at = datetime.utcnow()
+            
+            # 更新扫描任务状态
+            if self.db and self.scan_task_id:
+                await self._update_scan_task_status()
             
             if self.on_status_change:
                 await self._notify_status()
@@ -103,13 +165,161 @@ class Agent:
             self.error = str(e)
             self.completed_at = datetime.utcnow()
             
+            # 更新扫描任务状态为失败
+            if self.db and self.scan_task_id:
+                await self._update_scan_task_status(error=str(e))
+            
             if self.on_status_change:
                 await self._notify_status()
             
+            # 广播失败事件
+            try:
+                await _broadcast_failed(self.agent_id, str(e))
+            except Exception as e:
+                logger.debug(f"Failed to broadcast failure: {e}")
+            
             raise
     
+    async def _persist_evidence(self, evidence: dict, step: dict):
+        """持久化证据到数据库"""
+        try:
+            # 创建 Finding
+            judgment_status = evidence.get("judgment", {}).get("status", "unknown")
+            judgment_map = {
+                "pass": Judgment.PASS,
+                "fail": Judgment.FAIL,
+                "partial": Judgment.PARTIAL,
+                "unknown": Judgment.NOT_TESTED,
+            }
+            
+            # 确定严重性
+            severity = Severity.MEDIUM
+            raw_result = evidence.get("raw_result", {})
+            if "port_scan_result" in raw_result:
+                ports = raw_result["port_scan_result"].get("data", {}).get("open_ports", [])
+                critical_ports = [p for p in ports if p.get("risk_level") == "critical"]
+                if critical_ports:
+                    severity = Severity.CRITICAL
+                elif any(p.get("risk_level") == "high" for p in ports):
+                    severity = Severity.HIGH
+            
+            finding = Finding(
+                project_id=self.project_id,
+                scan_task_id=self.scan_task_id,
+                clause_id=step.get("clause", "unknown"),
+                clause_name=step.get("clause_name", "Unknown"),
+                severity=severity,
+                judgment=judgment_map.get(judgment_status, Judgment.NOT_TESTED),
+                judgment_engine=JudgmentEngine.RULE,
+                description=evidence.get("judgment", {}).get("reason", ""),
+                status=FindingStatus.OPEN,
+            )
+            self.db.add(finding)
+            await self.db.flush()
+            
+            # 创建 Evidence
+            db_evidence = Evidence(
+                finding_id=finding.id,
+                evidence_type=EvidenceType.TOOL_OUTPUT,
+                source=", ".join(evidence.get("tool_used", [])),
+                content=evidence.get("raw_result", {}),
+                raw_output=str(evidence.get("raw_result", {})),
+            )
+            self.db.add(db_evidence)
+            await self.db.commit()
+            
+            logger.info(f"Evidence persisted: Finding {finding.id}, Evidence {db_evidence.id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to persist evidence: {e}", exc_info=True)
+            await self.db.rollback()
+    
+    async def _update_scan_task_status(self, error: str = None):
+        """更新扫描任务状态"""
+        try:
+            result = await self.db.execute(
+                select(ScanTask).where(ScanTask.id == self.scan_task_id)
+            )
+            scan_task = result.scalar_one_or_none()
+            
+            if scan_task:
+                if error:
+                    scan_task.status = ScanTaskStatus.FAILED
+                    scan_task.error_message = error
+                else:
+                    scan_task.status = ScanTaskStatus.COMPLETED
+                    scan_task.completed_at = datetime.utcnow()
+                    
+                    # 统计 findings
+                    result = await self.db.execute(
+                        select(Finding).where(Finding.scan_task_id == self.scan_task_id)
+                    )
+                    findings = result.scalars().all()
+                    scan_task.findings_count = len(findings)
+                    scan_task.high_severity_count = sum(1 for f in findings if f.severity in [Severity.HIGH, Severity.CRITICAL])
+                    scan_task.medium_severity_count = sum(1 for f in findings if f.severity == Severity.MEDIUM)
+                    scan_task.low_severity_count = sum(1 for f in findings if f.severity == Severity.LOW)
+                
+                await self.db.commit()
+                logger.info(f"Scan task {self.scan_task_id} updated: {scan_task.status}")
+                
+        except Exception as e:
+            logger.error(f"Failed to update scan task status: {e}", exc_info=True)
+            await self.db.rollback()
+    
+    async def execute_step_with_progress(self, step: dict) -> dict:
+        """执行单个检查步骤，支持实时进度"""
+        results = {}
+        
+        for tool in step.get("tools", []):
+            tool_name = tool["name"]
+            params = self.resolve_params(tool.get("params", {}))
+            
+            # 检查工具是否支持异步模式
+            if tool_name in ["nmap_scan", "port_scan"]:
+                # 使用异步模式，支持实时进度
+                result = await self.mcp_client.call_with_progress(
+                    tool_name=tool_name,
+                    params=params,
+                    on_progress=lambda p: self._update_scan_progress(p),
+                    poll_interval=2.0,
+                )
+            else:
+                # 同步模式
+                result = await self.mcp_client.call(
+                    tool_name=tool_name,
+                    params=params,
+                )
+            
+            output_key = tool.get("output_key", tool_name)
+            results[output_key] = result
+            
+            # 如果有依赖，将结果存入上下文
+            if tool.get("depends_on"):
+                self.context[output_key] = result
+        
+        return results
+    
+    def _update_scan_progress(self, progress: dict):
+        """更新扫描进度"""
+        self.scan_progress = {
+            "total_ports": progress.get("total_ports", 0),
+            "scanned_ports": progress.get("scanned_ports", 0),
+            "open_ports_found": progress.get("open_ports_found", 0),
+        }
+        
+        # 计算基于端口的进度
+        total_ports = self.scan_progress["total_ports"]
+        scanned_ports = self.scan_progress["scanned_ports"]
+        
+        if total_ports > 0:
+            # 端口扫描进度（0-100）
+            port_progress = int((scanned_ports / total_ports) * 100)
+            # 结合步骤进度（假设当前只有一个步骤）
+            self.progress = port_progress
+    
     async def execute_step(self, step: dict) -> dict:
-        """执行单个检查步骤"""
+        """执行单个检查步骤（向后兼容）"""
         results = {}
         
         for tool in step.get("tools", []):
@@ -226,7 +436,7 @@ class Agent:
                 resolved[key] = value
             elif isinstance(value, dict):
                 # 递归解析
-                resolved[key] = self.resolve_params(value, context)
+                resolved[key] = self.resolve_params(value)
             else:
                 resolved[key] = value
         
@@ -234,17 +444,27 @@ class Agent:
     
     async def _notify_status(self):
         """通知状态变化"""
+        status_data = {
+            "agent_id": self.agent_id,
+            "name": self.name,
+            "status": self.status,
+            "progress": self.progress,
+            "current_step": self.current_step.get("clause_name") if self.current_step else None,
+            "scan_progress": self.scan_progress,
+        }
+        
+        # 调用回调函数
         if self.on_status_change:
             try:
-                await self.on_status_change({
-                    "agent_id": self.agent_id,
-                    "name": self.name,
-                    "status": self.status,
-                    "progress": self.progress,
-                    "current_step": self.current_step.get("clause_name") if self.current_step else None,
-                })
+                await self.on_status_change(status_data)
             except Exception as e:
-                print(f"Error notifying status: {e}")
+                logger.error(f"Error notifying status via callback: {e}")
+        
+        # 广播到 WebSocket
+        try:
+            await _broadcast_status(self.agent_id, status_data)
+        except Exception as e:
+            logger.debug(f"Failed to broadcast status: {e}")
     
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -255,6 +475,7 @@ class Agent:
             "progress": self.progress,
             "current_step": self.current_step.get("clause_name") if self.current_step else None,
             "evidence_count": len(self.evidence),
+            "scan_progress": self.scan_progress,
             "created_at": self.created_at.isoformat(),
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,

@@ -1,11 +1,12 @@
 .model-selector {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .model-select {
-  min-width: 200px;
+  min-width: 180px;
+  max-width: 240px;
 }
 
 .model-select .ant-select-selector {
@@ -14,11 +15,30 @@
   border-radius: 8px !important;
   height: 36px !important;
   padding: 0 12px !important;
+  transition: all 0.3s ease !important;
+}
+
+.model-select .ant-select-selector:hover {
+  border-color: rgba(99, 102, 241, 0.5) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
 }
 
 .model-select .ant-select-selection-item {
   line-height: 34px !important;
   color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.model-selected-display {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.model-selected-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
 }
 
 .model-select .ant-select-arrow {
@@ -28,11 +48,15 @@
 .model-select-dropdown {
   background: #1a1a1c !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+  min-width: 280px !important;
 }
 
 .model-select-dropdown .ant-select-item {
   color: rgba(255, 255, 255, 0.8) !important;
-  padding: 8px 12px !important;
+  padding: 10px 12px !important;
+  transition: all 0.2s ease !important;
 }
 
 .model-select-dropdown .ant-select-item-option-selected {
@@ -40,33 +64,24 @@
 }
 
 .model-select-dropdown .ant-select-item-option-active {
-  background: rgba(255, 255, 255, 0.05) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
 }
 
 .model-option {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .model-option-header {
   display: flex;
   align-items: center;
-  gap: 8px;
 }
 
 .model-name {
   font-weight: 600;
   font-size: 13px;
-}
-
-.model-badge {
-  font-size: 10px;
-  padding: 2px 6px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: white;
-  border-radius: 4px;
-  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .model-option-meta {
@@ -75,18 +90,25 @@
   gap: 8px;
   font-size: 11px;
   color: rgba(255, 255, 255, 0.5);
+  margin-left: 22px;
 }
 
 .model-provider {
   color: rgba(255, 255, 255, 0.6);
 }
 
+.model-capabilities {
+  display: flex;
+  gap: 4px;
+}
+
 .model-settings-btn {
   color: rgba(255, 255, 255, 0.6) !important;
   font-size: 16px;
+  transition: all 0.2s ease !important;
 }
 
 .model-settings-btn:hover {
-  color: #fff !important;
-  background: rgba(255, 255, 255, 0.05) !important;
+  color: #6366f1 !important;
+  background: rgba(99, 102, 241, 0.1) !important;
 }

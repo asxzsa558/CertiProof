@@ -1,10 +1,12 @@
 """
 MCP Gateway Client - MCP Gateway 客户端
 通过 Gateway 统一调用各种 MCP 工具
+支持同步和异步调用模式
 """
 
 import httpx
-from typing import Dict, Any, Optional
+import asyncio
+from typing import Dict, Any, Optional, Callable
 from app.core.config import settings
 
 
@@ -21,7 +23,7 @@ class MCPGatewayClient:
     
     async def call(self, tool_name: str, params: dict) -> dict:
         """
-        通过 Gateway 调用工具
+        通过 Gateway 调用工具（同步模式）
         
         Args:
             tool_name: 工具名称
@@ -45,6 +47,121 @@ class MCPGatewayClient:
                 raise Exception(f"MCP Gateway error: {e.response.status_code} - {e.response.text}")
             except httpx.RequestError as e:
                 raise Exception(f"MCP Gateway request error: {e}")
+    
+    async def call_async(self, tool_name: str, params: dict) -> str:
+        """
+        异步调用工具，返回 task_id
+        
+        Args:
+            tool_name: 工具名称
+            params: 工具参数
+        
+        Returns:
+            task_id: 任务 ID
+        """
+        async with httpx.AsyncClient(timeout=60) as client:
+            try:
+                response = await client.post(
+                    f"{self.gateway_url}/call/async",
+                    json={
+                        "tool": tool_name,
+                        "params": params,
+                    }
+                )
+                response.raise_for_status()
+                result = response.json()
+                return result.get("task_id")
+            except httpx.HTTPStatusError as e:
+                raise Exception(f"MCP Gateway error: {e.response.status_code} - {e.response.text}")
+            except httpx.RequestError as e:
+                raise Exception(f"MCP Gateway request error: {e}")
+    
+    async def get_progress(self, tool_name: str, task_id: str) -> dict:
+        """
+        查询异步任务进度
+        
+        Args:
+            tool_name: 工具名称
+            task_id: 任务 ID
+        
+        Returns:
+            进度信息
+        """
+        async with httpx.AsyncClient(timeout=10) as client:
+            try:
+                response = await client.get(
+                    f"{self.gateway_url}/progress/{tool_name}/{task_id}"
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                raise Exception(f"MCP Gateway error: {e.response.status_code} - {e.response.text}")
+            except httpx.RequestError as e:
+                raise Exception(f"MCP Gateway request error: {e}")
+    
+    async def get_result(self, tool_name: str, task_id: str) -> dict:
+        """
+        获取异步任务结果
+        
+        Args:
+            tool_name: 工具名称
+            task_id: 任务 ID
+        
+        Returns:
+            任务结果
+        """
+        async with httpx.AsyncClient(timeout=10) as client:
+            try:
+                response = await client.get(
+                    f"{self.gateway_url}/result/{tool_name}/{task_id}"
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPStatusError as e:
+                raise Exception(f"MCP Gateway error: {e.response.status_code} - {e.response.text}")
+            except httpx.RequestError as e:
+                raise Exception(f"MCP Gateway request error: {e}")
+    
+    async def call_with_progress(
+        self,
+        tool_name: str,
+        params: dict,
+        on_progress: Optional[Callable[[dict], None]] = None,
+        poll_interval: float = 2.0,
+    ) -> dict:
+        """
+        异步调用工具并轮询进度
+        
+        Args:
+            tool_name: 工具名称
+            params: 工具参数
+            on_progress: 进度回调函数
+            poll_interval: 轮询间隔（秒）
+        
+        Returns:
+            工具返回结果
+        """
+        # 启动异步任务
+        task_id = await self.call_async(tool_name, params)
+        
+        # 轮询进度
+        while True:
+            progress = await self.get_progress(tool_name, task_id)
+            
+            # 回调进度
+            if on_progress:
+                on_progress(progress)
+            
+            # 检查是否完成
+            status = progress.get("status")
+            if status == "completed":
+                # 获取最终结果
+                return await self.get_result(tool_name, task_id)
+            elif status == "failed":
+                raise Exception(f"Task failed: {progress.get('error', 'Unknown error')}")
+            
+            # 等待下一次轮询
+            await asyncio.sleep(poll_interval)
     
     async def health(self) -> dict:
         """

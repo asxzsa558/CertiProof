@@ -31,7 +31,7 @@ class BaseProvider(ABC):
         pass
     
     @abstractmethod
-    async def test_connection(self) -> bool:
+    async def test_connection(self, model_name: str = None) -> bool:
         """Test if the provider connection works"""
         pass
 
@@ -45,7 +45,9 @@ class OpenAIProvider(BaseProvider):
             
             client = AsyncOpenAI(
                 api_key=self.api_key,
-                base_url=self.api_base or "https://api.openai.com/v1"
+                base_url=self.api_base or "https://api.openai.com/v1",
+                timeout=120.0,
+                max_retries=2
             )
             
             response = await client.chat.completions.create(
@@ -68,10 +70,15 @@ class OpenAIProvider(BaseProvider):
             logger.error(f"OpenAI API error: {e}")
             raise
     
-    async def test_connection(self) -> bool:
+    async def test_connection(self, model_name: str = None) -> bool:
         try:
             from openai import AsyncOpenAI
-            client = AsyncOpenAI(api_key=self.api_key, base_url=self.api_base)
+            client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=self.api_base,
+                timeout=30.0,
+                max_retries=1
+            )
             await client.models.list()
             return True
         except Exception as e:
@@ -86,7 +93,10 @@ class AnthropicProvider(BaseProvider):
         try:
             from anthropic import AsyncAnthropic
             
-            client = AsyncAnthropic(api_key=self.api_key)
+            client = AsyncAnthropic(
+                api_key=self.api_key,
+                base_url=self.api_base or "https://api.anthropic.com"
+            )
             
             # Convert OpenAI format to Anthropic format
             system_msg = None
@@ -119,12 +129,15 @@ class AnthropicProvider(BaseProvider):
             logger.error(f"Anthropic API error: {e}")
             raise
     
-    async def test_connection(self) -> bool:
+    async def test_connection(self, model_name: str = None) -> bool:
         try:
             from anthropic import AsyncAnthropic
-            client = AsyncAnthropic(api_key=self.api_key)
+            client = AsyncAnthropic(
+                api_key=self.api_key,
+                base_url=self.api_base or "https://api.anthropic.com"
+            )
             await client.messages.create(
-                model="claude-3-haiku-20240307",
+                model=model_name or "claude-3-haiku-20240307",
                 messages=[{"role": "user", "content": "test"}],
                 max_tokens=10
             )
@@ -170,7 +183,7 @@ class OllamaProvider(BaseProvider):
             logger.error(f"Ollama API error: {e}")
             raise
     
-    async def test_connection(self) -> bool:
+    async def test_connection(self, model_name: str = None) -> bool:
         try:
             import httpx
             api_base = self.api_base or "http://localhost:11434"
@@ -391,13 +404,28 @@ class LLMService:
             return {"success": False, "error": "Provider not found"}
         
         adapter = self._get_provider(provider)
-        success = await adapter.test_connection()
-        
-        return {
-            "success": success,
-            "model_name": model_config.model_name,
-            "provider": provider.name
-        }
+        try:
+            success = await adapter.test_connection(model_name=model_config.model_name)
+            if not success:
+                return {
+                    "success": False,
+                    "error": "Connection failed. Please check API Key and API Base URL.",
+                    "model_name": model_config.model_name,
+                    "provider": provider.name
+                }
+            return {
+                "success": True,
+                "model_name": model_config.model_name,
+                "provider": provider.name
+            }
+        except Exception as e:
+            logger.error(f"Model test failed: {e}")
+            return {
+                "success": False,
+                "error": f"Connection error: {str(e)}",
+                "model_name": model_config.model_name,
+                "provider": provider.name
+            }
 
 
 # Singleton instance

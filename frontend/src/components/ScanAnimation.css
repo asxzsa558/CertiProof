@@ -1,0 +1,273 @@
+/* 扫描动画样式 */
+
+/* 脉冲扫描效果 */
+@keyframes pulse-scan {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.05);
+  }
+}
+
+/* 扫描线效果 */
+@keyframes scan-line {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* 淡入效果 */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 滑入效果 */
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 端口发现动画 */
+@keyframes port-discover {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+    background-color: rgba(99, 102, 241, 0.2);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+    background-color: rgba(99, 102, 241, 0.4);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    background-color: transparent;
+  }
+}
+
+/* 高危端口警告动画 */
+@keyframes warning-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+}
+
+/* 盾牌扫描动画 */
+@keyframes shield-scan {
+  0% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(5deg);
+  }
+  75% {
+    transform: rotate(-5deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+/* 完成勾选动画 */
+@keyframes check-draw {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* 数字跳动动画 */
+@keyframes number-bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+/* 光晕扩散动画 */
+@keyframes glow-expand {
+  0% {
+    box-shadow: 0 0 5px rgba(99, 102, 241, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.6);
+  }
+  100% {
+    box-shadow: 0 0 5px rgba(99, 102, 241, 0.3);
+  }
+}
+
+/* 进度条流光效果 */
+@keyframes progress-shine {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* 应用动画类 */
+.scan-animation-pulse {
+  animation: pulse-scan 2s ease-in-out infinite;
+}
+
+.scan-animation-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+.scan-animation-slide-in {
+  animation: slide-in 0.3s ease-out forwards;
+}
+
+.scan-animation-port-discover {
+  animation: port-discover 0.5s ease-out forwards;
+}
+
+.scan-animation-warning {
+  animation: warning-pulse 2s ease-in-out infinite;
+}
+
+.scan-animation-shield {
+  animation: shield-scan 1s ease-in-out;
+}
+
+.scan-animation-number-bounce {
+  animation: number-bounce 0.5s ease-out;
+}
+
+.scan-animation-glow {
+  animation: glow-expand 2s ease-in-out infinite;
+}
+
+/* 进度条容器 */
+.scan-progress-container {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+/* 进度条流光效果 */
+.scan-progress-shine::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  animation: progress-shine 2s infinite;
+}
+
+/* 扫描状态指示器 */
+.scan-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.scan-status-running {
+  background: rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.scan-status-completed {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.scan-status-failed {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* 端口列表动画 */
+.port-list-item {
+  transition: all 0.3s ease-out;
+}
+
+.port-list-item:hover {
+  transform: translateX(4px);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* 证据计数器动画 */
+.evidence-counter {
+  display: inline-block;
+  font-weight: 700;
+  font-size: 24px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.evidence-counter-animate {
+  animation: number-bounce 0.5s ease-out;
+}
+
+/* 扫描卡片进入动画 */
+.scan-card-enter {
+  animation: fade-in 0.4s ease-out forwards;
+}
+
+/* 分级颜色动画 */
+.severity-critical {
+  color: #dc2626;
+  animation: warning-pulse 1.5s ease-in-out infinite;
+}
+
+.severity-high {
+  color: #ef4444;
+}
+
+.severity-medium {
+  color: #f59e0b;
+}
+
+.severity-low {
+  color: #3b82f6;
+}
+
+.severity-info {
+  color: #6b7280;
+}

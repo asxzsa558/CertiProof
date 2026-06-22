@@ -1,6 +1,7 @@
 """
 MCP Gateway - 路由 + 鉴权 + Schema 验证
 统一入口，将请求路由到对应的 Tool Server
+支持同步和异步调用模式
 """
 
 from fastapi import FastAPI, HTTPException, Request
@@ -23,21 +24,15 @@ app.add_middleware(
 
 # 工具路由表：工具名 -> Tool Server URL
 TOOL_ROUTES = {
-    # nmap 相关
-    "nmap_scan": "http://nmap-server:8001",
-    "port_scan": "http://nmap-server:8001",
-    
-    # testssl 相关
-    "testssl_scan": "http://testssl-server:8002",
-    "ssl_check": "http://testssl-server:8002",
-    
-    # nuclei 相关
-    "nuclei_scan": "http://nuclei-server:8003",
-    "vuln_scan": "http://nuclei-server:8003",
-    
-    # hydra 相关
-    "hydra_bruteforce": "http://hydra-server:8004",
-    "password_test": "http://hydra-server:8004",
+    # 安全工具（统一服务）
+    "nmap_scan": "http://security-tools:8010",
+    "port_scan": "http://security-tools:8010",
+    "testssl_scan": "http://security-tools:8010",
+    "ssl_check": "http://security-tools:8010",
+    "nuclei_scan": "http://security-tools:8010",
+    "vuln_scan": "http://security-tools:8010",
+    "hydra_bruteforce": "http://security-tools:8010",
+    "password_test": "http://security-tools:8010",
     
     # OCR 相关
     "ocr_analyze": "http://ocr-server:8005",
@@ -46,12 +41,12 @@ TOOL_ROUTES = {
 
 # 工具到 Tool Server 的映射（用于健康检查）
 SERVER_ROUTES = {
-    "nmap-server": "http://nmap-server:8001",
-    "testssl-server": "http://testssl-server:8002",
-    "nuclei-server": "http://nuclei-server:8003",
-    "hydra-server": "http://hydra-server:8004",
+    "security-tools": "http://security-tools:8010",
     "ocr-server": "http://ocr-server:8005",
 }
+
+# 支持异步扫描的工具
+ASYNC_TOOLS = ["nmap_scan", "port_scan"]
 
 
 class ToolCallRequest(BaseModel):
@@ -128,6 +123,7 @@ async def list_tools():
         tools.append({
             "name": tool_name,
             "server": server_url,
+            "supports_async": tool_name in ASYNC_TOOLS,
         })
     
     return {
@@ -139,12 +135,7 @@ async def list_tools():
 @app.post("/call", response_model=ToolCallResponse)
 async def call_tool(request: ToolCallRequest):
     """
-    调用工具
-    
-    1. 路由：根据工具名找到对应的 Tool Server
-    2. 转发：将请求转发给 Tool Server
-    3. 验证：验证返回结果是否符合标准 Schema
-    4. 返回：返回标准化结果
+    调用工具（同步模式）
     """
     tool_name = request.tool
     params = request.params
@@ -180,10 +171,7 @@ async def call_tool(request: ToolCallRequest):
             detail=f"Tool server unavailable: {e}"
         )
     
-    # 3. 验证（可选）
-    # validate_output(result, tool_name)
-    
-    # 4. 返回
+    # 3. 返回
     return ToolCallResponse(
         tool=tool_name,
         version=result.get("version", "1.0"),
@@ -192,6 +180,127 @@ async def call_tool(request: ToolCallRequest):
         metadata=result.get("metadata"),
         error=result.get("error"),
     )
+
+
+@app.post("/call/async")
+async def call_tool_async(request: ToolCallRequest):
+    """
+    异步调用工具
+    返回 task_id 用于查询进度
+    """
+    tool_name = request.tool
+    params = request.params
+    
+    # 检查是否支持异步
+    if tool_name not in ASYNC_TOOLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tool {tool_name} does not support async mode. Use /call instead."
+        )
+    
+    # 路由
+    server_url = TOOL_ROUTES.get(tool_name)
+    if not server_url:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Tool not found: {tool_name}"
+        )
+    
+    # 转发到异步接口
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                f"{server_url}/scan/start",
+                json={
+                    "tool": tool_name,
+                    "params": params,
+                }
+            )
+            response.raise_for_status()
+            result = response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Tool server error: {e.response.text}"
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Tool server unavailable: {e}"
+        )
+    
+    return {
+        "tool": tool_name,
+        "task_id": result.get("task_id"),
+        "status": "running",
+        "message": result.get("message", "Scan started"),
+    }
+
+
+@app.get("/progress/{tool_name}/{task_id}")
+async def get_progress(tool_name: str, task_id: str):
+    """
+    查询异步任务进度
+    """
+    # 路由
+    server_url = TOOL_ROUTES.get(tool_name)
+    if not server_url:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Tool not found: {tool_name}"
+        )
+    
+    # 查询进度
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{server_url}/scan/{task_id}/progress"
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Tool server error: {e.response.text}"
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Tool server unavailable: {e}"
+        )
+
+
+@app.get("/result/{tool_name}/{task_id}")
+async def get_result(tool_name: str, task_id: str):
+    """
+    获取异步任务结果
+    """
+    # 路由
+    server_url = TOOL_ROUTES.get(tool_name)
+    if not server_url:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Tool not found: {tool_name}"
+        )
+    
+    # 获取结果
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{server_url}/scan/{task_id}/result"
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Tool server error: {e.response.text}"
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Tool server unavailable: {e}"
+        )
 
 
 @app.post("/call/{tool_name}")

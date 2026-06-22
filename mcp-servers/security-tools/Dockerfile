@@ -4,19 +4,31 @@ FROM python:3.11-slim
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
     sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
 
-# 安装依赖
+# 安装系统依赖
 RUN apt-get update && \
-    apt-get install -y curl bsdmainutils procps && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y \
+    curl \
+    wget \
+    unzip \
+    bsdmainutils \
+    procps \
+    hydra \
+    nmap \
+    && rm -rf /var/lib/apt/lists/*
 
-# 安装 testssl.sh (使用 GitHub 镜像)
+# 安装 testssl.sh
 RUN curl -fsSL https://ghfast.top/https://github.com/drwetter/testssl.sh/archive/refs/heads/3.2.tar.gz | tar xz -C /opt && \
     mv /opt/testssl.sh-3.2 /testssl && \
     chmod +x /testssl/testssl.sh
 
-WORKDIR /app
+# 安装 nuclei (arm64)
+RUN wget -q https://ghfast.top/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/nuclei_3.3.0_linux_arm64.zip -O /tmp/nuclei.zip && \
+    unzip /tmp/nuclei.zip -d /usr/local/bin/ && \
+    chmod +x /usr/local/bin/nuclei && \
+    rm /tmp/nuclei.zip
 
 # 安装 Python 依赖
+WORKDIR /app
 COPY requirements.txt .
 RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
     pip install --no-cache-dir -r requirements.txt
@@ -24,8 +36,6 @@ RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
 # 复制代码
 COPY server.py .
 
-# 暴露端口
-EXPOSE 8002
+EXPOSE 8010
 
-# 启动
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8010"]
