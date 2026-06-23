@@ -5,9 +5,11 @@
 - ResultCache: 结果缓存
 - ProjectMemory: 项目记忆
 - UserMemory: 用户记忆
+- ConversationArchive: 对话归档
+- ConversationThread: 对话线程
 """
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Boolean
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -19,6 +21,7 @@ class ConversationHistory(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    thread_id = Column(Integer, ForeignKey("conversation_threads.id"), nullable=True, index=True)
     
     role = Column(String(20), nullable=False)  # 'user' or 'assistant'
     content = Column(Text, nullable=False)
@@ -28,7 +31,7 @@ class ConversationHistory(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     def __repr__(self):
-        return f"<ConversationHistory(id={self.id}, role={self.role}, user_id={self.user_id})>"
+        return f"<ConversationHistory(id={self.id}, role={self.role}, user_id={self.user_id}, thread_id={self.thread_id})>"
 
 
 class ActionHistory(Base):
@@ -104,3 +107,50 @@ class UserMemory(Base):
     
     def __repr__(self):
         return f"<UserMemory(id={self.id}, user_id={self.user_id}, type={self.memory_type})>"
+
+
+class ConversationArchive(Base):
+    """对话归档 - 归档的对话历史（用于任务交接）"""
+    __tablename__ = "conversation_archives"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    thread_id = Column(Integer, ForeignKey("conversation_threads.id"), nullable=True, index=True)
+    
+    title = Column(String(200))  # 归档标题
+    summary = Column(Text)  # 归档摘要（LLM 生成的交接摘要）
+    message_count = Column(Integer, default=0)  # 包含的消息数量
+    token_count = Column(Integer, default=0)  # 包含的 token 数
+    
+    # 结构化交接信息
+    completed_tasks = Column(JSON)  # 已完成任务列表 [{"task": "端口扫描", "result": "发现 3 个端口"}]
+    current_task = Column(JSON)     # 当前进行中的任务 {"task": "SSL 检测", "progress": "已扫描 443 端口"}
+    interrupt_point = Column(Text)  # 中断点描述（从哪里继续）
+    key_findings = Column(JSON)     # 关键发现 [{"finding": "开放端口 22,80,443"}]
+    
+    archived_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    def __repr__(self):
+        return f"<ConversationArchive(id={self.id}, user_id={self.user_id}, title={self.title})>"
+
+
+class ConversationThread(Base):
+    """对话线程 - 管理对话会话"""
+    __tablename__ = "conversation_threads"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    
+    title = Column(String(200))  # 线程标题
+    parent_thread_id = Column(Integer, ForeignKey("conversation_threads.id"), nullable=True)  # 父线程
+    
+    is_active = Column(Boolean, default=True)  # 是否活跃
+    is_archived = Column(Boolean, default=False)  # 是否已归档
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    def __repr__(self):
+        return f"<ConversationThread(id={self.id}, user_id={self.user_id}, title={self.title})>"

@@ -7,6 +7,10 @@ from app.models.evidence import Evidence, EvidenceType
 from app.models.remediation import RemediationTicket, RemediationStatus
 from app.models.monitoring import ScheduledScan, ScanHistory, ScheduleFrequency
 from app.models.model_config import ModelProvider, ModelConfig, ModelUsage, ProviderType
+from app.models.context import (
+    ConversationHistory, ActionHistory, ResultCache, ProjectMemory, UserMemory,
+    ConversationArchive, ConversationThread
+)
 
 __all__ = [
     "User",
@@ -39,4 +43,11 @@ __all__ = [
     "ModelConfig",
     "ModelUsage",
     "ProviderType",
+    "ConversationHistory",
+    "ActionHistory",
+    "ResultCache",
+    "ProjectMemory",
+    "UserMemory",
+    "ConversationArchive",
+    "ConversationThread",
 ]

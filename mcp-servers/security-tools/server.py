@@ -44,7 +44,7 @@ async def nmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     if port_range == "1-65535":
         service_detection = False
     
-    cmd = ["nmap", "-sS", "-T4", "-oG", "-"]
+    cmd = ["nmap", "-sS", "-T5", "-oG", "-", "--min-rate", "10000"]
     if service_detection:
         cmd.append("-sV")
     cmd.extend(["-p", port_range, target])
@@ -61,8 +61,14 @@ async def nmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         
         output = stdout.decode("utf-8", errors="replace")
         open_ports = []
+        host_status = "unknown"
         
         for line in output.split("\n"):
+            if line.startswith("Host:") and "Status:" in line:
+                if "Up" in line:
+                    host_status = "up"
+                elif "Down" in line:
+                    host_status = "down"
             if line.startswith("Host:") and "Ports:" in line:
                 ports_part = line.split("Ports:", 1)[1]
                 for port_entry in ports_part.split(","):
@@ -85,7 +91,7 @@ async def nmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
             "status": "success",
             "data": {
                 "target": target,
-                "host_status": "up" if open_ports else "unknown",
+                "host_status": host_status,
                 "open_ports": open_ports,
             },
             "metadata": {

@@ -1,6 +1,6 @@
 """Add context management tables
 
-Revision ID: 001_add_context_tables
+Revision ID: 001
 Revises: 
 Create Date: 2026-06-21
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = '001_add_context_tables'
+revision = '001'
 down_revision = None
 branch_labels = None
 depends_on = None

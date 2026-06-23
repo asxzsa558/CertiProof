@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Input, Button, Avatar, Spin, Empty, Typography, Progress, Tag, Table, message } from 'antd'
+import { Input, Button, Avatar, Spin, Empty, Typography, Progress, Tag, Table, message, Modal, Checkbox, Dropdown, Menu, Popconfirm } from 'antd'
 import {
   SendOutlined,
   UserOutlined,
@@ -15,8 +15,15 @@ import {
   ApiOutlined,
   CheckCircleFilled,
   CloseCircleFilled,
+  ExclamationCircleFilled,
+  InfoCircleFilled,
   PauseCircleOutlined,
   StopOutlined,
+  PlayCircleOutlined,
+  HistoryOutlined,
+  SwapOutlined,
+  DeleteOutlined,
+  FolderOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import './ChatWorkspace.css'
@@ -56,6 +63,17 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [commandFilter, setCommandFilter] = useState('')
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
+  const [assetSelectorVisible, setAssetSelectorVisible] = useState(false)
+  const [assetSelectorAssets, setAssetSelectorAssets] = useState([])
+  const [assetSelectorSelected, setAssetSelectorSelected] = useState([])
+  const [assetSelectorCommand, setAssetSelectorCommand] = useState('')
+  const [compressionStatus, setCompressionStatus] = useState(null) // null | 'started' | 'completed'
+  const [compressionInfo, setCompressionInfo] = useState(null) // { tokens_freed, message_count }
+  const [archives, setArchives] = useState([])
+  const [threads, setThreads] = useState([])
+  const [currentThreadId, setCurrentThreadId] = useState(null)
+  const [showArchivePanel, setShowArchivePanel] = useState(false)
+  const [showThreadPanel, setShowThreadPanel] = useState(false)
   const messagesEndRef = useRef(null)
   const wsRef = useRef(null)
   const pollRef = useRef(null)
@@ -165,8 +183,8 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         const translatedText = commandTexts[matchedCommand] || messageText
         await handleSendToAI(translatedText)
       } else {
-        // 无目标，使用项目资产
-        await handleMultiAssetScan(matchedCommand)
+        // 无目标，弹出资产选择对话框
+        await openAssetSelector(matchedCommand)
       }
       return
     }
@@ -183,24 +201,11 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       const response = await api.get('/diagnostics/mcp/health')
       const data = response.data
       
-      const services = data.services || {}
-      const lines = ['MCP 连通性测试结果：', '']
-      
-      for (const [name, info] of Object.entries(services)) {
-        const statusIcon = info.status === 'healthy' ? '✓' : '✗'
-        const statusText = info.status === 'healthy' ? '正常' : '异常'
-        lines.push(`${statusIcon} ${name}: ${statusText}`)
-        if (info.error) {
-          lines.push(`  错误: ${info.error}`)
-        }
-      }
-      
-      lines.push('')
-      lines.push(data.status === 'healthy' ? '所有服务正常' : '部分服务异常')
-      
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: lines.join('\n'),
+        content: '',
+        isDiagnostic: true,
+        diagnosticData: data,
       }])
     } catch (error) {
       setMessages(prev => [...prev, {
@@ -260,6 +265,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         message: messageText,
         project_id: currentProjectId,
         model_id: currentModelId,
+        thread_id: currentThreadId,
       })
 
       const taskId = response.data.task_id
@@ -293,7 +299,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     }
   }
 
-  const handleMultiAssetScan = async (command) => {
+  const openAssetSelector = async (command) => {
     if (!currentProjectId) {
       setMessages(prev => [...prev, {
         role: 'assistant',
@@ -303,7 +309,6 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       return
     }
     
-    // 获取资产列表
     try {
       const response = await api.get(`/projects/${currentProjectId}/assets/`)
       const assets = response.data
@@ -316,24 +321,68 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         return
       }
       
-      // 映射命令到能力
-      const capabilityMap = {
-        '/scan': 'scan_ports',
-        '/ssl': 'scan_ssl',
-        '/vuln': 'scan_vulnerabilities',
-      }
-      
-      const capability = capabilityMap[command]
-      const capabilityNames = {
-        'scan_ports': '端口扫描',
-        'scan_ssl': 'SSL/TLS 检测',
-        'scan_vulnerabilities': '漏洞扫描',
-      }
-      
-      // 添加用户消息
+      setAssetSelectorAssets(assets)
+      setAssetSelectorSelected(assets.map(a => a.id))
+      setAssetSelectorCommand(command)
+      setAssetSelectorVisible(true)
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `获取资产列表失败：${error.response?.data?.detail || error.message || '未知错误'}`,
+        isError: true,
+      }])
+    }
+  }
+
+  const handleAssetSelectorConfirm = async () => {
+    setAssetSelectorVisible(false)
+    const selectedAssets = assetSelectorAssets.filter(a => assetSelectorSelected.includes(a.id))
+    
+    if (selectedAssets.length === 0) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '未选择任何资产',
+      }])
+      return
+    }
+    
+    await handleMultiAssetScan(assetSelectorCommand, selectedAssets)
+  }
+
+  const handleMultiAssetScan = async (command, selectedAssets) => {
+    if (!currentProjectId) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '请先选择项目',
+        isError: true,
+      }])
+      return
+    }
+    
+    const assets = selectedAssets || []
+    if (assets.length === 0) return
+    
+    const capabilityMap = {
+      '/scan': 'scan_ports',
+      '/ssl': 'scan_ssl',
+      '/vuln': 'scan_vulnerabilities',
+    }
+    
+    const capability = capabilityMap[command]
+    const capabilityNames = {
+      'scan_ports': '端口扫描',
+      'scan_ssl': 'SSL/TLS 检测',
+      'scan_vulnerabilities': '漏洞扫描',
+    }
+    
+    const targetDesc = assets.length === assetSelectorAssets.length
+      ? `扫描项目所有资产 (${assets.length} 个)`
+      : `扫描选定资产 (${assets.length} 个)`
+    
+    try {
       const userMessage = {
         role: 'user',
-        content: `扫描项目所有资产 (${assets.length} 个)`,
+        content: targetDesc,
         isMultiAsset: true,
         totalAssets: assets.length,
       }
@@ -341,7 +390,6 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       setInput('')
       setLoading(true)
       
-      // 发送多资产扫描请求
       const scanResponse = await api.post('/chat/', {
         message: JSON.stringify({
           type: 'multi_asset_scan',
@@ -354,7 +402,6 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       const taskId = scanResponse.data.task_id
       const aiResponse = scanResponse.data.response
       
-      // 添加 AI 回复消息
       const assistantMessage = {
         role: 'assistant',
         content: aiResponse || `开始${capabilityNames[capability]}，共 ${assets.length} 个资产`,
@@ -365,7 +412,6 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       }
       setMessages(prev => [...prev, assistantMessage])
       
-      // 连接 WebSocket 接收进度
       if (taskId) {
         connectWebSocket(taskId)
       }
@@ -409,8 +455,26 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
           if (msg.type === 'status') {
             const data = msg.data
             
+            // 处理任务暂停
+            if (data.type === 'task_paused') {
+              setMessages(prev => prev.map(m =>
+                m.taskId === taskId ? { ...m, taskStatus: 'paused' } : m
+              ))
+            }
+            // 处理任务恢复
+            else if (data.type === 'task_resumed') {
+              setMessages(prev => prev.map(m =>
+                m.taskId === taskId ? { ...m, taskStatus: 'running' } : m
+              ))
+            }
+            // 处理任务停止
+            else if (data.type === 'task_stopped') {
+              setMessages(prev => prev.map(m =>
+                m.taskId === taskId ? { ...m, taskStatus: 'stopped', taskCompleted: true } : m
+              ))
+            }
             // 处理多资产进度
-            if (data.type === 'multi_asset_progress') {
+            else if (data.type === 'multi_asset_progress') {
               setMessages(prev => prev.map(m => {
                 if (m.taskId === taskId) {
                   return {
@@ -449,12 +513,16 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
               m.taskId === taskId ? { ...m, taskCompleted: true, taskStatus: 'completed' } : m
             ))
 
+            // 检查是否包含多资产结果
+            const hasAssetResults = msg.data?.scan_results?.asset_results && 
+                                  Object.keys(msg.data.scan_results.asset_results).length > 0
+
             const resultMessage = {
               role: 'assistant',
               content: msg.data?.result_description || '任务执行完成',
               isResult: true,
               scanResults: msg.data?.scan_results || {},
-              isMultiAsset: msg.data?.is_multi_asset || false,
+              isMultiAsset: msg.data?.is_multi_asset || hasAssetResults,
             }
             setMessages(prev => [...prev, resultMessage])
           } else if (msg.type === 'failed') {
@@ -470,6 +538,24 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
               content: `任务执行失败：${msg.data?.error || '未知错误'}`,
               isError: true,
             }])
+          } else if (msg.type === 'compression_status') {
+            // 处理上下文压缩状态
+            const data = msg.data
+            if (data.status === 'started') {
+              setCompressionStatus('started')
+              setCompressionInfo(null)
+            } else if (data.status === 'completed') {
+              setCompressionStatus('completed')
+              setCompressionInfo({
+                tokens_freed: data.tokens_freed,
+                message_count: data.message_count,
+              })
+              // 3秒后清除压缩完成提示
+              setTimeout(() => {
+                setCompressionStatus(null)
+                setCompressionInfo(null)
+              }, 3000)
+            }
           }
         } catch (e) {
           console.error('WebSocket message parse error:', e)
@@ -532,11 +618,16 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
             } : msg
           ))
           
+          // 检查是否包含多资产结果
+          const hasAssetResults = data.scan_results?.asset_results && 
+                                Object.keys(data.scan_results.asset_results).length > 0
+          
           const resultMessage = {
             role: 'assistant',
             content: data.result_description || '任务执行完成',
             isResult: true,
             scanResults: data.scan_results || {},
+            isMultiAsset: hasAssetResults,
           }
           setMessages((prev) => [...prev, resultMessage])
           return
@@ -694,48 +785,48 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   }
 
   // 渲染结果消息
+  // 端口表格列定义（共用）
+  const portColumns = [
+    {
+      title: '端口',
+      dataIndex: 'port',
+      key: 'port',
+      width: 80,
+      sorter: (a, b) => a.port - b.port,
+    },
+    {
+      title: '协议',
+      dataIndex: 'protocol',
+      key: 'protocol',
+      width: 80,
+    },
+    {
+      title: '服务',
+      dataIndex: 'service',
+      key: 'service',
+      render: (service) => service || '-',
+    },
+    {
+      title: '状态',
+      dataIndex: 'state',
+      key: 'state',
+      width: 100,
+      render: (state) => {
+        const colorMap = {
+          open: 'green',
+          closed: 'default',
+          filtered: 'orange',
+        }
+        return <Tag color={colorMap[state] || 'default'}>{state}</Tag>
+      },
+    },
+  ]
+
   const renderResultMessage = (msg) => {
     const scanResults = msg.scanResults || {}
     const openPorts = scanResults.open_ports || []
     const vulnerabilities = scanResults.vulnerabilities || []
     const sslIssues = scanResults.ssl_issues || []
-
-    // 端口表格列定义
-    const portColumns = [
-      {
-        title: '端口',
-        dataIndex: 'port',
-        key: 'port',
-        width: 80,
-        sorter: (a, b) => a.port - b.port,
-      },
-      {
-        title: '协议',
-        dataIndex: 'protocol',
-        key: 'protocol',
-        width: 80,
-      },
-      {
-        title: '服务',
-        dataIndex: 'service',
-        key: 'service',
-        render: (service) => service || '-',
-      },
-      {
-        title: '状态',
-        dataIndex: 'state',
-        key: 'state',
-        width: 100,
-        render: (state) => {
-          const colorMap = {
-            open: 'green',
-            closed: 'default',
-            filtered: 'orange',
-          }
-          return <Tag color={colorMap[state] || 'default'}>{state}</Tag>
-        },
-      },
-    ]
 
     return (
       <div className="scan-animation-fade-in">
@@ -791,7 +882,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
             <Table
               dataSource={openPorts.map((port, idx) => ({ ...port, key: idx }))}
               columns={portColumns}
-              pagination={openPorts.length > 10 ? { pageSize: 10, showSizeChanger: true } : false}
+              pagination={openPorts.length > 10 ? { defaultPageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] } : false}
               size="small"
               className="port-table"
             />
@@ -831,26 +922,31 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   const renderTaskStatus = (msg) => {
     if (!msg.taskId) return null
 
-    // 如果任务已完成，不显示转圈指示器
     if (msg.taskCompleted) return null
 
-    // 多资产进度
     if (msg.isMultiAsset && msg.assetProgress) {
       return renderMultiAssetProgress(msg)
     }
 
     const stepProgress = msg.stepProgress
     const currentStep = msg.currentStep
+    const isPaused = msg.taskStatus === 'paused'
 
     return (
       <div className="scan-animation-fade-in" style={{ marginTop: 4 }}>
-        <div className="task-progress-card">
+        <div className={`task-progress-card ${isPaused ? 'paused' : ''}`}>
+          {isPaused && (
+            <div className="task-status-badge badge-paused">
+              <PauseCircleOutlined />
+              <span>已暂停</span>
+            </div>
+          )}
           {/* 进度条 */}
           {stepProgress && stepProgress.total_steps > 0 && (
             <div className="progress-bar-container">
               <Progress
                 percent={Math.round(((stepProgress.step_index + 1) / stepProgress.total_steps) * 100)}
-                strokeColor={{ from: '#6366f1', to: '#8b5cf6' }}
+                strokeColor={isPaused ? '#faad14' : { from: '#6366f1', to: '#8b5cf6' }}
                 showInfo={false}
                 size="small"
               />
@@ -862,8 +958,12 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
           
           {/* 当前步骤 */}
           <div className="current-step">
-            <LoadingOutlined style={{ color: '#6366f1' }} spin />
-            <span className="step-text">{currentStep || '任务执行中...'}</span>
+            {isPaused ? (
+              <PauseCircleOutlined style={{ color: '#faad14' }} />
+            ) : (
+              <LoadingOutlined style={{ color: '#6366f1' }} spin />
+            )}
+            <span className="step-text">{isPaused ? '任务已暂停' : (currentStep || '任务执行中...')}</span>
           </div>
           
           {/* 步骤列表 */}
@@ -891,6 +991,9 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   const handlePauseTask = async (taskId) => {
     try {
       await api.post(`/tasks/${taskId}/pause`)
+      setMessages(prev => prev.map(m =>
+        m.taskId === taskId ? { ...m, taskStatus: 'paused' } : m
+      ))
       message.success('任务已暂停')
     } catch (error) {
       message.error('暂停失败')
@@ -900,29 +1003,242 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   const handleStopTask = async (taskId) => {
     try {
       await api.post(`/tasks/${taskId}/stop`)
+      setMessages(prev => prev.map(m =>
+        m.taskId === taskId ? { ...m, taskStatus: 'stopped' } : m
+      ))
       message.success('任务已停止')
     } catch (error) {
       message.error('停止失败')
     }
   }
 
+  const handleResumeTask = async (taskId) => {
+    try {
+      await api.post(`/tasks/${taskId}/resume`)
+      setMessages(prev => prev.map(m =>
+        m.taskId === taskId ? { ...m, taskStatus: 'running' } : m
+      ))
+      message.success('任务已恢复')
+    } catch (error) {
+      message.error('恢复失败')
+    }
+  }
+
+  // ==================== 归档管理 ====================
+  
+  const handleCreateArchive = async () => {
+    try {
+      // 1. 创建归档（立即返回）
+      const response = await api.post('/chat/archives', { title: null })
+      const archiveId = response.data.archive_id
+      
+      // 2. 显示"正在生成摘要..."
+      message.loading({ content: '正在生成归档摘要...', key: 'archive', duration: 0 })
+      
+      // 3. 清空当前对话
+      setMessages([{
+        role: 'assistant',
+        content: '对话已归档，正在生成摘要...',
+      }])
+      
+      // 4. 轮询直到摘要生成完成
+      const maxAttempts = 15  // 最多等待 30 秒
+      let attempts = 0
+      
+      const pollInterval = setInterval(async () => {
+        attempts++
+        try {
+          const archiveRes = await api.get(`/chat/archives/${archiveId}`)
+          if (archiveRes.data.summary) {
+            clearInterval(pollInterval)
+            message.success({ content: '归档完成', key: 'archive' })
+            setMessages([{
+              role: 'assistant',
+              content: `对话已归档完成！\n\n**摘要**: ${archiveRes.data.summary}`,
+            }])
+            await loadArchives()
+          } else if (attempts >= maxAttempts) {
+            clearInterval(pollInterval)
+            message.warning({ content: '摘要生成超时，归档已保存', key: 'archive' })
+            await loadArchives()
+          }
+        } catch (e) {
+          console.error('Poll archive error:', e)
+        }
+      }, 2000)
+      
+    } catch (error) {
+      message.error(error.response?.data?.detail || '归档失败')
+    }
+  }
+
+  const loadArchives = async () => {
+    try {
+      const params = currentProjectId ? { project_id: currentProjectId } : {}
+      const response = await api.get('/chat/archives', { params })
+      setArchives(response.data.archives || [])
+    } catch (error) {
+      console.error('Failed to load archives:', error)
+    }
+  }
+
+  const handleDeleteArchive = async (archiveId) => {
+    try {
+      await api.delete(`/chat/archives/${archiveId}`)
+      message.success('归档已删除')
+      await loadArchives()
+    } catch (error) {
+      message.error('删除失败')
+    }
+  }
+
+  const handleContinueFromArchive = async (archive) => {
+    try {
+      // 创建新线程，标题包含归档信息
+      const threadTitle = `接续: ${archive.title}`
+      const response = await api.post('/chat/threads', { 
+        title: threadTitle, 
+        parent_thread_id: currentThreadId 
+      })
+      setCurrentThreadId(response.data.thread_id)
+      
+      // 构建接续消息
+      let continueMsg = `📋 已接续归档「${archive.title}」\n\n`
+      continueMsg += `**工作状态**: ${archive.summary}\n\n`
+      
+      if (archive.completed_tasks && archive.completed_tasks.length > 0) {
+        continueMsg += `**已完成**:\n`
+        archive.completed_tasks.forEach(t => {
+          continueMsg += `- ${t.task}: ${t.result}\n`
+        })
+        continueMsg += '\n'
+      }
+      
+      if (archive.current_task) {
+        continueMsg += `**进行中**: ${archive.current_task.task} - ${archive.current_task.progress}\n\n`
+      }
+      
+      if (archive.interrupt_point) {
+        continueMsg += `**中断点**: ${archive.interrupt_point}\n\n`
+      }
+      
+      continueMsg += '告诉我"继续"即可接续之前的工作。'
+      
+      setMessages([{
+        role: 'assistant',
+        content: continueMsg,
+      }])
+      
+      setShowArchivePanel(false)
+      await loadThreads()
+      message.success('已创建新线程并接续归档')
+    } catch (error) {
+      message.error('接续归档失败')
+    }
+  }
+
+  // ==================== 线程管理 ====================
+  
+  const handleCreateThread = async () => {
+    try {
+      const response = await api.post('/chat/threads', { title: null, parent_thread_id: currentThreadId })
+      setCurrentThreadId(response.data.thread_id)
+      message.success('新线程已创建')
+      // 清空当前对话
+      setMessages([{
+        role: 'assistant',
+        content: '新线程已创建，开始新的对话吧！',
+      }])
+      await loadThreads()
+    } catch (error) {
+      message.error('创建线程失败')
+    }
+  }
+
+  const loadThreads = async () => {
+    try {
+      const response = await api.get('/chat/threads')
+      setThreads(response.data.threads || [])
+    } catch (error) {
+      console.error('Failed to load threads:', error)
+    }
+  }
+
+  const handleSwitchThread = async (threadId) => {
+    try {
+      const response = await api.post(`/chat/threads/${threadId}/continue`)
+      setCurrentThreadId(threadId)
+      
+      // 加载线程的对话历史
+      const conversationHistory = response.data.conversation_history || []
+      if (conversationHistory.length > 0) {
+        // 显示历史对话
+        setMessages(conversationHistory.map(h => ({
+          role: h.role,
+          content: h.content,
+        })))
+      } else {
+        // 没有历史对话，显示提示信息
+        const archiveSummary = response.data.archive_summary
+        setMessages([{
+          role: 'assistant',
+          content: archiveSummary 
+            ? `已接续线程上下文：\n\n${archiveSummary}`
+            : '已切换到新线程，开始新的对话吧！',
+        }])
+      }
+      
+      setShowThreadPanel(false)
+      message.success('线程已切换')
+    } catch (error) {
+      message.error('切换线程失败')
+    }
+  }
+
+  const handleDeleteThread = async (threadId) => {
+    try {
+      await api.delete(`/chat/threads/${threadId}`)
+      if (currentThreadId === threadId) {
+        setCurrentThreadId(null)
+      }
+      message.success('线程已删除')
+      await loadThreads()
+    } catch (error) {
+      message.error('删除失败')
+    }
+  }
+
   const renderMultiAssetProgress = (msg) => {
     const assetProgress = msg.assetProgress || {}
     const totalAssets = msg.totalAssets || Object.keys(assetProgress).length
+    const taskStatus = msg.taskStatus || 'running'
+    const isPaused = taskStatus === 'paused'
+    const isStopped = taskStatus === 'stopped'
+    
     const completedCount = Object.values(assetProgress).filter(a => 
       a.status === 'completed' || a.status === 'failed' || a.status === 'success' || a.status === 'cancelled'
     ).length
     
     const progress = totalAssets > 0 ? Math.round((completedCount / totalAssets) * 100) : 0
 
+    const cardClassName = `task-progress-card multi-asset-card ${isPaused ? 'paused' : ''} ${isStopped ? 'stopped' : ''}`
+
     return (
       <div className="scan-animation-fade-in" style={{ marginTop: 4 }}>
-        <div className="task-progress-card multi-asset-card">
+        <div className={cardClassName}>
+          {/* 状态徽章 */}
+          {(isPaused || isStopped) && (
+            <div className={`task-status-badge ${isPaused ? 'badge-paused' : 'badge-stopped'}`}>
+              {isPaused ? <PauseCircleOutlined /> : <StopOutlined />}
+              <span>{isPaused ? '已暂停' : '已停止'}</span>
+            </div>
+          )}
+          
           {/* 总进度 */}
           <div className="progress-bar-container">
             <Progress
               percent={progress}
-              strokeColor={{ from: '#6366f1', to: '#8b5cf6' }}
+              strokeColor={isStopped ? '#ef4444' : isPaused ? '#faad14' : { from: '#6366f1', to: '#8b5cf6' }}
               showInfo={false}
               size="small"
             />
@@ -933,47 +1249,84 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
           
           {/* 控制按钮 */}
           <div className="task-controls">
-            <Button
-              size="small"
-              icon={<PauseCircleOutlined />}
-              onClick={() => handlePauseTask(msg.taskId)}
-              className="task-control-btn"
-            >
-              暂停
-            </Button>
-            <Button
-              size="small"
-              danger
-              icon={<StopOutlined />}
-              onClick={() => handleStopTask(msg.taskId)}
-              className="task-control-btn"
-            >
-              停止
-            </Button>
+            {isPaused ? (
+              <>
+                <Button
+                  size="small"
+                  icon={<PlayCircleOutlined />}
+                  onClick={() => handleResumeTask(msg.taskId)}
+                  className="task-control-btn"
+                  style={{ background: 'rgba(16, 185, 129, 0.1)', borderColor: '#10b981', color: '#10b981' }}
+                >
+                  恢复
+                </Button>
+                <Button
+                  size="small"
+                  danger
+                  icon={<StopOutlined />}
+                  onClick={() => handleStopTask(msg.taskId)}
+                  className="task-control-btn"
+                >
+                  停止
+                </Button>
+              </>
+            ) : isStopped ? (
+              <span className="task-stopped-text">任务已终止</span>
+            ) : (
+              <>
+                <Button
+                  size="small"
+                  icon={<PauseCircleOutlined />}
+                  onClick={() => handlePauseTask(msg.taskId)}
+                  className="task-control-btn"
+                >
+                  暂停
+                </Button>
+                <Button
+                  size="small"
+                  danger
+                  icon={<StopOutlined />}
+                  onClick={() => handleStopTask(msg.taskId)}
+                  className="task-control-btn"
+                >
+                  停止
+                </Button>
+              </>
+            )}
           </div>
           
           {/* 资产列表 */}
           <div className="asset-progress-list">
-            {Object.entries(assetProgress).map(([index, asset]) => (
-              <div key={index} className={`asset-progress-item ${asset.status}`}>
-                {asset.status === 'completed' || asset.status === 'success' ? (
-                  <CheckCircleFilled style={{ color: '#10b981' }} />
-                ) : asset.status === 'failed' ? (
-                  <CloseCircleFilled style={{ color: '#ef4444' }} />
-                ) : asset.status === 'cancelled' ? (
-                  <StopOutlined style={{ color: '#faad14' }} />
-                ) : (
-                  <LoadingOutlined style={{ color: '#6366f1' }} spin />
-                )}
-                <span className="asset-name">{asset.name}</span>
-                {asset.status === 'running' && (
-                  <span className="asset-status">扫描中...</span>
-                )}
-                {asset.status === 'cancelled' && (
-                  <span className="asset-status">已取消</span>
-                )}
-              </div>
-            ))}
+            {Object.entries(assetProgress).map(([index, asset]) => {
+              const isRunning = asset.status === 'running' || asset.status === 'pending'
+              const showPaused = isPaused && isRunning
+              
+              return (
+                <div key={index} className={`asset-progress-item ${showPaused ? 'paused' : asset.status}`}>
+                  {asset.status === 'completed' || asset.status === 'success' ? (
+                    <CheckCircleFilled style={{ color: '#10b981' }} />
+                  ) : asset.status === 'failed' ? (
+                    <CloseCircleFilled style={{ color: '#ef4444' }} />
+                  ) : asset.status === 'cancelled' ? (
+                    <StopOutlined style={{ color: '#faad14' }} />
+                  ) : showPaused ? (
+                    <PauseCircleOutlined style={{ color: '#faad14' }} />
+                  ) : (
+                    <LoadingOutlined style={{ color: '#6366f1' }} spin />
+                  )}
+                  <span className="asset-name">{asset.name}</span>
+                  {asset.status === 'running' && !isPaused && (
+                    <span className="asset-status">扫描中...</span>
+                  )}
+                  {asset.status === 'cancelled' && (
+                    <span className="asset-status">已取消</span>
+                  )}
+                  {showPaused && (
+                    <span className="asset-status">已暂停</span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>
@@ -985,17 +1338,12 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     const assetResults = scanResults.asset_results || {}
     
     const totalAssets = Object.keys(assetResults).length
-    const successCount = Object.values(assetResults).filter(r => 
-      r.status === 'success' || r.every(item => item.status === 'success')
-    ).length
-    const failedCount = totalAssets - successCount
+    const successCount = Object.values(assetResults).filter(r => r.display_status === 'success').length
+    const warningCount = Object.values(assetResults).filter(r => r.display_status === 'warning').length
+    const failedCount = Object.values(assetResults).filter(r => r.display_status === 'failed').length
 
     return (
       <div className="scan-animation-fade-in">
-        <div className="message-bubble assistant" style={{ whiteSpace: 'pre-wrap' }}>
-          {msg.content}
-        </div>
-        
         {/* 统计摘要 */}
         <div className="result-summary multi-asset-summary">
           <div className="summary-item">
@@ -1016,6 +1364,17 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
               <div className="summary-value">{successCount}</div>
             </div>
           </div>
+          {warningCount > 0 && (
+            <div className="summary-item">
+              <div className="summary-icon" style={{ background: 'rgba(245, 158, 11, 0.2)' }}>
+                <ExclamationCircleFilled style={{ color: '#f59e0b' }} />
+              </div>
+              <div className="summary-content">
+                <div className="summary-title">警告</div>
+                <div className="summary-value">{warningCount}</div>
+              </div>
+            </div>
+          )}
           {failedCount > 0 && (
             <div className="summary-item">
               <div className="summary-icon" style={{ background: 'rgba(239, 68, 68, 0.2)' }}>
@@ -1029,50 +1388,215 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
           )}
         </div>
         
-        {/* 资产详情 */}
-        <div className="asset-results-details">
-          {Object.entries(assetResults).map(([target, results], index) => {
-            const isSuccess = Array.isArray(results) 
-              ? results.every(r => r.status === 'success')
-              : results.status === 'success'
+        {/* 资产详情卡片 */}
+        <div className="asset-results-cards">
+          {Object.entries(assetResults).map(([target, assetData], index) => {
+            const displayStatus = assetData.display_status || (assetData.status === 'success' ? 'success' : 'failed')
+            
+            // 提取端口数据
+            const openPorts = assetData.result?.open_ports || []
+            
+            // 提取错误信息
+            const errorMsg = assetData.error
+            
+            // 根据状态设置图标和颜色
+            const statusConfig = {
+              success: {
+                icon: <CheckCircleFilled style={{ color: '#10b981' }} />,
+                tagColor: 'success',
+                tagText: '成功',
+                cardClass: 'success'
+              },
+              warning: {
+                icon: <ExclamationCircleFilled style={{ color: '#f59e0b' }} />,
+                tagColor: 'warning',
+                tagText: '警告',
+                cardClass: 'warning'
+              },
+              failed: {
+                icon: <CloseCircleFilled style={{ color: '#ef4444' }} />,
+                tagColor: 'error',
+                tagText: '失败',
+                cardClass: 'failed'
+              }
+            }
+            
+            const config = statusConfig[displayStatus]
             
             return (
-              <div key={index} className={`asset-result-item ${isSuccess ? 'success' : 'failed'}`}>
+              <div key={index} className={`asset-result-card ${config.cardClass}`}>
+                {/* 卡片头部 */}
                 <div className="asset-result-header">
-                  {isSuccess ? (
-                    <CheckCircleFilled style={{ color: '#10b981' }} />
-                  ) : (
-                    <CloseCircleFilled style={{ color: '#ef4444' }} />
-                  )}
-                  <span className="asset-target">{target}</span>
-                  <Tag color={isSuccess ? 'success' : 'error'}>
-                    {isSuccess ? '成功' : '失败'}
+                  <div className="asset-result-title">
+                    {config.icon}
+                    <span className="asset-target">{target}</span>
+                  </div>
+                  <Tag color={config.tagColor}>
+                    {config.tagText}
                   </Tag>
                 </div>
                 
-                {isSuccess && Array.isArray(results) && results[0]?.result && (
-                  <div className="asset-result-data">
-                    {results[0].result.open_ports && (
-                      <div className="result-stat">
-                        开放端口: {results[0].result.open_ports.length}
-                      </div>
-                    )}
-                    {results[0].result.vulnerabilities && (
-                      <div className="result-stat">
-                        漏洞: {results[0].result.vulnerabilities.length}
+                {/* 成功状态：显示端口详情 */}
+                {displayStatus === 'success' && (
+                  <div className="asset-result-content">
+                    <div className="asset-result-stats">
+                      <span className="stat-label">开放端口:</span>
+                      <span className="stat-value">{openPorts.length} 个</span>
+                    </div>
+                    
+                    {openPorts.length > 0 && (
+                      <div className="port-table-container">
+                        <Table
+                          dataSource={openPorts.map((port, idx) => ({ ...port, key: idx }))}
+                          columns={portColumns}
+                          pagination={openPorts.length > 5 ? { defaultPageSize: 5, showSizeChanger: true, pageSizeOptions: ['5', '10', '20'] } : false}
+                          size="small"
+                          className="port-table-compact"
+                        />
                       </div>
                     )}
                   </div>
                 )}
                 
-                {!isSuccess && (
-                  <div className="asset-result-error">
-                    {Array.isArray(results) ? results[0]?.error : results.error}
+                {/* 警告状态：无开放端口 */}
+                {displayStatus === 'warning' && (
+                  <div className="asset-result-content">
+                    <div className="asset-result-stats">
+                      <span className="stat-label">开放端口:</span>
+                      <span className="stat-value">0 个</span>
+                    </div>
+                    
+                    <div className="info-box warning">
+                      <InfoCircleFilled style={{ color: '#f59e0b', marginRight: 8 }} />
+                      <div className="info-content">
+                        <div className="info-title">未发现开放端口</div>
+                        <div className="info-desc">可能原因：主机不可达、防火墙过滤、或服务未启动</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* 失败状态：显示错误信息 */}
+                {displayStatus === 'failed' && (
+                  <div className="asset-result-content">
+                    <div className="info-box error">
+                      <CloseCircleFilled style={{ color: '#ef4444', marginRight: 8 }} />
+                      <div className="info-content">
+                        <div className="info-title">扫描失败</div>
+                        <div className="info-desc">{errorMsg || '扫描过程中发生错误'}</div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
             )
           })}
+        </div>
+      </div>
+    )
+  }
+
+  const renderDiagnosticResult = (data) => {
+    const services = data.services || {}
+    const overallStatus = data.status
+    
+    const serviceConfig = {
+      gateway: { 
+        label: 'MCP Gateway', 
+        icon: <ApiOutlined />, 
+        gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' 
+      },
+      security_tools: { 
+        label: 'Security Tools', 
+        icon: <SafetyCertificateOutlined />, 
+        gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)' 
+      },
+      ocr_server: { 
+        label: 'OCR Server', 
+        icon: <FileSearchOutlined />, 
+        gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)' 
+      },
+    }
+
+    const healthyCount = Object.values(services).filter(s => s.status === 'healthy').length
+    const totalCount = Object.keys(services).length
+
+    return (
+      <div className="scan-animation-fade-in">
+        <div className="diagnostic-card">
+          {/* Header */}
+          <div className="diagnostic-header">
+            <div className="diagnostic-title">
+              <ApiOutlined />
+              <span>MCP 连通性测试</span>
+            </div>
+            <div className={`diagnostic-overall ${overallStatus === 'healthy' ? 'healthy' : 'unhealthy'}`}>
+              {overallStatus === 'healthy' ? (
+                <><CheckCircleFilled /> 全部正常</>
+              ) : (
+                <><CloseCircleFilled /> 部分异常</>
+              )}
+            </div>
+          </div>
+
+          {/* Service Cards */}
+          <div className="diagnostic-services">
+            {Object.entries(services).map(([key, info]) => {
+              const config = serviceConfig[key] || { label: key, icon: <MonitorOutlined />, gradient: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }
+              const isHealthy = info.status === 'healthy'
+              const tools = info.details?.tools || info.details?.details?.tools || []
+              
+              return (
+                <div key={key} className={`diagnostic-service-card ${isHealthy ? 'healthy' : 'unhealthy'}`}>
+                  <div className="service-card-header" style={{ background: config.gradient }}>
+                    <div className="service-icon">{config.icon}</div>
+                    <div className="service-info">
+                      <div className="service-name">{config.label}</div>
+                      <div className="service-status">
+                        {isHealthy ? (
+                          <><CheckCircleFilled /> 正常</>
+                        ) : (
+                          <><CloseCircleFilled /> 异常</>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {tools.length > 0 && (
+                    <div className="service-tools">
+                      <div className="tools-label">可用工具</div>
+                      <div className="tools-list">
+                        {tools.map((tool, i) => (
+                          <Tag key={i} color={isHealthy ? 'success' : 'default'} className="tool-tag">
+                            {tool.replace(/_scan|_analyze|_bruteforce/, '')}
+                          </Tag>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {info.error && (
+                    <div className="service-error">
+                      <CloseCircleFilled /> {info.error}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Summary */}
+          <div className="diagnostic-summary">
+            <div className="summary-stat">
+              <span className="stat-value">{healthyCount}</span>
+              <span className="stat-label">正常</span>
+            </div>
+            <div className="summary-divider">/</div>
+            <div className="summary-stat">
+              <span className="stat-value">{totalCount}</span>
+              <span className="stat-label">服务</span>
+            </div>
+          </div>
         </div>
       </div>
     )
@@ -1098,8 +1622,155 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
             <div className="status-dot"></div>
             <span>在线</span>
           </div>
+          <div className="header-actions">
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'archive', icon: <FolderOutlined />, label: '归档当前对话' },
+                  { key: 'view-archives', icon: <HistoryOutlined />, label: '查看归档' },
+                  { type: 'divider' },
+                  { key: 'new-thread', icon: <SwapOutlined />, label: '新建线程' },
+                  { key: 'view-threads', icon: <SwapOutlined />, label: '切换线程' },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'archive') handleCreateArchive()
+                  else if (key === 'view-archives') { loadArchives(); setShowArchivePanel(true) }
+                  else if (key === 'new-thread') handleCreateThread()
+                  else if (key === 'view-threads') { loadThreads(); setShowThreadPanel(true) }
+                }
+              }}
+              trigger={['click']}
+            >
+              <Button type="text" icon={<HistoryOutlined />} className="header-action-btn" />
+            </Dropdown>
+          </div>
         </div>
       </div>
+
+      {/* Archive Panel Modal */}
+      <Modal
+        title="对话归档"
+        open={showArchivePanel}
+        onCancel={() => setShowArchivePanel(false)}
+        footer={null}
+        className="archive-panel-modal"
+        width={560}
+      >
+        {archives.length === 0 ? (
+          <Empty description="暂无归档" />
+        ) : (
+          <div className="archive-list">
+            {archives.map(archive => (
+              <div key={archive.id} className="archive-item">
+                <div className="archive-info">
+                  <div className="archive-title">{archive.title}</div>
+                  <div className="archive-summary">{archive.summary}</div>
+                  
+                  {/* 结构化交接信息 */}
+                  {archive.completed_tasks && archive.completed_tasks.length > 0 && (
+                    <div className="archive-section">
+                      <span className="archive-section-label">已完成:</span>
+                      {archive.completed_tasks.map((t, i) => (
+                        <Tag key={i} color="green">{t.task}: {t.result}</Tag>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {archive.current_task && (
+                    <div className="archive-section">
+                      <span className="archive-section-label">进行中:</span>
+                      <Tag color="processing">{archive.current_task.task}</Tag>
+                      <span className="archive-detail">{archive.current_task.progress}</span>
+                    </div>
+                  )}
+                  
+                  {archive.interrupt_point && (
+                    <div className="archive-section">
+                      <span className="archive-section-label">中断点:</span>
+                      <span className="archive-detail">{archive.interrupt_point}</span>
+                    </div>
+                  )}
+                  
+                  {archive.key_findings && archive.key_findings.length > 0 && (
+                    <div className="archive-section">
+                      <span className="archive-section-label">关键发现:</span>
+                      {archive.key_findings.map((f, i) => (
+                        <Tag key={i} color="blue">{f}</Tag>
+                      ))}
+                    </div>
+                  )}
+                  
+                  <div className="archive-meta">
+                    <Tag>{archive.message_count} 条消息</Tag>
+                    <span className="archive-date">{new Date(archive.archived_at).toLocaleString()}</span>
+                  </div>
+                </div>
+                <div className="archive-actions">
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<SwapOutlined />}
+                    onClick={() => handleContinueFromArchive(archive)}
+                  >
+                    接续
+                  </Button>
+                  <Button
+                    type="text"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleDeleteArchive(archive.id)}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
+      {/* Thread Panel Modal */}
+      <Modal
+        title="对话线程"
+        open={showThreadPanel}
+        onCancel={() => setShowThreadPanel(false)}
+        footer={null}
+        className="thread-panel-modal"
+      >
+        {threads.length === 0 ? (
+          <Empty description="暂无线程">
+            <Button type="primary" onClick={handleCreateThread}>创建新线程</Button>
+          </Empty>
+        ) : (
+          <div className="thread-list">
+            {threads.map(thread => (
+              <div key={thread.id} className={`thread-item ${currentThreadId === thread.id ? 'active' : ''}`}>
+                <div className="thread-info" onClick={() => handleSwitchThread(thread.id)}>
+                  <div className="thread-title">
+                    {thread.title}
+                    {currentThreadId === thread.id && <Tag color="blue">当前</Tag>}
+                  </div>
+                  <div className="thread-meta">
+                    <span className="thread-date">创建于 {new Date(thread.created_at).toLocaleString()}</span>
+                  </div>
+                </div>
+                <Popconfirm
+                  title="确定要删除这个线程吗？"
+                  onConfirm={() => handleDeleteThread(thread.id)}
+                  okText="确定"
+                  cancelText="取消"
+                >
+                  <Button
+                    type="text"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </Popconfirm>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
 
       {/* Messages */}
       <div className="workspace-messages">
@@ -1117,8 +1788,10 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
               )}
             </div>
             <div className="message-body">
-              {/* 结果消息 */}
-              {msg.isResult ? (
+              {/* 诊断结果 */}
+              {msg.isDiagnostic ? (
+                renderDiagnosticResult(msg.diagnosticData)
+              ) : msg.isResult ? (
                 msg.isMultiAsset ? renderMultiAssetResult(msg) : renderResultMessage(msg)
               ) : (
                 <>
@@ -1149,6 +1822,45 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
             </div>
           </div>
         )}
+        
+        {/* Compression Status Indicator */}
+        {compressionStatus === 'started' && (
+          <div className="workspace-message assistant">
+            <div className="message-avatar">
+              <Avatar
+                size={32}
+                style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}
+                icon={<RobotOutlined />}
+              />
+            </div>
+            <div className="message-body">
+              <div className="message-bubble assistant compression-indicator">
+                <Spin size="small" />
+                <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.8)' }}>正在压缩上下文...</span>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {compressionStatus === 'completed' && compressionInfo && (
+          <div className="workspace-message assistant">
+            <div className="message-avatar">
+              <Avatar
+                size={32}
+                style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}
+                icon={<CheckCircleOutlined />}
+              />
+            </div>
+            <div className="message-body">
+              <div className="message-bubble assistant compression-completed">
+                <span style={{ color: 'rgba(255,255,255,0.9)' }}>
+                  ✓ 上下文已压缩（释放 {compressionInfo.tokens_freed} tokens，压缩 {compressionInfo.message_count} 条消息）
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+        
         <div ref={messagesEndRef} />
       </div>
 
@@ -1211,6 +1923,52 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
           </Button>
         </div>
       </div>
+
+      {/* Asset Selector Modal */}
+      <Modal
+        title="选择扫描资产"
+        open={assetSelectorVisible}
+        onOk={handleAssetSelectorConfirm}
+        onCancel={() => setAssetSelectorVisible(false)}
+        okText="开始扫描"
+        cancelText="取消"
+        className="asset-selector-modal"
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Checkbox
+            indeterminate={assetSelectorSelected.length > 0 && assetSelectorSelected.length < assetSelectorAssets.length}
+            checked={assetSelectorSelected.length === assetSelectorAssets.length}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setAssetSelectorSelected(assetSelectorAssets.map(a => a.id))
+              } else {
+                setAssetSelectorSelected([])
+              }
+            }}
+          >
+            全选 ({assetSelectorSelected.length}/{assetSelectorAssets.length})
+          </Checkbox>
+        </div>
+        <div className="asset-selector-list">
+          {assetSelectorAssets.map(asset => (
+            <div key={asset.id} className="asset-selector-item">
+              <Checkbox
+                checked={assetSelectorSelected.includes(asset.id)}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setAssetSelectorSelected(prev => [...prev, asset.id])
+                  } else {
+                    setAssetSelectorSelected(prev => prev.filter(id => id !== asset.id))
+                  }
+                }}
+              >
+                <span className="asset-selector-value">{asset.value}</span>
+                <Tag color="blue" style={{ marginLeft: 8 }}>{asset.asset_type}</Tag>
+              </Checkbox>
+            </div>
+          ))}
+        </div>
+      </Modal>
     </div>
   )
 }

@@ -20,6 +20,8 @@ class ConnectionManager:
     def __init__(self):
         # task_id -> List[WebSocket]
         self.active_connections: Dict[str, List[WebSocket]] = {}
+        # 全局连接（不绑定 task_id，用于系统级广播）
+        self.global_connections: List[WebSocket] = []
     
     async def connect(self, websocket: WebSocket, task_id: str):
         """接受新的 WebSocket 连接"""
@@ -27,6 +29,8 @@ class ConnectionManager:
         if task_id not in self.active_connections:
             self.active_connections[task_id] = []
         self.active_connections[task_id].append(websocket)
+        # 同时加入全局连接池
+        self.global_connections.append(websocket)
         logger.info(f"WebSocket connected for task {task_id}, total: {len(self.active_connections[task_id])}")
     
     def disconnect(self, websocket: WebSocket, task_id: str):
@@ -35,7 +39,10 @@ class ConnectionManager:
             self.active_connections[task_id].remove(websocket)
             if not self.active_connections[task_id]:
                 del self.active_connections[task_id]
-            logger.info(f"WebSocket disconnected for task {task_id}")
+        # 从全局连接池移除
+        if websocket in self.global_connections:
+            self.global_connections.remove(websocket)
+        logger.info(f"WebSocket disconnected for task {task_id}")
     
     async def send_personal_message(self, message: dict, websocket: WebSocket):
         """发送消息到特定 WebSocket"""
@@ -52,6 +59,14 @@ class ConnectionManager:
                     await connection.send_json(message)
                 except Exception as e:
                     logger.error(f"Failed to broadcast to task {task_id}: {e}")
+    
+    async def broadcast(self, message: dict):
+        """广播消息到所有连接（全局广播）"""
+        for connection in self.global_connections[:]:  # 使用切片避免迭代时修改
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                logger.error(f"Failed to broadcast: {e}")
 
 
 manager = ConnectionManager()

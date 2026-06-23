@@ -31,6 +31,8 @@ class ExecutionEngine:
         context_manager: ContextManager = None,
         task_id: str = None,
         progress_callback: Callable = None,
+        check_stop: Callable = None,
+        wait_if_paused: Callable = None,
     ) -> Dict:
         """
         执行计划中的每个步骤
@@ -58,6 +60,30 @@ class ExecutionEngine:
         failed_count = 0
         
         for i, step in enumerate(plan):
+            if check_stop and check_stop():
+                logger.info(f"Task stopped before step {i}")
+                for remaining in range(i, len(plan)):
+                    results.append({
+                        "capability": plan[remaining].get("capability"),
+                        "status": "cancelled",
+                        "error": "Task was stopped",
+                    })
+                    failed_count += 1
+                break
+            
+            if wait_if_paused:
+                stopped = await wait_if_paused()
+                if stopped:
+                    logger.info(f"Task stopped while paused before step {i}")
+                    for remaining in range(i, len(plan)):
+                        results.append({
+                            "capability": plan[remaining].get("capability"),
+                            "status": "cancelled",
+                            "error": "Task was stopped while paused",
+                        })
+                        failed_count += 1
+                    break
+            
             capability_name = step.get("capability")
             parameters = step.get("parameters", {})
             
@@ -146,7 +172,7 @@ class ExecutionEngine:
     async def execute_plan_concurrent(
         self,
         plan: List[Dict],
-        user_id: int,
+        user_id: int = None,
         project_id: int = None,
         db: AsyncSession = None,
         context_manager: ContextManager = None,
@@ -155,6 +181,7 @@ class ExecutionEngine:
         max_concurrent: int = 5,
         max_retries: int = 3,
         check_stop: Callable = None,
+        wait_if_paused: Callable = None,
     ) -> Dict:
         """
         并发执行计划（多资产场景）
@@ -195,6 +222,7 @@ class ExecutionEngine:
                 progress_callback=progress_callback,
                 max_retries=max_retries,
                 check_stop=check_stop,
+                wait_if_paused=wait_if_paused,
             )
             tasks.append(task)
         
@@ -315,6 +343,7 @@ class ExecutionEngine:
         progress_callback: Callable,
         max_retries: int,
         check_stop: Callable = None,
+        wait_if_paused: Callable = None,
     ) -> Dict:
         """执行单个资产任务"""
         capability_name = step.get("capability")
@@ -332,6 +361,19 @@ class ExecutionEngine:
                 "attempts": 0,
             }
         
+        # 如果暂停，等待恢复
+        if wait_if_paused:
+            stopped = await wait_if_paused()
+            if stopped:
+                logger.info(f"Task {asset_index} stopped while paused for {capability_name}({target})")
+                return {
+                    "capability": capability_name,
+                    "target": target,
+                    "status": "cancelled",
+                    "error": "Task was stopped while paused",
+                    "attempts": 0,
+                }
+        
         logger.info(f"Task {asset_index} waiting for semaphore for {capability_name}({target})")
         
         async with semaphore:
@@ -345,6 +387,19 @@ class ExecutionEngine:
                     "error": "Task was stopped",
                     "attempts": 0,
                 }
+            
+            # 再次检查是否暂停（可能在等待 semaphore 期间被暂停）
+            if wait_if_paused:
+                stopped = await wait_if_paused()
+                if stopped:
+                    logger.info(f"Task {asset_index} stopped while paused after semaphore for {capability_name}({target})")
+                    return {
+                        "capability": capability_name,
+                        "target": target,
+                        "status": "cancelled",
+                        "error": "Task was stopped while paused",
+                        "attempts": 0,
+                    }
             
             logger.info(f"Task {asset_index} acquired semaphore, starting {capability_name}({target})")
             
@@ -513,9 +568,15 @@ class ExecutionEngine:
             "port_range": parameters.get("port_range", "1-65535"),
         })
         
+        data = result.get("data", {})
+        
+        # 如果主机不可达，抛出异常（会被重试机制捕获并标记为失败）
+        if data.get("host_status") == "down":
+            raise ValueError(f"主机 {data.get('target')} 不可达")
+        
         # 包含 metadata 以便后续检查端口范围
         return {
-            **result.get("data", {}),
+            **data,
             "metadata": result.get("metadata", {}),
         }
     

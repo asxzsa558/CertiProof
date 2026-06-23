@@ -48,31 +48,58 @@ class Orchestrator:
         self.task_status: Dict[str, str] = {}  # running/paused/stopped
         self.active_tasks: Dict[str, asyncio.Task] = {}  # asyncio Task 引用
     
-    def pause_task(self, task_id: str) -> bool:
+    async def pause_task(self, task_id: str) -> bool:
         """暂停任务"""
         if task_id in self.task_status and self.task_status[task_id] == "running":
             self.task_status[task_id] = "paused"
             logger.info(f"Task {task_id} paused")
+            
+            try:
+                from app.api.websocket import broadcast_agent_status
+                await broadcast_agent_status(task_id, {
+                    "task_id": task_id,
+                    "type": "task_paused",
+                    "status": "paused",
+                })
+            except Exception as e:
+                logger.error(f"Failed to broadcast pause: {e}")
+            
             return True
         return False
     
-    def resume_task(self, task_id: str) -> bool:
+    async def resume_task(self, task_id: str) -> bool:
         """恢复任务"""
         if task_id in self.task_status and self.task_status[task_id] == "paused":
             self.task_status[task_id] = "running"
             logger.info(f"Task {task_id} resumed")
+            
+            try:
+                from app.api.websocket import broadcast_agent_status
+                await broadcast_agent_status(task_id, {
+                    "task_id": task_id,
+                    "type": "task_resumed",
+                    "status": "running",
+                })
+            except Exception as e:
+                logger.error(f"Failed to broadcast resume: {e}")
+            
             return True
         return False
     
-    def stop_task(self, task_id: str) -> bool:
+    async def stop_task(self, task_id: str) -> bool:
         """停止任务"""
         if task_id in self.task_status:
             self.task_stop_flags[task_id] = True
             self.task_status[task_id] = "stopped"
             
-            # 取消 asyncio Task
             if task_id in self.active_tasks:
                 self.active_tasks[task_id].cancel()
+            
+            try:
+                from app.api.websocket import broadcast_agent_failed
+                await broadcast_agent_failed(task_id, "任务已停止")
+            except Exception as e:
+                logger.error(f"Failed to broadcast stop: {e}")
             
             logger.info(f"Task {task_id} stopped")
             return True
@@ -95,6 +122,7 @@ class Orchestrator:
         db: Optional[AsyncSession] = None,
         on_agent_status: Optional[Callable] = None,
         on_agent_complete: Optional[Callable] = None,
+        thread_id: int = None,
     ) -> dict:
         """
         处理用户输入 - AI 驱动意图识别和能力编排
@@ -122,7 +150,7 @@ class Orchestrator:
             }
         
         # 1. 构建上下文
-        context_manager = ContextManager(db, user_id, project_id)
+        context_manager = ContextManager(db, user_id, project_id, thread_id)
         context = await context_manager.build_context()
         
         if asset:
@@ -177,6 +205,8 @@ class Orchestrator:
                 db=db,
                 context_manager=context_manager,
                 ai_response=response,
+                user_input=user_input,
+                thread_id=thread_id,
             ))
             logger.info(f"Async task {task_id} created successfully")
             
@@ -204,6 +234,8 @@ class Orchestrator:
         db: AsyncSession,
         context_manager: ContextManager,
         ai_response: str = "",
+        user_input: str = "",
+        thread_id: int = None,
     ):
         """异步执行计划，完成后用 AI 生成结果描述"""
         # 初始化任务控制状态
@@ -212,6 +244,14 @@ class Orchestrator:
         
         # 创建停止检查回调
         def check_stop():
+            return self.is_task_stopped(task_id)
+        
+        # 创建暂停检查回调（异步等待直到恢复或停止）
+        async def wait_if_paused():
+            while self.task_status.get(task_id) == "paused":
+                if self.is_task_stopped(task_id):
+                    return True
+                await asyncio.sleep(0.5)
             return self.is_task_stopped(task_id)
         
         # 创建新的数据库会话用于异步任务
@@ -257,7 +297,7 @@ class Orchestrator:
                     pass
                 
                 # 创建新的上下文管理器使用新的数据库会话
-                async_context_manager = ContextManager(async_db, user_id, project_id)
+                async_context_manager = ContextManager(async_db, user_id, project_id, thread_id)
                 
                 # 检测是否为多资产扫描
                 is_multi_asset = self._is_multi_asset_scan(plan)
@@ -276,6 +316,7 @@ class Orchestrator:
                         max_concurrent=5,
                         max_retries=3,
                         check_stop=check_stop,
+                        wait_if_paused=wait_if_paused,
                     )
                 else:
                     # 单资产串行执行
@@ -287,6 +328,8 @@ class Orchestrator:
                         context_manager=async_context_manager,
                         task_id=task_id,
                         progress_callback=self._update_task_progress,
+                        check_stop=check_stop,
+                        wait_if_paused=wait_if_paused,
                     )
                 
                 # 提取扫描结果
@@ -322,6 +365,11 @@ class Orchestrator:
                         async_context_manager, plan, execution_result, scan_results
                     )
                 
+                # 记录用户记忆
+                await self._record_user_memory(
+                    async_context_manager, user_input, execution_result
+                )
+                
                 # 记录完成的任务
                 self.completed_tasks.append({
                     "task_id": task_id,
@@ -353,8 +401,11 @@ class Orchestrator:
                 
                 logger.info(f"Task {task_id} completed: {result_description[:100]}")
                 
-            except Exception as e:
-                logger.error(f"Task {task_id} failed: {str(e)}", exc_info=True)
+            except (Exception, asyncio.CancelledError) as e:
+                if isinstance(e, asyncio.CancelledError):
+                    logger.info(f"Task {task_id} was cancelled")
+                else:
+                    logger.error(f"Task {task_id} failed: {str(e)}", exc_info=True)
                 
                 # 记录失败
                 self.completed_tasks.append({
@@ -589,6 +640,35 @@ class Orchestrator:
         except Exception as e:
             logger.warning(f"Failed to record project memory: {e}")
     
+    async def _record_user_memory(
+        self,
+        context_manager: ContextManager,
+        user_input: str,
+        execution_result: Dict,
+    ):
+        """从用户交互中提取偏好，记录到用户记忆"""
+        try:
+            scan_capabilities = ["scan_ports", "scan_ssl", "scan_vulnerabilities",
+                                 "scan_weak_passwords", "full_compliance_scan"]
+            executed_scans = [s for s in execution_result.get("results", []) 
+                             if s.get("capability") in scan_capabilities and s.get("status") == "success"]
+            
+            if executed_scans:
+                targets = [s.get("target", "") for s in executed_scans if s.get("target")]
+                if targets:
+                    await context_manager.add_user_memory(
+                        memory_type="scan_targets",
+                        content=f"常用扫描目标: {', '.join(set(targets))}",
+                    )
+            
+            if "创建项目" in user_input or "create_project" in str(execution_result):
+                await context_manager.add_user_memory(
+                    memory_type="preferences",
+                    content="用户倾向于创建新项目进行管理",
+                )
+        except Exception as e:
+            logger.warning(f"Failed to record user memory: {e}")
+    
     async def _generate_result_description(
         self,
         execution_result: Dict,
@@ -626,16 +706,24 @@ class Orchestrator:
                 {"role": "user", "content": prompt},
             ]
             
-            response = await self.ai_engine._call_llm_direct(db, messages)
-            description = response.get("content", "").strip()
-            
-            # 清理  标签
-            import re
-            description = re.sub(r'<think>.*?</think>', '', description, flags=re.DOTALL).strip()
-            
-            if description:
-                return description
-            else:
+            import asyncio
+            try:
+                response = await asyncio.wait_for(
+                    self.ai_engine._call_llm_direct(db, messages),
+                    timeout=45.0
+                )
+                description = response.get("content", "").strip()
+                
+                # 清理 <think> 标签
+                import re
+                description = re.sub(r'<think>.*?</think>', '', description, flags=re.DOTALL).strip()
+                
+                if description:
+                    return description
+                else:
+                    return self._generate_fallback_description(execution_result)
+            except asyncio.TimeoutError:
+                logger.warning("Result description LLM timed out (45s), using fallback")
                 return self._generate_fallback_description(execution_result)
             
         except Exception as e:
@@ -650,19 +738,28 @@ class Orchestrator:
         
         parts = []
         for result in results:
-            if result.get("status") != "success":
-                continue
-            
+            status = result.get("status")
             capability = result.get("capability")
+            target = result.get("target", "")
             data = result.get("result", {})
+            
+            if status != "success":
+                error = result.get("error", "未知错误")
+                target_str = f"({target})" if target else ""
+                parts.append(f"{capability}{target_str}: 失败 - {error}")
+                continue
             
             if capability == "scan_ports":
                 open_ports = data.get("open_ports", [])
+                host_status = data.get("host_status", "unknown")
+                target_str = f"({target})" if target else ""
                 if open_ports:
                     port_list = ", ".join([f"{p['port']}/{p.get('protocol', 'tcp')} ({p.get('service', 'unknown')})" for p in open_ports])
-                    parts.append(f"端口扫描：发现 {len(open_ports)} 个开放端口：{port_list}")
+                    parts.append(f"端口扫描{target_str}: 主机可达，发现 {len(open_ports)} 个开放端口：{port_list}")
+                elif host_status == "up":
+                    parts.append(f"端口扫描{target_str}: 主机可达，未发现开放端口")
                 else:
-                    parts.append("端口扫描：未发现开放端口")
+                    parts.append(f"端口扫描{target_str}: 主机状态未知，未发现开放端口")
             
             elif capability == "scan_ssl":
                 issues = data.get("issues", [])
@@ -717,20 +814,31 @@ class Orchestrator:
         
         parts = []
         for result in results:
-            if result.get("status") != "success":
-                continue
-            
+            status = result.get("status")
             capability = result.get("capability")
+            target = result.get("target", "")
             data = result.get("result", {})
+            
+            if status != "success":
+                error = result.get("error", "未知错误")
+                target_str = f"({target})" if target else ""
+                parts.append(f"扫描失败：{capability}{target_str} - {error}")
+                continue
             
             if capability == "scan_ports":
                 open_ports = data.get("open_ports", [])
+                host_status = data.get("host_status", "unknown")
+                target_str = f"({target})" if target else ""
                 if open_ports:
-                    parts.append(f"发现 {len(open_ports)} 个开放端口：")
+                    parts.append(f"端口扫描{target_str}: 主机可达，发现 {len(open_ports)} 个开放端口：")
                     for port in open_ports[:5]:
                         parts.append(f"  - {port['port']}/{port.get('protocol', 'tcp')}: {port.get('service', 'unknown')}")
                     if len(open_ports) > 5:
                         parts.append(f"  ... 还有 {len(open_ports) - 5} 个")
+                elif host_status == "up":
+                    parts.append(f"端口扫描{target_str}: 主机可达，未发现开放端口")
+                else:
+                    parts.append(f"端口扫描{target_str}: 主机状态未知")
             
             elif capability == "view_open_ports":
                 open_ports = data.get("open_ports", [])
@@ -764,18 +872,51 @@ class Orchestrator:
         return "\n".join(lines)
     
     def _extract_scan_results_from_execution(self, execution_result: dict) -> dict:
-        """从执行结果中提取扫描结果"""
+        """从执行结果中提取扫描结果
+        
+        判断逻辑（基于实际扫描结果，不依赖 nmap 的主机检测）：
+        - 有开放端口 → success（主机确实可达）
+        - 无开放端口但扫描完成 → warning（可能不可达，或无服务）
+        - 扫描超时/失败 → failed
+        """
         results = {
             "open_ports": [],
             "vulnerabilities": [],
             "ssl_issues": [],
             "compliance_score": None,
+            "asset_results": {},  # 按资产分组的结果
         }
         
         for result in execution_result.get("results", []):
-            if result.get("status") == "success":
-                data = result.get("result", {})
+            target = result.get("target", "unknown")
+            status = result.get("status")
+            data = result.get("result", {})
+            error = result.get("error")
+            
+            # 初始化资产结果
+            if target not in results["asset_results"]:
+                results["asset_results"][target] = {
+                    "status": status,
+                    "result": {},
+                    "error": error,
+                }
+            
+            if status == "success":
+                # 更新资产状态
+                results["asset_results"][target]["status"] = "success"
+                results["asset_results"][target]["result"] = data
                 
+                # 判断显示状态：基于实际扫描结果，不依赖 host_status
+                open_ports = data.get("open_ports", [])
+                
+                if len(open_ports) > 0:
+                    # 有开放端口 → 主机确实可达
+                    results["asset_results"][target]["display_status"] = "success"
+                else:
+                    # 无开放端口 → 可能不可达，或防火墙过滤，或无服务
+                    results["asset_results"][target]["display_status"] = "warning"
+                
+                # 合并到全局结果（保持向后兼容）
                 if "open_ports" in data:
                     results["open_ports"].extend(data["open_ports"])
                 if "findings" in data:
@@ -784,6 +925,11 @@ class Orchestrator:
                     results["ssl_issues"].extend(data["issues"])
                 if "compliance_score" in data:
                     results["compliance_score"] = data["compliance_score"]
+            else:
+                # 失败的情况（扫描超时、网络错误等）
+                results["asset_results"][target]["status"] = "failed"
+                results["asset_results"][target]["display_status"] = "failed"
+                results["asset_results"][target]["error"] = error
         
         return results
     

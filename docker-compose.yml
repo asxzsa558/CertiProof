@@ -93,6 +93,8 @@ services:
       context: ./mcp-servers/security-tools
       dockerfile: Dockerfile
     container_name: certiproof-security-tools
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     networks:
       - certiproof-net

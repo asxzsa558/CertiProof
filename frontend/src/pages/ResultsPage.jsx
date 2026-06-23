@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Layout, Card, Table, Tag, Space, Button, Typography, Spin, Empty, Progress, Select } from 'antd'
+import { Layout, Card, Table, Tag, Space, Button, Typography, Spin, Empty, Progress, Select, Popconfirm, message } from 'antd'
 import { 
   ArrowLeftOutlined, 
   ScanOutlined, 
@@ -8,6 +8,7 @@ import {
   CloseCircleOutlined,
   WarningOutlined,
   ClockCircleOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import './ResultsPage.css'
@@ -73,6 +74,17 @@ function ResultsPage() {
   const filteredTasks = statusFilter === 'all' 
     ? scanTasks 
     : scanTasks.filter(t => t.status === statusFilter)
+
+  const handleDeleteScan = async (scanTaskId) => {
+    try {
+      await api.delete(`/results/scans/${scanTaskId}`)
+      message.success('扫描任务已删除')
+      fetchData()
+    } catch (error) {
+      console.error('Failed to delete scan:', error)
+      message.error(error.response?.data?.detail || '删除失败')
+    }
+  }
 
   const columns = [
     {
@@ -160,12 +172,26 @@ function ResultsPage() {
       title: '操作',
       key: 'actions',
       render: (_, record) => (
-        <Button 
-          type="link" 
-          onClick={() => navigate(`/projects/${projectId}/results/${record.id}`)}
-        >
-          查看详情
-        </Button>
+        <Space>
+          <Button 
+            type="link" 
+            onClick={() => navigate(`/projects/${projectId}/results/${record.id}`)}
+          >
+            查看详情
+          </Button>
+          <Popconfirm
+            title="确认删除"
+            description="删除后无法恢复，确定要删除这个扫描任务吗？"
+            onConfirm={() => handleDeleteScan(record.id)}
+            okText="确定"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+          >
+            <Button type="link" danger icon={<DeleteOutlined />}>
+              删除
+            </Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ]

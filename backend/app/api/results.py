@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from typing import List
 
 from app.core.database import get_db
@@ -194,3 +194,53 @@ async def get_evidence(
         raise HTTPException(status_code=403, detail="Access denied")
     
     return evidence
+
+
+@router.delete("/scans/{scan_task_id}")
+async def delete_scan_task(
+    scan_task_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除扫描任务及其关联数据"""
+    # 获取扫描任务
+    result = await db.execute(
+        select(ScanTask).where(ScanTask.id == scan_task_id)
+    )
+    scan_task = result.scalar_one_or_none()
+    
+    if not scan_task:
+        raise HTTPException(status_code=404, detail="Scan task not found")
+    
+    # 验证项目属于当前用户
+    result = await db.execute(
+        select(Project).where(Project.id == scan_task.project_id, Project.user_id == current_user.id)
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # 删除关联的 evidences（通过 findings）
+    result = await db.execute(
+        select(Finding).where(Finding.scan_task_id == scan_task_id)
+    )
+    findings = result.scalars().all()
+    
+    for finding in findings:
+        await db.execute(
+            delete(Evidence).where(Evidence.finding_id == finding.id)
+        )
+    
+    # 删除关联的 findings
+    await db.execute(
+        delete(Finding).where(Finding.scan_task_id == scan_task_id)
+    )
+    
+    # 删除扫描任务
+    await db.execute(
+        delete(ScanTask).where(ScanTask.id == scan_task_id)
+    )
+    
+    await db.commit()
+    
+    return {"message": "扫描任务已删除"}

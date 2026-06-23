@@ -35,7 +35,7 @@ async def pause_task(
     current_user: User = Depends(get_current_user),
 ):
     """暂停任务"""
-    success = orchestrator.pause_task(task_id)
+    success = await orchestrator.pause_task(task_id)
     if not success:
         raise HTTPException(status_code=400, detail="任务无法暂停（可能已完成或已停止）")
     
@@ -52,7 +52,7 @@ async def resume_task(
     current_user: User = Depends(get_current_user),
 ):
     """恢复任务"""
-    success = orchestrator.resume_task(task_id)
+    success = await orchestrator.resume_task(task_id)
     if not success:
         raise HTTPException(status_code=400, detail="任务无法恢复（可能未暂停）")
     
@@ -69,7 +69,7 @@ async def stop_task(
     current_user: User = Depends(get_current_user),
 ):
     """停止任务"""
-    success = orchestrator.stop_task(task_id)
+    success = await orchestrator.stop_task(task_id)
     if not success:
         raise HTTPException(status_code=400, detail="任务无法停止（可能已完成）")
     

@@ -14,7 +14,10 @@ async def proxy_api(request):
     path = request.match_info.get('path', '')
     url = f"{BACKEND_URL}/api/{path}"
     
-    async with aiohttp.ClientSession() as session:
+    # 设置较长的超时时间（180秒），避免 LLM 调用超时
+    timeout = aiohttp.ClientTimeout(total=180)
+    
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.request(
             method=request.method,
             url=url,

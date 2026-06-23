@@ -3,6 +3,7 @@ LLM Service - CertiProof
 Unified LLM interface with multi-provider support and fallback strategy.
 """
 
+import asyncio
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -321,11 +322,33 @@ class LLMService:
         user_id: int,
         messages: List[Dict],
         task_type: str = "chat",
+        timeout: float = 60.0,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        Send chat request with automatic fallback to backup models
+        Send chat request with automatic fallback to backup models.
+        
+        Args:
+            timeout: 整体超时时间（秒），默认 60 秒
         """
+        try:
+            return await asyncio.wait_for(
+                self._chat_with_fallback_impl(db, user_id, messages, task_type, **kwargs),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"LLM call timed out after {timeout}s")
+            raise ValueError(f"LLM call timed out after {timeout}s")
+    
+    async def _chat_with_fallback_impl(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        messages: List[Dict],
+        task_type: str = "chat",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Internal implementation of chat_with_fallback"""
         models = await self.get_available_models(db, task_type)
         
         if not models:

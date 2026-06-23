@@ -30,6 +30,7 @@ class ChatMessage(BaseModel):
     project_id: Optional[int] = None
     asset: Optional[str] = None
     model_id: Optional[int] = None
+    thread_id: Optional[int] = None
 
 
 class ChatResponse(BaseModel):
@@ -132,6 +133,7 @@ async def chat(
             db=db,
             context_manager=None,
             ai_response=response,
+            thread_id=msg.thread_id,
         ))
         
         return ChatResponse(
@@ -158,6 +160,7 @@ async def chat(
         user_id=current_user.id,
         asset=asset,
         db=db,
+        thread_id=msg.thread_id,
     )
     
     return ChatResponse(
@@ -340,3 +343,209 @@ async def scanner_info(current_user: User = Depends(get_current_user)):
         "active_agents": len(orchestrator.active_agents),
         "completed_tasks": len(orchestrator.completed_tasks),
     }
+
+
+# --- Archive Endpoints ---
+
+class ArchiveRequest(BaseModel):
+    title: Optional[str] = None
+
+
+class ArchiveResponse(BaseModel):
+    archive_id: int
+    message: str
+    status: str = "completed"  # "pending" or "completed"
+
+
+@router.post("/archives", response_model=ArchiveResponse)
+async def create_archive(
+    req: ArchiveRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    创建对话归档（异步）
+    
+    1. 立即创建归档记录并删除对话历史
+    2. 后台异步生成 LLM 摘要
+    3. 前端轮询 /archives/{id} 获取完整结果
+    """
+    from app.services.context_manager import ContextManager
+    from app.core.database import AsyncSessionLocal
+    
+    context_manager = ContextManager(db, current_user.id)
+    
+    # 1. 立即创建归档占位记录并删除对话历史
+    archive_id = await context_manager.create_archive_placeholder(title=req.title)
+    
+    if not archive_id:
+        raise HTTPException(status_code=400, detail="没有可归档的对话")
+    
+    # 2. 后台异步生成 LLM 摘要
+    async def generate_summary():
+        async with AsyncSessionLocal() as async_db:
+            cm = ContextManager(async_db, current_user.id)
+            await cm.generate_archive_summary(archive_id)
+    
+    background_tasks.add_task(generate_summary)
+    
+    return ArchiveResponse(
+        archive_id=archive_id,
+        message="归档已创建，正在生成摘要...",
+        status="pending"
+    )
+
+
+@router.get("/archives")
+async def list_archives(
+    project_id: Optional[int] = None,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """列出对话归档"""
+    from app.services.context_manager import ContextManager
+    
+    context_manager = ContextManager(db, current_user.id, project_id=project_id)
+    archives = await context_manager.list_archives(limit=limit)
+    
+    return {"archives": archives, "count": len(archives)}
+
+
+@router.get("/archives/{archive_id}")
+async def get_archive(
+    archive_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取归档详情"""
+    from app.services.context_manager import ContextManager
+    
+    context_manager = ContextManager(db, current_user.id)
+    archive = await context_manager.get_archive(archive_id)
+    
+    if not archive:
+        raise HTTPException(status_code=404, detail="归档不存在")
+    
+    return archive
+
+
+@router.delete("/archives/{archive_id}")
+async def delete_archive(
+    archive_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除对话归档"""
+    from app.services.context_manager import ContextManager
+    
+    context_manager = ContextManager(db, current_user.id)
+    success = await context_manager.delete_archive(archive_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="归档不存在")
+    
+    return {"message": "归档已删除"}
+
+
+# --- Thread Endpoints ---
+
+class ThreadRequest(BaseModel):
+    title: Optional[str] = None
+    parent_thread_id: Optional[int] = None
+
+
+class ThreadResponse(BaseModel):
+    thread_id: int
+    message: str
+
+
+@router.post("/threads", response_model=ThreadResponse)
+async def create_thread(
+    req: ThreadRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """创建新的对话线程"""
+    from app.services.context_manager import ContextManager
+    
+    context_manager = ContextManager(db, current_user.id)
+    thread_id = await context_manager.create_thread(
+        title=req.title,
+        parent_thread_id=req.parent_thread_id
+    )
+    
+    return ThreadResponse(
+        thread_id=thread_id,
+        message="线程创建成功"
+    )
+
+
+@router.get("/threads")
+async def list_threads(
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """列出对话线程"""
+    from app.services.context_manager import ContextManager
+    
+    context_manager = ContextManager(db, current_user.id)
+    threads = await context_manager.list_threads(limit=limit)
+    
+    return {"threads": threads, "count": len(threads)}
+
+
+@router.get("/threads/{thread_id}")
+async def get_thread(
+    thread_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取线程详情"""
+    from app.services.context_manager import ContextManager
+    
+    context_manager = ContextManager(db, current_user.id)
+    thread = await context_manager.get_thread(thread_id)
+    
+    if not thread:
+        raise HTTPException(status_code=404, detail="线程不存在")
+    
+    return thread
+
+
+@router.delete("/threads/{thread_id}")
+async def delete_thread(
+    thread_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除对话线程"""
+    from app.services.context_manager import ContextManager
+    
+    context_manager = ContextManager(db, current_user.id)
+    success = await context_manager.delete_thread(thread_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="线程不存在")
+    
+    return {"message": "线程已删除"}
+
+
+@router.post("/threads/{thread_id}/continue")
+async def continue_from_thread(
+    thread_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """从指定线程接续上下文"""
+    from app.services.context_manager import ContextManager
+    
+    context_manager = ContextManager(db, current_user.id)
+    result = await context_manager.continue_from_thread(thread_id)
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="线程不存在")
+    
+    return result
