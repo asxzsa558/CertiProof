@@ -1,20 +1,24 @@
-.logo-3d-container {
-  perspective: 200px;
+.logo-container {
   display: inline-block;
+  position: relative;
 }
 
-.logo-3d {
+.logo-img {
   width: 100%;
   height: 100%;
   animation: logo-spin 8s linear infinite;
   transform-style: preserve-3d;
-  filter: drop-shadow(0 0 8px rgba(197, 165, 90, 0.4));
-  transition: filter 0.3s ease;
+  filter: drop-shadow(0 0 6px rgba(197, 165, 90, 0.5))
+          drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+  transition: filter 0.3s ease, transform 0.3s ease;
 }
 
-.logo-3d-container:hover .logo-3d {
+.logo-container:hover .logo-img {
   animation-duration: 4s;
-  filter: drop-shadow(0 0 16px rgba(197, 165, 90, 0.7));
+  filter: drop-shadow(0 0 14px rgba(197, 165, 90, 0.8))
+          drop-shadow(0 0 28px rgba(212, 175, 55, 0.4))
+          drop-shadow(0 2px 6px rgba(0, 0, 0, 0.4));
+  transform: scale(1.05);
 }
 
 @keyframes logo-spin {

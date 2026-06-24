@@ -5,23 +5,56 @@
       <stop offset="50%" style="stop-color:#C5A55A"/>
       <stop offset="100%" style="stop-color:#B8941F"/>
     </linearGradient>
+    <linearGradient id="goldGradBright" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#E8C547"/>
+      <stop offset="50%" style="stop-color:#D4AF37"/>
+      <stop offset="100%" style="stop-color:#C5A55A"/>
+    </linearGradient>
     <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" style="stop-color:#1A3A6B"/>
+      <stop offset="50%" style="stop-color:#0B1D3A"/>
+      <stop offset="100%" style="stop-color:#050E1F"/>
+    </linearGradient>
+    <linearGradient id="innerBlue" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#0F2447"/>
       <stop offset="100%" style="stop-color:#0B1D3A"/>
     </linearGradient>
   </defs>
-  <circle cx="100" cy="100" r="96" fill="#0B1D3A" stroke="url(#goldGrad)" stroke-width="3"/>
-  <circle cx="100" cy="100" r="88" fill="none" stroke="url(#goldGrad)" stroke-width="1" opacity="0.5"/>
-  <path id="topArc" d="M 30,100 a 70,70 0 0,1 140,0" fill="none"/>
-  <path id="bottomArc" d="M 170,100 a 70,70 0 0,1 -140,0" fill="none"/>
-  <text fill="url(#goldGrad)" font-family="Georgia, 'Times New Roman', serif" font-size="11" font-weight="700" letter-spacing="4">
+
+  <!-- 最外层金色厚边 -->
+  <circle cx="100" cy="100" r="98" fill="none" stroke="url(#goldGrad)" stroke-width="4"/>
+  <!-- 次外层细金线 -->
+  <circle cx="100" cy="100" r="93" fill="none" stroke="url(#goldGradBright)" stroke-width="1.5" opacity="0.7"/>
+  <!-- 内层深蓝填充（让 Logo 有厚度感的关键） -->
+  <circle cx="100" cy="100" r="91" fill="url(#innerBlue)"/>
+  <!-- 内圈金色细线（增加层次） -->
+  <circle cx="100" cy="100" r="84" fill="none" stroke="url(#goldGrad)" stroke-width="1.2" opacity="0.6"/>
+  <!-- 最内层装饰金线 -->
+  <circle cx="100" cy="100" r="80" fill="none" stroke="url(#goldGrad)" stroke-width="0.8" opacity="0.4"/>
+
+  <!-- 上弧文字路径 -->
+  <path id="topArc" d="M 35,100 a 65,65 0 0,1 130,0" fill="none"/>
+  <!-- 下弧文字路径 -->
+  <path id="bottomArc" d="M 165,100 a 65,65 0 0,1 -130,0" fill="none"/>
+
+  <!-- 上弧文字 VERISURE -->
+  <text fill="url(#goldGradBright)" font-family="Georgia, 'Times New Roman', serif" font-size="13" font-weight="700" letter-spacing="3.5">
     <textPath href="#topArc" startOffset="50%" text-anchor="middle">VERISURE</textPath>
   </text>
-  <text fill="url(#goldGrad)" font-family="Georgia, 'Times New Roman', serif" font-size="8" letter-spacing="3">
+  <!-- 下弧文字 INTELLIGENCE -->
+  <text fill="url(#goldGrad)" font-family="Georgia, 'Times New Roman', serif" font-size="9" font-weight="600" letter-spacing="2.5">
     <textPath href="#bottomArc" startOffset="50%" text-anchor="middle">INTELLIGENCE</textPath>
   </text>
-  <path d="M100,55 L130,70 L130,105 C130,125 115,140 100,148 C85,140 70,125 70,105 L70,70 Z" fill="url(#shieldGrad)" stroke="url(#goldGrad)" stroke-width="2"/>
-  <path d="M100,62 L125,75 L125,103 C125,120 112,134 100,141 C88,134 75,120 75,103 L75,75 Z" fill="none" stroke="url(#goldGrad)" stroke-width="0.5" opacity="0.4"/>
-  <polyline points="85,100 95,112 118,85" fill="none" stroke="url(#goldGrad)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="100" cy="100" r="96" fill="none" stroke="url(#goldGrad)" stroke-width="0.5" opacity="0.2"/>
+
+  <!-- 盾牌 - 实心填充，有厚度感 -->
+  <path d="M100,52 L132,68 L132,108 C132,130 116,146 100,154 C84,146 68,130 68,108 L68,68 Z" fill="url(#shieldGrad)" stroke="url(#goldGradBright)" stroke-width="2.5"/>
+  <!-- 盾牌内边高光（增加立体感） -->
+  <path d="M100,58 L126,72 L126,106 C126,124 113,138 100,145 C87,138 74,124 74,106 L74,72 Z" fill="none" stroke="url(#goldGrad)" stroke-width="0.8" opacity="0.5"/>
+  <!-- 盾牌高光（左上） -->
+  <path d="M100,56 L128,70 L128,100" fill="none" stroke="url(#goldGradBright)" stroke-width="1" opacity="0.4"/>
+
+  <!-- 对勾 - 加粗，更醒目 -->
+  <polyline points="84,100 95,113 120,82" fill="none" stroke="url(#goldGradBright)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 对勾高光 -->
+  <polyline points="84,100 95,113 120,82" fill="none" stroke="#E8C547" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
 </svg>
