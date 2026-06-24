@@ -28,8 +28,8 @@
 }
 
 .workspace-logo {
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   background: #0B1D3A;
   border: 2px solid #C5A55A;
@@ -41,7 +41,7 @@
 }
 
 .workspace-name {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 700;
   font-family: Georgia, 'Times New Roman', serif;
   color: #C5A55A;

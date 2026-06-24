@@ -344,7 +344,7 @@ function ChatPage() {
       >
         <div className="sider-header">
           <div className="sider-logo">
-            <img src="/verisure-logo.svg" alt="VeriSure" style={{ width: 40, height: 40 }} />
+            <img src="/verisure-logo.svg" alt="VeriSure" style={{ width: 56, height: 56 }} />
             <span className="logo-text">VeriSure</span>
           </div>
         </div>

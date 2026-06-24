@@ -89,8 +89,8 @@
 }
 
 .logo-mark {
-  width: 52px;
-  height: 52px;
+  width: 72px;
+  height: 72px;
   background: #0B1D3A;
   border-radius: 50%;
   border: 2px solid #C5A55A;
@@ -104,13 +104,13 @@
   content: '✓';
   position: relative;
   color: #C5A55A;
-  font-size: 24px;
+  font-size: 32px;
   font-weight: bold;
   z-index: 1;
 }
 
 .logo-text {
-  font-size: 2rem;
+  font-size: 2.25rem;
   font-weight: 700;
   font-family: Georgia, 'Times New Roman', serif;
   background: linear-gradient(135deg, #D4AF37 0%, #C5A55A 50%, #B8941F 100%);

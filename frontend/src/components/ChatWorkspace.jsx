@@ -1682,7 +1682,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       <div className="workspace-header">
         <div className="workspace-title">
           <div className="workspace-logo">
-            <img src="/verisure-logo.svg" alt="VeriSure" style={{ width: 48, height: 48 }} />
+            <img src="/verisure-logo.svg" alt="VeriSure" style={{ width: 56, height: 56 }} />
           </div>
           <div>
             <div className="workspace-name">VeriSure Agent</div>
