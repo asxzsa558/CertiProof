@@ -16,12 +16,14 @@ import {
   EditOutlined,
   ArrowLeftOutlined,
   AppstoreOutlined,
+  UpOutlined,
+  DownOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../store/authStore'
 import ChatWorkspace from '../components/ChatWorkspace'
 import ModelSelector from '../components/ModelSelector'
 import AssessmentProgress from '../components/AssessmentProgress'
-import VeriSureLogo from '../components/VeriSureLogo'
+import VeriSureLogo3D from '../components/VeriSureLogo3D'
 import api from '../services/api'
 import './ChatPage.css'
 
@@ -45,6 +47,7 @@ function ChatPage() {
   const [assetForm] = Form.useForm()
   const [managerAssets, setManagerAssets] = useState([])
   const [batchAssets, setBatchAssets] = useState('')
+  const [assetsExpanded, setAssetsExpanded] = useState(true)
 
   useEffect(() => {
     fetchProjects()
@@ -345,7 +348,7 @@ function ChatPage() {
       >
         <div className="sider-header">
           <div className="sider-logo">
-            <VeriSureLogo size={56} />
+            <VeriSureLogo3D size={56} />
             <span className="logo-text">VeriSure</span>
           </div>
         </div>
@@ -436,35 +439,49 @@ function ChatPage() {
                         }}
                         className="add-asset-btn"
                       />
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={assetsExpanded ? <UpOutlined /> : <DownOutlined />}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setAssetsExpanded(!assetsExpanded)
+                        }}
+                        className="toggle-assets-btn"
+                      />
                     </div>
-                    {assets.length === 0 ? (
-                      <div className="empty-assets-inline">
-                        <Button type="link" size="small" onClick={(e) => { e.stopPropagation(); handleNewAsset() }}>
-                          + 添加资产
-                        </Button>
-                      </div>
-                    ) : (
-                      assets.slice(0, 5).map((asset) => (
-                        <div key={asset.id} className="asset-item-inline" onClick={(e) => e.stopPropagation()}>
-                          <Tag color={asset.asset_type === 'ip' ? 'blue' : asset.asset_type === 'domain' ? 'green' : 'purple'} className="asset-type-tag">
-                            {asset.asset_type === 'ip' ? 'IP' : asset.asset_type === 'domain' ? '域名' : '云'}
-                          </Tag>
-                          <span className="asset-value">{asset.value}</span>
-                          <Popconfirm
-                            title="确定删除？"
-                            onConfirm={() => handleDeleteAsset(asset.id)}
-                            okText="删除"
-                            cancelText="取消"
-                          >
-                            <Button type="text" size="small" icon={<DeleteOutlined />} className="delete-asset-btn" />
-                          </Popconfirm>
-                        </div>
-                      ))
-                    )}
-                    {assets.length > 5 && (
-                      <div className="more-assets-hint" onClick={(e) => { e.stopPropagation(); handleOpenManager(project) }}>
-                        还有 {assets.length - 5} 个资产...
-                      </div>
+                    {assetsExpanded && (
+                      <>
+                        {assets.length === 0 ? (
+                          <div className="empty-assets-inline">
+                            <Button type="link" size="small" onClick={(e) => { e.stopPropagation(); handleNewAsset() }}>
+                              + 添加资产
+                            </Button>
+                          </div>
+                        ) : (
+                          assets.slice(0, 5).map((asset) => (
+                            <div key={asset.id} className="asset-item-inline" onClick={(e) => e.stopPropagation()}>
+                              <Tag color={asset.asset_type === 'ip' ? 'blue' : asset.asset_type === 'domain' ? 'green' : 'purple'} className="asset-type-tag">
+                                {asset.asset_type === 'ip' ? 'IP' : asset.asset_type === 'domain' ? '域名' : '云'}
+                              </Tag>
+                              <span className="asset-value">{asset.value}</span>
+                              <Popconfirm
+                                title="确定删除？"
+                                onConfirm={() => handleDeleteAsset(asset.id)}
+                                okText="删除"
+                                cancelText="取消"
+                              >
+                                <Button type="text" size="small" icon={<DeleteOutlined />} className="delete-asset-btn" />
+                              </Popconfirm>
+                            </div>
+                          ))
+                        )}
+                        {assets.length > 5 && (
+                          <div className="more-assets-hint" onClick={(e) => { e.stopPropagation(); handleOpenManager(project) }}>
+                            还有 {assets.length - 5} 个资产...
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

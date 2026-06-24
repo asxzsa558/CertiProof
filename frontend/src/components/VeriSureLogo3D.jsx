@@ -1,0 +1,98 @@
+import { useRef } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
+import { Float, Environment } from '@react-three/drei'
+import * as THREE from 'three'
+
+function Shield() {
+  const meshRef = useRef()
+  
+  useFrame((state, delta) => {
+    if (meshRef.current) {
+      meshRef.current.rotation.y += delta * 0.3
+    }
+  })
+
+  const shieldShape = new THREE.Shape()
+  shieldShape.moveTo(0, 0.8)
+  shieldShape.lineTo(0.6, 0.5)
+  shieldShape.lineTo(0.6, -0.2)
+  shieldShape.quadraticCurveTo(0.6, -0.6, 0, -0.8)
+  shieldShape.quadraticCurveTo(-0.6, -0.6, -0.6, -0.2)
+  shieldShape.lineTo(-0.6, 0.5)
+  shieldShape.lineTo(0, 0.8)
+
+  const extrudeSettings = {
+    depth: 0.15,
+    bevelEnabled: true,
+    bevelThickness: 0.02,
+    bevelSize: 0.02,
+    bevelSegments: 3,
+  }
+
+  return (
+    <group ref={meshRef}>
+      {/* 外圈圆环 */}
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[1, 0.08, 16, 64]} />
+        <meshStandardMaterial 
+          color="#C5A55A" 
+          metalness={0.8} 
+          roughness={0.2}
+        />
+      </mesh>
+
+      {/* 盾牌主体 */}
+      <mesh position={[0, 0, 0]}>
+        <extrudeGeometry args={[shieldShape, extrudeSettings]} />
+        <meshStandardMaterial 
+          color="#0B1D3A" 
+          metalness={0.6} 
+          roughness={0.3}
+        />
+      </mesh>
+
+      {/* 对勾 */}
+      <mesh position={[0, 0, 0.1]} rotation={[0, 0, 0]}>
+        <tubeGeometry args={[
+          new THREE.CatmullRomCurve3([
+            new THREE.Vector3(-0.3, 0, 0),
+            new THREE.Vector3(-0.1, -0.25, 0),
+            new THREE.Vector3(0.35, 0.25, 0),
+          ]),
+          20,
+          0.04,
+          8,
+          false
+        ]} />
+        <meshStandardMaterial 
+          color="#C5A55A" 
+          metalness={0.9} 
+          roughness={0.1}
+          emissive="#C5A55A"
+          emissiveIntensity={0.2}
+        />
+      </mesh>
+    </group>
+  )
+}
+
+function VeriSureLogo3D({ size = 56 }) {
+  return (
+    <div style={{ width: size, height: size }}>
+      <Canvas
+        camera={{ position: [0, 0, 3], fov: 50 }}
+        style={{ background: 'transparent' }}
+      >
+        <ambientLight intensity={0.5} />
+        <pointLight position={[10, 10, 10]} intensity={1} />
+        <pointLight position={[-10, -10, -10]} intensity={0.5} />
+        <Float speed={2} rotationIntensity={0.3} floatIntensity={0.3}>
+          <Shield />
+        </Float>
+        <Environment preset="city" />
+      </Canvas>
+    </div>
+  )
+}
+
+export default VeriSureLogo3D

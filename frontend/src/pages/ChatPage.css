@@ -217,6 +217,18 @@
   color: #6366f1 !important;
 }
 
+.toggle-assets-btn {
+  color: rgba(255, 255, 255, 0.4) !important;
+  padding: 0 4px !important;
+  font-size: 10px;
+  height: 20px;
+  margin-left: 2px;
+}
+
+.toggle-assets-btn:hover {
+  color: #C5A55A !important;
+}
+
 .empty-assets-inline {
   padding: 2px 0;
 }

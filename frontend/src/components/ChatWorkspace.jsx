@@ -27,7 +27,7 @@ import {
   RocketOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
-import VeriSureLogo from './VeriSureLogo'
+import VeriSureLogo3D from './VeriSureLogo3D'
 import './ChatWorkspace.css'
 import './ScanAnimation.css'
 
@@ -1682,14 +1682,8 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       {/* Header */}
       <div className="workspace-header">
         <div className="workspace-title">
-          <div className="workspace-logo">
-            <VeriSureLogo size={56} />
-          </div>
-          <div>
-            <div className="workspace-name">VeriSure Agent</div>
-            <div className="workspace-subtitle">
-              {projectName ? `项目：${projectName}` : '智能合规验证对话'}
-            </div>
+          <div className="workspace-project-name">
+            {projectName || '智能合规验证对话'}
           </div>
         </div>
         <div className="workspace-status">
