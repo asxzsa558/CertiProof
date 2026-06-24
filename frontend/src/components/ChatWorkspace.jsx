@@ -1682,9 +1682,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       {/* Header */}
       <div className="workspace-header">
         <div className="workspace-title">
-          <div className="workspace-project-name">
-            {projectName || '智能合规验证对话'}
-          </div>
+          {/* 项目名称已在 ChatPage.jsx 顶部 Header 显示，此处移除避免重复 */}
         </div>
         <div className="workspace-status">
           <div className="status-indicator">

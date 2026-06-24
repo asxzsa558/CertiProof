@@ -26,17 +26,6 @@
   align-items: center;
 }
 
-.workspace-project-name {
-  font-size: 22px;
-  font-weight: 700;
-  font-family: Georgia, 'Times New Roman', serif;
-  background: linear-gradient(135deg, #D4AF37 0%, #C5A55A 50%, #B8941F 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  letter-spacing: 0.5px;
-}
-
 .workspace-status {
   display: flex;
   align-items: center;

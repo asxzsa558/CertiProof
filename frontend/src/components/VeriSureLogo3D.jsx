@@ -1,6 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { Float } from '@react-three/drei'
 import * as THREE from 'three'
 import VeriSureLogo from './VeriSureLogo'
 
@@ -46,9 +45,11 @@ function Shield() {
       <mesh position={[0, 0, 0]}>
         <extrudeGeometry args={[shieldShape, extrudeSettings]} />
         <meshStandardMaterial 
-          color="#0B1D3A" 
+          color="#1A3A6B" 
           metalness={0.6} 
           roughness={0.3}
+          emissive="#1A3A6B"
+          emissiveIntensity={0.3}
         />
       </mesh>
 
@@ -101,17 +102,15 @@ function VeriSureLogo3D({ size = 56 }) {
   return (
     <div style={{ width: size, height: size }}>
       <Canvas
-        camera={{ position: [0, 0, 3], fov: 50 }}
+        camera={{ position: [0, 0, 2.5], fov: 60 }}
         style={{ background: 'transparent' }}
         onError={() => setWebglSupported(false)}
       >
-        <hemisphereLight args={['#C5A55A', '#0B1D3A', 0.6]} />
-        <pointLight position={[5, 5, 5]} intensity={1} color="#C5A55A" />
-        <pointLight position={[-5, -5, 5]} intensity={0.5} color="#1A3A6B" />
-        <pointLight position={[0, 5, -5]} intensity={0.3} color="#ffffff" />
-        <Float speed={2} rotationIntensity={0.3} floatIntensity={0.3}>
-          <Shield />
-        </Float>
+        <hemisphereLight args={['#C5A55A', '#0B1D3A', 1.0]} />
+        <pointLight position={[5, 5, 5]} intensity={1.5} color="#C5A55A" />
+        <pointLight position={[-5, -5, 5]} intensity={0.8} color="#1A3A6B" />
+        <pointLight position={[0, 5, -5]} intensity={0.5} color="#ffffff" />
+        <Shield />
       </Canvas>
     </div>
   )
