@@ -27,7 +27,7 @@ import {
   RocketOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
-import VeriSureLogo3D from './VeriSureLogo3D'
+import VeriSureLogo from './VeriSureLogo'
 import './ChatWorkspace.css'
 import './ScanAnimation.css'
 
