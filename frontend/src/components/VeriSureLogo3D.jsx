@@ -1,7 +1,8 @@
-import { useRef } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { Float, Environment } from '@react-three/drei'
+import { Float } from '@react-three/drei'
 import * as THREE from 'three'
+import VeriSureLogo from './VeriSureLogo'
 
 function Shield() {
   const meshRef = useRef()
@@ -77,19 +78,40 @@ function Shield() {
 }
 
 function VeriSureLogo3D({ size = 56 }) {
+  const [webglSupported, setWebglSupported] = useState(null)
+
+  useEffect(() => {
+    try {
+      const canvas = document.createElement('canvas')
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl')
+      setWebglSupported(!!gl)
+    } catch (e) {
+      setWebglSupported(false)
+    }
+  }, [])
+
+  if (webglSupported === false) {
+    return <VeriSureLogo size={size} />
+  }
+
+  if (webglSupported === null) {
+    return <div style={{ width: size, height: size }} />
+  }
+
   return (
     <div style={{ width: size, height: size }}>
       <Canvas
         camera={{ position: [0, 0, 3], fov: 50 }}
         style={{ background: 'transparent' }}
+        onError={() => setWebglSupported(false)}
       >
-        <ambientLight intensity={0.5} />
-        <pointLight position={[10, 10, 10]} intensity={1} />
-        <pointLight position={[-10, -10, -10]} intensity={0.5} />
+        <hemisphereLight args={['#C5A55A', '#0B1D3A', 0.6]} />
+        <pointLight position={[5, 5, 5]} intensity={1} color="#C5A55A" />
+        <pointLight position={[-5, -5, 5]} intensity={0.5} color="#1A3A6B" />
+        <pointLight position={[0, 5, -5]} intensity={0.3} color="#ffffff" />
         <Float speed={2} rotationIntensity={0.3} floatIntensity={0.3}>
           <Shield />
         </Float>
-        <Environment preset="city" />
       </Canvas>
     </div>
   )
