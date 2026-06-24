@@ -37,18 +37,18 @@ function Login() {
           <div className="brand-header">
             <div className="logo">
               <div className="logo-mark"></div>
-              <span className="logo-text">CertiProof</span>
+              <span className="logo-text">VeriSure</span>
             </div>
-            <div className="brand-badge">Enterprise Security</div>
+            <div className="brand-badge">Intelligence · Compliance · Assurance</div>
           </div>
           
           <div className="brand-content">
             <h1 className="brand-title">
-              等保合规<br/>
-              <span className="brand-accent">智能平台</span>
+              智能合规<br/>
+              <span className="brand-accent">精准验证</span>
             </h1>
             <p className="brand-description">
-              AI 驱动的自动化合规检测，让安全合规从"纸上谈兵"变成"实战验证"
+              以 AI 驱动的智能验证引擎，为企业构建全链路合规保障体系
             </p>
             
             <div className="brand-metrics">

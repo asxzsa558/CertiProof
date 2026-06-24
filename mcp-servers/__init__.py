@@ -1,1 +1,1 @@
-"""MCP Tool Server Framework - CertiProof"""
+"""MCP Tool Server Framework - VeriSure"""

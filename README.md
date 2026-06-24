@@ -1,4 +1,4 @@
-# CertiProof - 等保合规智能平台
+# VeriSure - 等保合规智能平台
 
 基于 AI Agent + MCP 架构的实战化等保合规自检平台。
 
@@ -41,7 +41,7 @@
 ```bash
 # 克隆项目
 git clone <repository-url>
-cd CertiProof
+cd VeriSure
 
 # 启动所有服务
 docker-compose up -d
@@ -71,7 +71,7 @@ exit
 ## 项目结构
 
 ```
-CertiProof/
+VeriSure/
 ├── backend/                 # FastAPI 后端
 │   ├── app/
 │   │   ├── api/            # API 路由

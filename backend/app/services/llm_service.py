@@ -1,5 +1,5 @@
 """
-LLM Service - CertiProof
+LLM Service - VeriSure
 Unified LLM interface with multi-provider support and fallback strategy.
 """
 

@@ -4,7 +4,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # Application
-    APP_NAME: str = "CertiProof"
+    APP_NAME: str = "VeriSure"
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = True
     API_V1_PREFIX: str = "/api/v1"

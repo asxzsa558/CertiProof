@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 # AI 决策系统提示（精简版）
-AI_DECISION_SYSTEM_PROMPT = """你是 CertiProof 等保合规智能助手。理解用户需求，调用能力完成任务。
+AI_DECISION_SYSTEM_PROMPT = """你是 VeriSure 智能合规验证助手。理解用户需求，调用能力完成任务。
 
 ## 能力列表
 {capabilities}

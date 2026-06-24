@@ -1,6 +1,6 @@
-# CertiProof 产品路线图
+# VeriSure 产品路线图
 
-> 本文档描述 CertiProof 的产品定位、当前状态、目标规划和执行计划。
+> 本文档描述 VeriSure 的产品定位、当前状态、目标规划和执行计划。
 > 技术架构详情请参见 [ARCHITECTURE.md](./ARCHITECTURE.md)
 
 ---
@@ -12,7 +12,7 @@
 **"让等保合规从'纸上谈兵'变成'实战验证'"**
 
 - **传统等保**：配置打勾 = 合规，实际防线无效
-- **CertiProof**：白盒配置 + 黑盒渗透交叉验证，打出"纸上合规"原形
+- **VeriSure**：白盒配置 + 黑盒渗透交叉验证，打出"纸上合规"原形
 
 ### 1.2 目标用户
 
@@ -452,4 +452,4 @@ class RemediationTicket(Base):
 
 **文档版本**: v2.0  
 **最后更新**: 2026-06-24  
-**维护者**: CertiProof Team
+**维护者**: VeriSure Team

@@ -1,6 +1,6 @@
-# CertiProof 技术架构文档
+# VeriSure 技术架构文档
 
-> 本文档描述 CertiProof 的当前技术架构、核心模块设计、数据流和调用链。
+> 本文档描述 VeriSure 的当前技术架构、核心模块设计、数据流和调用链。
 > 产品路线图和执行计划请参见 [ROADMAP.md](./ROADMAP.md)
 
 ---
@@ -11,7 +11,7 @@
 
 **对话式 AI 驱动**：用户用自然语言描述需求，LLM 自主理解意图、规划执行路径、调度能力、生成结果描述。
 
-| 维度 | 传统方式 | CertiProof 方式 |
+| 维度 | 传统方式 | VeriSure 方式 |
 |------|----------|-----------------|
 | 意图识别 | 硬编码意图分类器 | LLM 自主理解语义 |
 | 能力调度 | if-else 分支 | LLM 生成执行计划 |
@@ -125,7 +125,7 @@ async def handle_user_input(user_input, project_id, user_id, db) -> dict:
 
 **Prompt 结构**：
 ```
-你是 CertiProof 等保合规智能助手。
+你是 VeriSure 等保合规智能助手。
 
 ## 能力列表
 {capabilities}  # 动态注入所有能力描述
@@ -508,4 +508,4 @@ const useStore = create((set) => ({
 
 **文档版本**: v1.0  
 **最后更新**: 2026-06-24  
-**维护者**: CertiProof Team
+**维护者**: VeriSure Team

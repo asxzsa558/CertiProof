@@ -59,9 +59,9 @@ function Register() {
           <div className="brand-header">
             <div className="logo">
               <div className="logo-mark"></div>
-              <span className="logo-text">CertiProof</span>
+              <span className="logo-text">VeriSure</span>
             </div>
-            <div className="brand-badge">Enterprise Security</div>
+            <div className="brand-badge">Intelligence · Compliance · Assurance</div>
           </div>
           
           <div className="brand-content">
@@ -70,7 +70,7 @@ function Register() {
               <span className="brand-accent">合规之旅</span>
             </h1>
             <p className="brand-description">
-              注册账户，体验 AI 驱动的等保合规自检平台。快速、智能、专业。
+              注册账户，体验 AI 驱动的智能合规验证平台。快速、精准、专业。
             </p>
             
             <div className="brand-metrics">

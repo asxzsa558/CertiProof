@@ -1,5 +1,5 @@
 """
-Model Configuration API - CertiProof
+Model Configuration API - VeriSure
 API endpoints for managing LLM providers and models.
 """
 

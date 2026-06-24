@@ -103,6 +103,11 @@ class CompleteTaskRequest(BaseModel):
     result: Optional[dict] = None
 
 
+class ExecuteTaskRequest(BaseModel):
+    target: str
+    params: Optional[dict] = None
+
+
 class SkipPhaseRequest(BaseModel):
     reason: str = ""
 
@@ -541,6 +546,45 @@ async def complete_task(
         raise HTTPException(status_code=400, detail=str(e))
     
     return {"message": "Task completed"}
+
+
+@router.post("/tasks/{task_id}/execute")
+async def execute_task(
+    task_id: int,
+    req: ExecuteTaskRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """执行流程任务（调用安全工具）"""
+    from app.services.task_executor import get_task_executor
+    
+    engine = get_flow_engine(db)
+    task = await engine.get_task(task_id)
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    phase = await engine.get_phase(task.phase_id)
+    assessment = await engine.get_assessment(phase.assessment_id)
+    
+    executor = get_task_executor(db)
+    
+    result = await executor.execute_task(
+        task_type=task.task_type,
+        target=req.target,
+        project_id=assessment.project_id,
+        user_id=current_user.id,
+        params=req.params,
+    )
+    
+    if result["status"] == "completed":
+        await engine.complete_task(task_id, result)
+    elif result["status"] == "skipped":
+        pass
+    else:
+        raise HTTPException(status_code=500, detail=result.get("error", "Task execution failed"))
+    
+    return result
 
 
 # ========== Event APIs ==========

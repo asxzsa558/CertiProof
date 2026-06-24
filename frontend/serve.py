@@ -98,8 +98,11 @@ app.router.add_get('/api/v1/ws/{path:.*}', proxy_websocket)
 app.router.add_route('*', '/api/{path:.*}', proxy_api)
 app.router.add_static('/assets/', path=os.path.join(STATIC_DIR, 'assets'), name='assets')
 
-# SPA fallback - 所有其他路由都返回 index.html
 async def spa_fallback(request):
+    path = request.match_info.get('path', '')
+    file_path = os.path.join(STATIC_DIR, path)
+    if os.path.isfile(file_path):
+        return web.FileResponse(file_path)
     return web.FileResponse(os.path.join(STATIC_DIR, 'index.html'))
 
 app.router.add_get('/{path:.*}', spa_fallback)

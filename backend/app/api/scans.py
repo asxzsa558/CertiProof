@@ -1,5 +1,5 @@
 """
-Scan API - CertiProof
+Scan API - VeriSure
 API endpoints for scan task management.
 """
 

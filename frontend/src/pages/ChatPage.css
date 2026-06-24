@@ -30,12 +30,14 @@
 }
 
 .logo-text {
-  font-size: 18px;
+  font-size: 24px;
   font-weight: 700;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  font-family: Georgia, 'Times New Roman', serif;
+  background: linear-gradient(135deg, #D4AF37, #C5A55A, #B8941F);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  letter-spacing: 0.5px;
 }
 
 .sider-actions {

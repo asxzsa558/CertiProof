@@ -144,7 +144,7 @@ async def download_report(
             content=pdf_data,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f"attachment; filename=certiproof_report_{project_id}.pdf"
+                "Content-Disposition": f"attachment; filename=verisure_report_{project_id}.pdf"
             }
         )
     except Exception as e:
@@ -183,7 +183,7 @@ async def download_json_report(
         return JSONResponse(
             content=report_data,
             headers={
-                "Content-Disposition": f"attachment; filename=certiproof_report_{project_id}.json"
+                "Content-Disposition": f"attachment; filename=verisure_report_{project_id}.json"
             }
         )
     except Exception as e:

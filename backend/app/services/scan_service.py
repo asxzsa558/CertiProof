@@ -1,5 +1,5 @@
 """
-Scan Service - CertiProof
+Scan Service - VeriSure
 Business logic for scan task management.
 """
 

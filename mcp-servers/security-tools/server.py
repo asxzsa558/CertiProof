@@ -355,54 +355,77 @@ async def nuclei_scan(params: Dict[str, Any]) -> Dict[str, Any]:
 
 # ============== Hydra 工具 ==============
 
+COMMON_USERNAMES = ["admin", "root", "administrator", "user", "test", "guest"]
+COMMON_PASSWORDS = ["admin", "123456", "password", "root", "admin123", "P@ssw0rd", "test", "12345678"]
+
 async def hydra_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
     """执行 hydra 暴力破解"""
     target = params.get("target")
     service = params.get("service", "ssh")
     port = params.get("port", 22)
+    usernames = params.get("usernames", COMMON_USERNAMES)
+    passwords = params.get("passwords", COMMON_PASSWORDS)
     
-    cmd = [
-        "hydra",
-        "-l", "admin",
-        "-p", "admin",
-        "-s", str(port),
-        target,
-        service,
-    ]
+    found = []
     
-    start_time = time.time()
+    for username in usernames:
+        for password in passwords:
+            cmd = [
+                "hydra",
+                "-l", username,
+                "-p", password,
+                "-s", str(port),
+                "-t", "4",
+                "-F",
+                target,
+                service,
+            ]
+            
+            start_time = time.time()
+            
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
+                
+                output = stdout.decode("utf-8", errors="replace")
+                duration_ms = int((time.time() - start_time) * 1000)
+                
+                if f"[{port}][{service}]" in output and "host:" in output:
+                    found.append({
+                        "username": username,
+                        "password": password,
+                        "service": service,
+                        "port": port,
+                    })
+                    break
+            except asyncio.TimeoutError:
+                continue
+            except Exception:
+                continue
+        
+        if found:
+            break
     
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
-        
-        output = stdout.decode("utf-8", errors="replace")
-        
-        duration_ms = int((time.time() - start_time) * 1000)
-        
-        return {
-            "tool": "hydra_bruteforce",
-            "version": "1.0",
-            "status": "success",
-            "data": {
-                "target": target,
-                "service": service,
-                "port": port,
-                "found": [],
-            },
-            "metadata": {
-                "duration_ms": duration_ms,
-                "scan_time": datetime.utcnow().isoformat(),
-            },
-        }
-    except asyncio.TimeoutError:
-        raise ValueError("hydra scan timeout")
-    except Exception as e:
-        raise ValueError(f"hydra scan error: {e}")
+    return {
+        "tool": "hydra_bruteforce",
+        "version": "1.0",
+        "status": "success",
+        "data": {
+            "target": target,
+            "service": service,
+            "port": port,
+            "found": found,
+            "tested_users": len(usernames),
+            "tested_passwords": len(passwords),
+        },
+        "metadata": {
+            "scan_time": datetime.utcnow().isoformat(),
+        },
+    }
 
 
 # ============== API 端点 ==============

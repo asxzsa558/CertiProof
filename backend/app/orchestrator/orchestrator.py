@@ -702,7 +702,7 @@ class Orchestrator:
             
             # 调用 LLM 生成描述
             messages = [
-                {"role": "system", "content": "你是 CertiProof 等保合规智能助手，负责描述任务执行结果。"},
+                {"role": "system", "content": "你是 VeriSure 智能合规验证助手，负责描述任务执行结果。"},
                 {"role": "user", "content": prompt},
             ]
             

@@ -1,4 +1,4 @@
-// CertiProof Design System - Professional Theme
+// VeriSure Design System - Professional Theme
 
 export const theme = {
   // Brand Colors

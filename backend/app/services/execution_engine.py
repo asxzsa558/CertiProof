@@ -1011,7 +1011,7 @@ class ExecutionEngine:
             if not result.scalar_one_or_none():
                 return {"message": "项目不存在或无权访问"}
         
-        token = f"certiproof-{uuid_mod.uuid4().hex[:16]}"
+        token = f"verisure-{uuid_mod.uuid4().hex[:16]}"
         asset.verification_token = token
         asset.verification_status = VerificationStatus.PENDING
         await db.flush()
@@ -1320,7 +1320,7 @@ class ExecutionEngine:
     async def _show_help(self) -> Dict:
         """显示帮助"""
         return {
-            "message": """我是 CertiProof 等保合规智能助手，可以帮你：
+            "message": """我是 VeriSure 智能合规验证助手，可以帮你：
 
 🔍 **扫描检测**
 - 端口扫描：扫描目标资产的开放端口

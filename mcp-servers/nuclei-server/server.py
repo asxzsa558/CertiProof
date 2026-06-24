@@ -1,5 +1,5 @@
 """
-Nuclei MCP Server - CertiProof
+Nuclei MCP Server - VeriSure
 Exposes nuclei vulnerability scanning as an MCP tool.
 Uses standardized /execute endpoint for gateway integration.
 """

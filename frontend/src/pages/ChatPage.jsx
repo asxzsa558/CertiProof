@@ -344,8 +344,8 @@ function ChatPage() {
       >
         <div className="sider-header">
           <div className="sider-logo">
-            <SafetyCertificateOutlined style={{ fontSize: 20, color: '#6366f1' }} />
-            <span className="logo-text">CertiProof</span>
+            <img src="/verisure-logo.svg" alt="VeriSure" style={{ width: 40, height: 40 }} />
+            <span className="logo-text">VeriSure</span>
           </div>
         </div>
 

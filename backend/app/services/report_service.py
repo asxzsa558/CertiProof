@@ -1,5 +1,5 @@
 """
-Report Service - CertiProof
+Report Service - VeriSure
 Generates PDF compliance reports.
 """
 
@@ -25,6 +25,7 @@ from app.models.project import Project
 from app.models.scan_task import ScanTask
 from app.models.finding import Finding, Severity
 from app.models.evidence import Evidence
+from app.models.assessment import Assessment, PhaseInstance, TaskInstance
 
 
 # Register Chinese font
@@ -94,6 +95,25 @@ async def generate_report(db: AsyncSession, project_id: int) -> io.BytesIO:
     project = result.scalar_one_or_none()
     if not project:
         raise ValueError("Project not found")
+    
+    # Fetch assessment data
+    result = await db.execute(
+        select(Assessment)
+        .where(Assessment.project_id == project_id)
+        .order_by(Assessment.created_at.desc())
+        .limit(1)
+    )
+    assessment = result.scalar_one_or_none()
+    
+    # Fetch phases and tasks if assessment exists
+    phases = []
+    if assessment:
+        result = await db.execute(
+            select(PhaseInstance)
+            .where(PhaseInstance.assessment_id == assessment.id)
+            .order_by(PhaseInstance.order)
+        )
+        phases = result.scalars().all()
     
     # Fetch latest scan
     result = await db.execute(
@@ -174,7 +194,7 @@ async def generate_report(db: AsyncSession, project_id: int) -> io.BytesIO:
     
     # Cover page
     elements.append(Spacer(1, 4*cm))
-    elements.append(Paragraph('CertiProof', title_style))
+    elements.append(Paragraph('VeriSure', title_style))
     elements.append(Spacer(1, 1*cm))
     elements.append(Paragraph('等保合规检测报告', ParagraphStyle(
         'Subtitle',
@@ -212,6 +232,87 @@ async def generate_report(db: AsyncSession, project_id: int) -> io.BytesIO:
         ('LINEBELOW', (0, 0), (-1, -2), 0.5, HexColor('#e2e8f0')),
     ]))
     elements.append(info_table)
+    
+    # Assessment progress section
+    if assessment and phases:
+        elements.append(Spacer(1, 1.5*cm))
+        elements.append(Paragraph('测评流程进度', ParagraphStyle(
+            'SectionTitle',
+            parent=styles['Heading2'],
+            fontName=CHINESE_FONT,
+            fontSize=14,
+            textColor=DARK_BG,
+            alignment=TA_CENTER,
+            spaceAfter=12,
+        )))
+        
+        # Assessment status
+        status_labels = {
+            'not_started': '未开始',
+            'in_progress': '进行中',
+            'paused': '已暂停',
+            'completed': '已完成',
+            'failed': '失败',
+        }
+        assessment_status = status_labels.get(assessment.status, assessment.status)
+        
+        progress_data = [
+            ['测评名称', assessment.name or '等保测评'],
+            ['当前状态', assessment_status],
+            ['总体进度', f"{assessment.progress:.1f}%"],
+            ['完成阶段', f"{assessment.completed_phases} / {assessment.total_phases}"],
+        ]
+        
+        progress_table = Table(progress_data, colWidths=[4*cm, 10*cm])
+        progress_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), CHINESE_FONT),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('TEXTCOLOR', (0, 0), (0, -1), GRAY_TEXT),
+            ('TEXTCOLOR', (1, 0), (1, -1), DARK_BG),
+            ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('BACKGROUND', (0, 0), (-1, -1), LIGHT_BG),
+            ('ROUNDEDCORNERS', [4, 4, 4, 4]),
+        ]))
+        elements.append(progress_table)
+        
+        # Phase details
+        elements.append(Spacer(1, 0.8*cm))
+        
+        phase_status_labels = {
+            'pending': '待执行',
+            'active': '执行中',
+            'completed': '已完成',
+            'skipped': '已跳过',
+            'failed': '失败',
+        }
+        
+        phase_data = [['阶段', '状态', '任务进度', '完成时间']]
+        for phase in phases:
+            phase_status = phase_status_labels.get(phase.status, phase.status)
+            task_progress = f"{phase.completed_tasks}/{phase.total_tasks}"
+            completed_time = phase.completed_at.strftime('%m-%d %H:%M') if phase.completed_at else '-'
+            phase_data.append([phase.name, phase_status, task_progress, completed_time])
+        
+        phase_table = Table(phase_data, colWidths=[4.5*cm, 2.5*cm, 2.5*cm, 3*cm])
+        phase_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), CHINESE_FONT),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('TEXTCOLOR', (0, 0), (-1, 0), white),
+            ('TEXTCOLOR', (0, 1), (-1, -1), DARK_BG),
+            ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#e2e8f0')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, LIGHT_BG]),
+        ]))
+        elements.append(phase_table)
     
     elements.append(PageBreak())
     
@@ -347,7 +448,7 @@ async def generate_report(db: AsyncSession, project_id: int) -> io.BytesIO:
     # Footer
     elements.append(Spacer(1, 2*cm))
     elements.append(Paragraph(
-        '本报告由 CertiProof 等保合规智能平台自动生成',
+        '本报告由 VeriSure 智能合规验证平台自动生成',
         ParagraphStyle(
             'Footer',
             parent=body_style,
@@ -372,6 +473,59 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
     project = result.scalar_one_or_none()
     if not project:
         raise ValueError("Project not found")
+    
+    # Fetch assessment data
+    result = await db.execute(
+        select(Assessment)
+        .where(Assessment.project_id == project_id)
+        .order_by(Assessment.created_at.desc())
+        .limit(1)
+    )
+    assessment = result.scalar_one_or_none()
+    
+    # Fetch phases and tasks if assessment exists
+    phases_data = []
+    if assessment:
+        result = await db.execute(
+            select(PhaseInstance)
+            .where(PhaseInstance.assessment_id == assessment.id)
+            .order_by(PhaseInstance.order)
+        )
+        phases = result.scalars().all()
+        
+        for phase in phases:
+            # Fetch tasks for this phase
+            result = await db.execute(
+                select(TaskInstance)
+                .where(TaskInstance.phase_id == phase.id)
+            )
+            tasks = result.scalars().all()
+            
+            tasks_data = []
+            for task in tasks:
+                tasks_data.append({
+                    'id': task.id,
+                    'task_type': task.task_type,
+                    'name': task.name,
+                    'status': task.status,
+                    'result': task.result,
+                    'started_at': task.started_at.isoformat() if task.started_at else None,
+                    'completed_at': task.completed_at.isoformat() if task.completed_at else None,
+                })
+            
+            phases_data.append({
+                'id': phase.id,
+                'phase_id': phase.phase_id,
+                'name': phase.name,
+                'order': phase.order,
+                'status': phase.status,
+                'total_tasks': phase.total_tasks,
+                'completed_tasks': phase.completed_tasks,
+                'progress': phase.progress,
+                'started_at': phase.started_at.isoformat() if phase.started_at else None,
+                'completed_at': phase.completed_at.isoformat() if phase.completed_at else None,
+                'tasks': tasks_data,
+            })
     
     # Fetch all scan tasks
     result = await db.execute(
@@ -464,6 +618,17 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
             'score_status': score_status,
             'status': project.status.value if hasattr(project.status, 'value') else str(project.status),
             'created_at': project.created_at.isoformat() if project.created_at else None,
+        },
+        'assessment': {
+            'id': assessment.id if assessment else None,
+            'name': assessment.name if assessment else None,
+            'status': assessment.status if assessment else None,
+            'progress': assessment.progress if assessment else 0,
+            'total_phases': assessment.total_phases if assessment else 0,
+            'completed_phases': assessment.completed_phases if assessment else 0,
+            'started_at': assessment.started_at.isoformat() if assessment and assessment.started_at else None,
+            'completed_at': assessment.completed_at.isoformat() if assessment and assessment.completed_at else None,
+            'phases': phases_data,
         },
         'summary': {
             'total_findings': len(findings),

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Input, Button, Avatar, Spin, Empty, Typography, Progress, Tag, Table, message, Modal, Checkbox, Dropdown, Menu, Popconfirm } from 'antd'
+import { Input, Button, Avatar, Spin, Empty, Typography, Progress, Tag, Table, message, Modal, Checkbox, Dropdown, Menu, Popconfirm, Drawer, Steps } from 'antd'
 import {
   SendOutlined,
   UserOutlined,
@@ -24,6 +24,7 @@ import {
   SwapOutlined,
   DeleteOutlined,
   FolderOutlined,
+  RocketOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import './ChatWorkspace.css'
@@ -36,7 +37,7 @@ const SUGGESTIONS = [
   { icon: <PlusOutlined />, title: '创建项目', text: '创建项目 ', color: '#6366f1' },
   { icon: <ThunderboltOutlined />, title: '端口扫描', text: '/scan', color: '#10b981' },
   { icon: <FileSearchOutlined />, title: '查看结果', text: '查看扫描结果', color: '#ef4444' },
-  { icon: <SafetyCertificateOutlined />, title: '合规评分', text: '查看合规分数', color: '#f59e0b' },
+  { icon: <RocketOutlined />, title: '等保测评', text: '', color: '#f59e0b', action: 'assessment' },
   { icon: <ApiOutlined />, title: '连通测试', text: '/diagnose', color: '#8b5cf6' },
 ]
 
@@ -48,6 +49,7 @@ const SLASH_COMMANDS = [
   { command: '/asset', description: '添加资产', usage: '/asset [IP/域名]', defaultText: '/asset ' },
   { command: '/assets', description: '列出项目资产', usage: '/assets', direct: true },
   { command: '/project', description: '列出项目', usage: '/project', defaultText: '列出所有项目' },
+  { command: '/assessment', description: '创建/查看等保测评', usage: '/assessment', direct: true },
   { command: '/diagnose', description: 'MCP 连通性测试', usage: '/diagnose', direct: true },
   { command: '/clear', description: '清理对话历史', usage: '/clear', direct: true },
   { command: '/help', description: '显示帮助', usage: '/help', direct: true },
@@ -74,6 +76,10 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   const [currentThreadId, setCurrentThreadId] = useState(null)
   const [showArchivePanel, setShowArchivePanel] = useState(false)
   const [showThreadPanel, setShowThreadPanel] = useState(false)
+  const [assessment, setAssessment] = useState(null)
+  const [assessmentPhases, setAssessmentPhases] = useState([])
+  const [assessmentDrawerVisible, setAssessmentDrawerVisible] = useState(false)
+  const [assessmentLoading, setAssessmentLoading] = useState(false)
   const messagesEndRef = useRef(null)
   const wsRef = useRef(null)
   const pollRef = useRef(null)
@@ -94,7 +100,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         setMessages([
           {
             role: 'assistant',
-            content: '你好！我是 CertiProof 等保合规智能助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
+            content: '你好！我是 VeriSure 智能合规验证助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
           },
         ])
         return
@@ -114,7 +120,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
           setMessages([
             {
               role: 'assistant',
-              content: '你好！我是 CertiProof 等保合规智能助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
+              content: '你好！我是 VeriSure 智能合规验证助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
             },
           ])
         }
@@ -123,7 +129,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         setMessages([
           {
             role: 'assistant',
-            content: '你好！我是 CertiProof 等保合规智能助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
+            content: '你好！我是 VeriSure 智能合规验证助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
           },
         ])
       }
@@ -726,6 +732,72 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     }
   }
 
+  const fetchAssessment = async () => {
+    if (!currentProjectId) return null
+    try {
+      const response = await api.get(`/assessments/projects/${currentProjectId}`)
+      if (response.data && response.data.length > 0) {
+        const latestAssessment = response.data[0]
+        const phasesResponse = await api.get(`/assessments/${latestAssessment.id}/phases`)
+        return { assessment: latestAssessment, phases: phasesResponse.data }
+      }
+      return null
+    } catch (error) {
+      console.error('Failed to fetch assessment:', error)
+      return null
+    }
+  }
+
+  const handleAssessmentAction = async () => {
+    if (!currentProjectId) {
+      message.warning('请先选择项目')
+      return
+    }
+    
+    setAssessmentLoading(true)
+    try {
+      const result = await fetchAssessment()
+      
+      if (result) {
+        setAssessment(result.assessment)
+        setAssessmentPhases(result.phases)
+        setAssessmentDrawerVisible(true)
+      } else {
+        const projectRes = await api.get(`/projects/${currentProjectId}`)
+        const project = projectRes.data
+        const complianceLevel = project.compliance_level
+        const targetLevel = complianceLevel === '二级' ? 2 : 3
+        
+        const templatesRes = await api.get('/assessments/templates')
+        const templates = templatesRes.data
+        const template = templates.find(t => t.compliance_level === targetLevel)
+        
+        if (!template) {
+          message.error('未找到匹配的测评模板')
+          return
+        }
+        
+        const createRes = await api.post(`/assessments/projects/${currentProjectId}`, {
+          template_id: template.id,
+          name: `${projectName || project.name} - 等保${complianceLevel}测评`,
+        })
+        
+        const newAssessment = createRes.data
+        const phasesRes = await api.get(`/assessments/${newAssessment.id}/phases`)
+        
+        setAssessment(newAssessment)
+        setAssessmentPhases(phasesRes.data)
+        setAssessmentDrawerVisible(true)
+        message.success('测评流程已创建')
+      }
+    } catch (error) {
+      console.error('Assessment action failed:', error)
+      message.error('操作失败，请重试')
+    } finally {
+      setAssessmentLoading(false)
+    }
+  }
+
   const handleShowHelp = () => {
     const helpText = `可用命令：
 
@@ -752,6 +824,8 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         handleClearHistory()
       } else if (cmd.command === '/assets') {
         handleListAssets()
+      } else if (cmd.command === '/assessment') {
+        handleAssessmentAction()
       } else if (cmd.command === '/help') {
         handleShowHelp()
       }
@@ -1608,12 +1682,12 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       <div className="workspace-header">
         <div className="workspace-title">
           <div className="workspace-logo">
-            <RobotOutlined />
+            <img src="/verisure-logo.svg" alt="VeriSure" style={{ width: 48, height: 48 }} />
           </div>
           <div>
-            <div className="workspace-name">CertiProof Agent</div>
+            <div className="workspace-name">VeriSure Agent</div>
             <div className="workspace-subtitle">
-              {projectName ? `项目：${projectName}` : '等保合规智能对话'}
+              {projectName ? `项目：${projectName}` : '智能合规验证对话'}
             </div>
           </div>
         </div>
@@ -1873,7 +1947,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
               <button
                 key={i}
                 className="suggestion-btn"
-                onClick={() => handleSend(s.text)}
+                onClick={() => s.action === 'assessment' ? handleAssessmentAction() : handleSend(s.text)}
                 style={{ '--accent': s.color }}
               >
                 <span className="suggestion-icon">{s.icon}</span>
@@ -1969,6 +2043,106 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
           ))}
         </div>
       </Modal>
+
+      {/* Assessment Progress Drawer */}
+      <Drawer
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <RocketOutlined style={{ color: '#f59e0b' }} />
+            <span>等保测评进度</span>
+          </div>
+        }
+        placement="right"
+        width={480}
+        open={assessmentDrawerVisible}
+        onClose={() => setAssessmentDrawerVisible(false)}
+        className="assessment-drawer"
+      >
+        {assessment && (
+          <div className="assessment-drawer-content">
+            <div className="assessment-drawer-header">
+              <div className="assessment-drawer-title">{assessment.name}</div>
+              <Tag color={
+                assessment.status === 'completed' ? '#10b981' :
+                assessment.status === 'in_progress' ? '#6366f1' :
+                assessment.status === 'paused' ? '#f59e0b' : '#64748b'
+              }>
+                {assessment.status === 'not_started' ? '未开始' :
+                 assessment.status === 'in_progress' ? '进行中' :
+                 assessment.status === 'paused' ? '已暂停' :
+                 assessment.status === 'completed' ? '已完成' : '失败'}
+              </Tag>
+            </div>
+            
+            <div className="assessment-drawer-progress">
+              <Progress
+                type="circle"
+                percent={Math.round(assessment.progress || 0)}
+                size={100}
+                strokeColor={{ '0%': '#D4AF37', '100%': '#C5A55A' }}
+              />
+              <div className="assessment-drawer-stats">
+                <div className="stat-item">
+                  <span className="stat-value">{assessment.completed_phases || 0}</span>
+                  <span className="stat-label">/ {assessment.total_phases} 阶段</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="assessment-drawer-phases">
+              {assessmentPhases.map((phase, index) => (
+                <div key={phase.id} className={`assessment-phase-item ${phase.status}`}>
+                  <div className="phase-indicator">
+                    {phase.status === 'completed' ? (
+                      <CheckCircleFilled style={{ color: '#10b981' }} />
+                    ) : phase.status === 'active' ? (
+                      <div className="phase-active-dot" />
+                    ) : (
+                      <div className="phase-pending-dot" />
+                    )}
+                    {index < assessmentPhases.length - 1 && (
+                      <div className={`phase-connector-line ${phase.status === 'completed' ? 'completed' : ''}`} />
+                    )}
+                  </div>
+                  <div className="phase-info">
+                    <div className="phase-name">{phase.name}</div>
+                    <div className="phase-meta">
+                      {phase.status === 'completed' && <Tag color="#10b981">完成</Tag>}
+                      {phase.status === 'active' && <Tag color="#6366f1">{Math.round(phase.progress || 0)}%</Tag>}
+                      {phase.status === 'pending' && <Tag>待开始</Tag>}
+                      {phase.status === 'skipped' && <Tag>已跳过</Tag>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {assessment.status === 'not_started' && (
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                block
+                style={{ marginTop: 16, background: 'linear-gradient(135deg, #D4AF37, #C5A55A)', border: 'none' }}
+                onClick={async () => {
+                  try {
+                    await api.post(`/assessments/${assessment.id}/start`)
+                    const result = await fetchAssessment()
+                    if (result) {
+                      setAssessment(result.assessment)
+                      setAssessmentPhases(result.phases)
+                    }
+                    message.success('测评已开始')
+                  } catch (error) {
+                    message.error('启动失败')
+                  }
+                }}
+              >
+                开始测评
+              </Button>
+            )}
+          </div>
+        )}
+      </Drawer>
     </div>
   )
 }

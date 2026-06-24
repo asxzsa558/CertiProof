@@ -1,5 +1,5 @@
 """
-OCR MCP Server - CertiProof
+OCR MCP Server - VeriSure
 Exposes screenshot OCR and AI analysis as an MCP tool.
 Uses OpenAI Vision API for intelligent screenshot analysis.
 Uses standardized /execute endpoint for gateway integration.
