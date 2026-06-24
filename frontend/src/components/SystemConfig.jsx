@@ -6,7 +6,7 @@ import {
 import {
   SettingOutlined, RobotOutlined, ThunderboltOutlined,
   FileProtectOutlined, ExperimentOutlined, SaveOutlined,
-  ReloadOutlined
+  ReloadOutlined, BulbOutlined, GlobalOutlined, FileTextOutlined
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
@@ -83,7 +83,6 @@ function SystemConfig({ trigger, value, onChange }) {
       await api.put('/config/', { updates: pendingChanges })
       message.success(`已保存 ${Object.keys(pendingChanges).length} 项配置`)
       setPendingChanges({})
-      // 重新加载
       const configRes = await api.get('/config/')
       setConfigs(configRes.data)
     } catch (error) {
@@ -100,12 +99,22 @@ function SystemConfig({ trigger, value, onChange }) {
 
   const getCurrentValue = (key) => {
     if (key in pendingChanges) return pendingChanges[key]
-    // 从 configs 中找
     for (const category of Object.values(configs)) {
       if (key in category) return category[key]
     }
     return meta[key]?.value
   }
+
+  // Section 标题组件 - 图标徽章 + 标题 + 副标题
+  const SectionTitle = ({ icon, title, subtitle }) => (
+    <div className="section-title">
+      <div className="section-icon-badge">{icon}</div>
+      <div className="section-title-text">
+        <span className="title">{title}</span>
+        {subtitle && <span className="subtitle">{subtitle}</span>}
+      </div>
+    </div>
+  )
 
   // --- Tab 1: AI 模型 ---
   const renderModelTab = () => {
@@ -113,9 +122,11 @@ function SystemConfig({ trigger, value, onChange }) {
     return (
       <div className="config-tab-content">
         <div className="config-section">
-          <h3 className="section-title">
-            <RobotOutlined /> 当前模型
-          </h3>
+          <SectionTitle
+            icon={<RobotOutlined />}
+            title="当前模型"
+            subtitle="选择 AI 提供商和具体模型"
+          />
           <Select
             value={selectedModel}
             onChange={handleModelChange}
@@ -142,12 +153,12 @@ function SystemConfig({ trigger, value, onChange }) {
           {currentModel && (
             <div className="model-info-card">
               <div className="info-row">
-                <span className="info-label">Provider:</span>
+                <span className="info-label">Provider</span>
                 <span>{currentModel.provider_name}</span>
               </div>
               {currentModel.capabilities && (
                 <div className="info-row">
-                  <span className="info-label">能力:</span>
+                  <span className="info-label">能力</span>
                   <Space size={[4, 4]} wrap>
                     {currentModel.capabilities.slice(0, 5).map(cap => (
                       <Tag key={cap} style={{ fontSize: 10 }}>{cap}</Tag>
@@ -164,7 +175,7 @@ function SystemConfig({ trigger, value, onChange }) {
               setOpen(false)
               navigate('/settings/models')
             }}
-            style={{ marginTop: 8, padding: 0 }}
+            style={{ marginTop: 10, padding: 0, color: '#C5A55A' }}
           >
             管理模型配置 →
           </Button>
@@ -178,10 +189,11 @@ function SystemConfig({ trigger, value, onChange }) {
     return (
       <div className="config-tab-content">
         <div className="config-section">
-          <h3 className="section-title">
-            <ExperimentOutlined /> AI 决策行为
-          </h3>
-
+          <SectionTitle
+            icon={<BulbOutlined />}
+            title="对话记忆"
+            subtitle="控制 AI 上下文的深度和广度"
+          />
           <Form layout="vertical">
             <Form.Item
               label="历史对话轮次"
@@ -198,7 +210,16 @@ function SystemConfig({ trigger, value, onChange }) {
                 <span className="slider-value">{getCurrentValue('ai.history_turns') || 5}</span>
               </div>
             </Form.Item>
+          </Form>
+        </div>
 
+        <div className="config-section">
+          <SectionTitle
+            icon={<ExperimentOutlined />}
+            title="性能优化"
+            subtitle="Prompt cache 和上下文注入"
+          />
+          <Form layout="vertical">
             <Form.Item
               label="启用 Prompt Cache"
               help="Anthropic 节省 90% 成本，OpenAI 自动 cache 无需配置。"
@@ -229,10 +250,11 @@ function SystemConfig({ trigger, value, onChange }) {
     return (
       <div className="config-tab-content">
         <div className="config-section">
-          <h3 className="section-title">
-            <FileProtectOutlined /> 测评流程默认行为
-          </h3>
-
+          <SectionTitle
+            icon={<FileProtectOutlined />}
+            title="自动化行为"
+            subtitle="创建测评后的默认动作"
+          />
           <Form layout="vertical">
             <Form.Item
               label="创建后自动开始"
@@ -253,7 +275,16 @@ function SystemConfig({ trigger, value, onChange }) {
                 onChange={(v) => handleConfigChange('assessment.auto_execute_tasks', v)}
               />
             </Form.Item>
+          </Form>
+        </div>
 
+        <div className="config-section">
+          <SectionTitle
+            icon={<GlobalOutlined />}
+            title="并发控制"
+            subtitle="多资产同时扫描的性能参数"
+          />
+          <Form layout="vertical">
             <Form.Item
               label="最大并发数"
               help="多资产同时扫描时的最大并发数（1-10）。"
@@ -280,10 +311,11 @@ function SystemConfig({ trigger, value, onChange }) {
     return (
       <div className="config-tab-content">
         <div className="config-section">
-          <h3 className="section-title">
-            <FileProtectOutlined /> 报告设置
-          </h3>
-
+          <SectionTitle
+            icon={<FileTextOutlined />}
+            title="报告格式"
+            subtitle="默认导出的报告类型"
+          />
           <Form layout="vertical">
             <Form.Item label="默认格式">
               <Select
@@ -295,7 +327,16 @@ function SystemConfig({ trigger, value, onChange }) {
                 <Option value="json">JSON</Option>
               </Select>
             </Form.Item>
+          </Form>
+        </div>
 
+        <div className="config-section">
+          <SectionTitle
+            icon={<FileTextOutlined />}
+            title="报告内容"
+            subtitle="控制报告详尽程度"
+          />
+          <Form layout="vertical">
             <Form.Item
               label="包含原始扫描数据"
               help="报告 PDF/JSON 中是否包含完整的扫描原始数据（端口列表、SSL 详情等）。"
@@ -310,6 +351,8 @@ function SystemConfig({ trigger, value, onChange }) {
       </div>
     )
   }
+
+  const unsavedCount = Object.keys(pendingChanges).length
 
   return (
     <>
@@ -331,7 +374,7 @@ function SystemConfig({ trigger, value, onChange }) {
       <Drawer
         title={
           <div className="drawer-title">
-            <SettingOutlined style={{ color: '#C5A55A', marginRight: 8 }} />
+            <SettingOutlined style={{ color: '#D4AF37', marginRight: 8 }} />
             <span>系统配置</span>
           </div>
         }
@@ -341,11 +384,12 @@ function SystemConfig({ trigger, value, onChange }) {
         onClose={() => setOpen(false)}
         className="system-config-drawer"
         extra={
-          <Space>
-            {Object.keys(pendingChanges).length > 0 && (
-              <Tag color="gold">{Object.keys(pendingChanges).length} 项未保存</Tag>
-            )}
-          </Space>
+          unsavedCount > 0 && (
+            <div className="unsaved-indicator">
+              <div className="unsaved-dot" />
+              <span>{unsavedCount} 项未保存</span>
+            </div>
+          )
         }
         footer={
           <div className="drawer-footer">
@@ -358,16 +402,16 @@ function SystemConfig({ trigger, value, onChange }) {
             </Button>
             <Button
               onClick={handleReset}
-              disabled={Object.keys(pendingChanges).length === 0 || saving}
+              disabled={unsavedCount === 0 || saving}
             >
-              撤销修改
+              撤销
             </Button>
             <Button
               type="primary"
               icon={<SaveOutlined />}
               onClick={handleSave}
               loading={saving}
-              disabled={Object.keys(pendingChanges).length === 0}
+              disabled={unsavedCount === 0}
             >
               保存
             </Button>
@@ -388,13 +432,13 @@ function SystemConfig({ trigger, value, onChange }) {
             <TabPane tab={<span><RobotOutlined /> AI 模型</span>} key="ai">
               {renderModelTab()}
             </TabPane>
-            <TabPane tab={<span><ExperimentOutlined /> AI 行为</span>} key="ai-behavior">
+            <TabPane tab={<span><BulbOutlined /> AI 行为</span>} key="ai-behavior">
               {renderAIBehaviorTab()}
             </TabPane>
             <TabPane tab={<span><FileProtectOutlined /> 测评流程</span>} key="assessment">
               {renderAssessmentTab()}
             </TabPane>
-            <TabPane tab={<span><FileProtectOutlined /> 报告</span>} key="report">
+            <TabPane tab={<span><FileTextOutlined /> 报告</span>} key="report">
               {renderReportTab()}
             </TabPane>
           </Tabs>

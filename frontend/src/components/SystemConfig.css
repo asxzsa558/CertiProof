@@ -1,29 +1,35 @@
-/* SystemConfig - 系统配置抽屉 */
+/* SystemConfig - 系统配置抽屉 - 美化版 */
 
 .system-config-drawer .ant-drawer-header {
-  background: #0a0a0b;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 16px 24px;
+  background: linear-gradient(180deg, #0a0a0b 0%, #0f0f12 100%);
+  border-bottom: 1px solid rgba(197, 165, 90, 0.15);
+  padding: 18px 24px;
 }
 
 .system-config-drawer .ant-drawer-title {
   color: #fff;
   font-family: Georgia, 'Times New Roman', serif;
+  font-size: 17px;
+  letter-spacing: 0.5px;
 }
 
 .system-config-drawer .ant-drawer-body {
-  background: #0a0a0b;
+  background:
+    radial-gradient(ellipse at top, rgba(197, 165, 90, 0.03) 0%, transparent 50%),
+    #0a0a0b;
   padding: 0;
   display: flex;
   flex-direction: column;
 }
 
 .system-config-drawer .ant-drawer-footer {
-  background: #0a0a0b;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 12px 24px;
+  background: linear-gradient(0deg, #0a0a0b 0%, #0f0f12 100%);
+  border-top: 1px solid rgba(197, 165, 90, 0.15);
+  padding: 14px 24px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
 }
 
+/* 抽屉标题 */
 .drawer-title {
   display: flex;
   align-items: center;
@@ -31,6 +37,12 @@
   font-weight: 600;
 }
 
+.drawer-title .anticon {
+  font-size: 18px;
+  filter: drop-shadow(0 0 6px rgba(197, 165, 90, 0.5));
+}
+
+/* 底部按钮区 */
 .drawer-footer {
   display: flex;
   justify-content: flex-end;
@@ -38,7 +50,9 @@
 }
 
 .drawer-footer .ant-btn {
-  border-radius: 6px;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all 0.2s ease;
 }
 
 .drawer-footer .ant-btn-primary {
@@ -46,10 +60,45 @@
   border: none !important;
   color: #0a0a0b !important;
   font-weight: 600;
+  box-shadow: 0 2px 8px rgba(197, 165, 90, 0.2);
 }
 
 .drawer-footer .ant-btn-primary:hover {
   background: linear-gradient(135deg, #E8C547, #D4AF37) !important;
+  box-shadow: 0 4px 12px rgba(197, 165, 90, 0.4);
+  transform: translateY(-1px);
+}
+
+.drawer-footer .ant-btn-primary:active {
+  transform: translateY(0);
+}
+
+/* 未保存指示器 */
+.unsaved-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: linear-gradient(135deg, rgba(197, 165, 90, 0.2), rgba(212, 175, 55, 0.2));
+  border: 1px solid rgba(197, 165, 90, 0.3);
+  border-radius: 12px;
+  font-size: 11px;
+  color: #D4AF37;
+  font-weight: 500;
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.unsaved-dot {
+  width: 6px;
+  height: 6px;
+  background: #D4AF37;
+  border-radius: 50%;
+  box-shadow: 0 0 6px #D4AF37;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 rgba(197, 165, 90, 0.3); }
+  50% { box-shadow: 0 0 8px rgba(197, 165, 90, 0.5); }
 }
 
 /* Tabs */
@@ -62,29 +111,74 @@
 
 .config-tabs .ant-tabs-nav {
   background: rgba(255, 255, 255, 0.02);
-  padding: 8px 16px 0;
+  padding: 10px 16px 0;
   margin: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(197, 165, 90, 0.1);
+  position: relative;
+}
+
+.config-tabs .ant-tabs-nav::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(197, 165, 90, 0.3), transparent);
 }
 
 .config-tabs .ant-tabs-tab {
-  color: rgba(255, 255, 255, 0.6) !important;
-  padding: 10px 16px !important;
+  color: rgba(255, 255, 255, 0.55) !important;
+  padding: 10px 18px !important;
   font-size: 13px;
+  font-weight: 500;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.config-tabs .ant-tabs-tab:hover {
+  color: rgba(255, 255, 255, 0.85) !important;
 }
 
 .config-tabs .ant-tabs-tab-active {
-  color: #C5A55A !important;
+  color: #D4AF37 !important;
+}
+
+.config-tabs .ant-tabs-tab-active .anticon {
+  filter: drop-shadow(0 0 6px rgba(197, 165, 90, 0.6));
+}
+
+.config-tabs .ant-tabs-tab .anticon {
+  font-size: 14px;
+  margin-right: 6px;
+  transition: all 0.2s ease;
 }
 
 .config-tabs .ant-tabs-ink-bar {
   background: linear-gradient(90deg, #D4AF37, #C5A55A) !important;
   height: 2px;
+  box-shadow: 0 0 8px rgba(197, 165, 90, 0.4);
 }
 
 .config-tabs .ant-tabs-content-holder {
   overflow-y: auto;
   flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(197, 165, 90, 0.3) transparent;
+}
+
+.config-tabs .ant-tabs-content-holder::-webkit-scrollbar {
+  width: 6px;
+}
+
+.config-tabs .ant-tabs-content-holder::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.config-tabs .ant-tabs-content-holder::-webkit-scrollbar-thumb {
+  background: rgba(197, 165, 90, 0.3);
+  border-radius: 3px;
 }
 
 .config-tabs .ant-tabs-content {
@@ -107,36 +201,98 @@
   height: 200px;
 }
 
+/* 卡片化的 section */
 .config-section {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
+  padding: 18px 20px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.025) 0%, rgba(255, 255, 255, 0.01) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  position: relative;
+  transition: all 0.2s ease;
 }
 
+.config-section:hover {
+  border-color: rgba(197, 165, 90, 0.2);
+  background: linear-gradient(135deg, rgba(197, 165, 90, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%);
+}
+
+.config-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(197, 165, 90, 0.3), transparent);
+  opacity: 0.5;
+}
+
+/* Section 标题 - 图标徽章 + 标题 */
 .section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #C5A55A;
-  margin: 0 0 16px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(197, 165, 90, 0.2);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  margin: 0 0 18px;
+  padding: 0;
+  border: none;
+}
+
+.section-icon-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(197, 165, 90, 0.15) 0%, rgba(212, 175, 55, 0.1) 100%);
+  border: 1px solid rgba(197, 165, 90, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #D4AF37;
+  font-size: 15px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(197, 165, 90, 0.1);
+}
+
+.section-title-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.section-title-text .title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  font-family: Georgia, 'Times New Roman', serif;
+  letter-spacing: 0.3px;
+}
+
+.section-title-text .subtitle {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: normal;
 }
 
 /* Form */
 .config-tabs .ant-form-item-label > label {
   color: rgba(255, 255, 255, 0.85) !important;
   font-size: 13px;
+  font-weight: 500;
 }
 
 .config-tabs .ant-form-item {
-  margin-bottom: 20px;
+  margin-bottom: 22px;
+}
+
+.config-tabs .ant-form-item:last-child {
+  margin-bottom: 0;
 }
 
 .config-tabs .ant-form-item-extra {
   color: rgba(255, 255, 255, 0.4) !important;
   font-size: 11px;
-  margin-top: 4px;
+  margin-top: 6px;
+  line-height: 1.5;
 }
 
 /* Select */
@@ -145,86 +301,132 @@
 }
 
 .full-width-select .ant-select-selector {
-  background: rgba(255, 255, 255, 0.05) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 6px !important;
+  border-radius: 8px !important;
   color: #fff !important;
+  height: 38px !important;
+  transition: all 0.2s ease;
 }
 
 .full-width-select .ant-select-selection-item {
   color: #fff !important;
+  line-height: 36px !important;
 }
 
 .full-width-select:hover .ant-select-selector {
-  border-color: #C5A55A !important;
+  border-color: rgba(197, 165, 90, 0.5) !important;
+  background: rgba(197, 165, 90, 0.04) !important;
 }
 
 .full-width-select.ant-select-focused .ant-select-selector {
   border-color: #C5A55A !important;
-  box-shadow: 0 0 0 2px rgba(197, 165, 90, 0.1) !important;
+  box-shadow: 0 0 0 3px rgba(197, 165, 90, 0.1) !important;
 }
 
-/* Slider */
+/* Slider - 增强版 */
 .slider-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .slider-row .ant-slider {
   flex: 1;
+  margin: 6px 0;
 }
 
 .slider-value {
-  min-width: 32px;
+  min-width: 42px;
   text-align: center;
-  font-weight: 600;
-  color: #C5A55A;
-  background: rgba(197, 165, 90, 0.1);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 13px;
+  font-weight: 700;
+  font-size: 16px;
+  font-family: Georgia, 'Times New Roman', serif;
+  color: #D4AF37;
+  background: linear-gradient(135deg, rgba(197, 165, 90, 0.15), rgba(212, 175, 55, 0.1));
+  border: 1px solid rgba(197, 165, 90, 0.3);
+  padding: 4px 10px;
+  border-radius: 6px;
+  text-shadow: 0 0 8px rgba(197, 165, 90, 0.3);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .config-tabs .ant-slider-rail {
-  background: rgba(255, 255, 255, 0.1) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  height: 4px !important;
+  border-radius: 2px;
 }
 
 .config-tabs .ant-slider-track {
   background: linear-gradient(90deg, #D4AF37, #C5A55A) !important;
+  height: 4px !important;
+  box-shadow: 0 0 6px rgba(197, 165, 90, 0.4);
+}
+
+.config-tabs .ant-slider-handle {
+  width: 18px !important;
+  height: 18px !important;
+  border: 2px solid #D4AF37 !important;
+  background: #0a0a0b !important;
+  box-shadow: 0 0 8px rgba(197, 165, 90, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+  transition: all 0.2s ease;
+}
+
+.config-tabs .ant-slider-handle:hover,
+.config-tabs .ant-slider-handle:focus {
+  border-color: #E8C547 !important;
+  box-shadow: 0 0 12px rgba(197, 165, 90, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4) !important;
+  transform: scale(1.1);
 }
 
 .config-tabs .ant-slider-handle::after {
-  box-shadow: 0 0 0 2px #C5A55A !important;
+  display: none;
 }
 
 .config-tabs .ant-slider-mark-text {
   color: rgba(255, 255, 255, 0.4) !important;
   font-size: 10px;
+  font-family: Georgia, 'Times New Roman', serif;
 }
 
-/* Switch */
+/* Switch - 增强版 */
 .config-tabs .ant-switch {
-  background: rgba(255, 255, 255, 0.15) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  min-width: 44px;
+  height: 22px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .config-tabs .ant-switch-checked {
   background: linear-gradient(135deg, #D4AF37, #C5A55A) !important;
+  box-shadow: 0 0 8px rgba(197, 165, 90, 0.4);
+}
+
+.config-tabs .ant-switch-handle {
+  width: 18px !important;
+  height: 18px !important;
+  top: 2px !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+}
+
+.config-tabs .ant-switch-handle::before {
+  border-radius: 50% !important;
+  background: #fff !important;
 }
 
 /* Model Info Card */
 .model-info-card {
-  margin-top: 12px;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(197, 165, 90, 0.1);
   border-radius: 8px;
 }
 
 .info-row {
   display: flex;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   font-size: 12px;
 }
 
@@ -232,10 +434,20 @@
   margin-bottom: 0;
 }
 
+.info-row .ant-tag {
+  margin-right: 4px;
+  background: rgba(197, 165, 90, 0.1) !important;
+  border-color: rgba(197, 165, 90, 0.3) !important;
+  color: #C5A55A !important;
+}
+
 .info-label {
   color: rgba(255, 255, 255, 0.5);
-  margin-right: 8px;
+  margin-right: 10px;
   min-width: 60px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 /* Model Option (in dropdown) */
@@ -246,7 +458,7 @@
 .model-option-header {
   display: flex;
   align-items: center;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
 }
 
 .model-option-meta {
@@ -260,19 +472,50 @@
 
 .model-name {
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .model-provider {
   color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
 }
 
 /* Header trigger button */
 .system-config-btn {
-  color: rgba(255, 255, 255, 0.6) !important;
+  color: rgba(255, 255, 255, 0.65) !important;
+  transition: all 0.2s ease !important;
 }
 
 .system-config-btn:hover {
-  color: #C5A55A !important;
+  color: #D4AF37 !important;
   background: rgba(197, 165, 90, 0.1) !important;
+  box-shadow: 0 0 8px rgba(197, 165, 90, 0.2);
+}
+
+/* 改字体系列 - 标题用衬线 */
+.config-tabs .section-title-text .title {
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+/* 输入框 */
+.config-tabs .ant-input {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+  border-radius: 8px !important;
+  transition: all 0.2s ease;
+}
+
+.config-tabs .ant-input:hover {
+  border-color: rgba(197, 165, 90, 0.5) !important;
+  background: rgba(197, 165, 90, 0.04) !important;
+}
+
+.config-tabs .ant-input:focus {
+  border-color: #C5A55A !important;
+  box-shadow: 0 0 0 3px rgba(197, 165, 90, 0.1) !important;
+}
+
+.config-tabs input::placeholder {
+  color: rgba(255, 255, 255, 0.3) !important;
 }
