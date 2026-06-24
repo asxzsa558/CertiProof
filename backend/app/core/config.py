@@ -28,7 +28,24 @@ class Settings(BaseSettings):
     
     # MCP Gateway
     MCP_GATEWAY_URL: str = "http://localhost:9000"
-    
+
+    # AI 行为配置
+    AI_HISTORY_TURNS: int = 5  # LLM 调用时携带的历史对话轮数（1-20）
+    AI_ENABLE_CACHE: bool = True  # 是否启用 prompt cache
+    AI_ENABLE_ASSESSMENT_CONTEXT: bool = True  # 是否注入测评流程状态到 prompt
+    AI_CACHE_MIN_TOKENS: int = 1024  # 触发 cache 的最小 token 数（Anthropic 限制）
+
+    # 测评流程配置
+    ASSESSMENT_DEFAULT_LEVEL: int = 3  # 默认等保级别（2/3）
+    ASSESSMENT_AUTO_START: bool = False  # 创建后是否自动开始
+    ASSESSMENT_AUTO_EXECUTE_TASKS: bool = True  # 是否自动执行扫描类任务
+    ASSESSMENT_MAX_CONCURRENT: int = 5  # 多资产扫描最大并发数
+
+    # 报告配置
+    REPORT_DEFAULT_FORMAT: str = "pdf"  # 默认报告格式
+    REPORT_INCLUDE_RAW_SCANS: bool = False  # 报告是否包含原始扫描数据
+    REPORT_LANGUAGE: str = "zh"  # 报告语言
+
     class Config:
         env_file = ".env"
         case_sensitive = True

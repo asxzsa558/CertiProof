@@ -14,15 +14,11 @@ from app.services.capability_registry import capability_registry
 logger = logging.getLogger(__name__)
 
 
-# AI 决策系统提示（精简版）
-AI_DECISION_SYSTEM_PROMPT = """你是 VeriSure 智能合规验证助手。理解用户需求，调用能力完成任务。
+# AI 决策系统提示 — 稳定部分（可 cache）
+AI_DECISION_SYSTEM_PROMPT_STABLE = """你是 VeriSure 智能合规验证助手。理解用户需求，调用能力完成任务。
 
 ## 能力列表
 {capabilities}
-
-## 上下文
-- 项目: {current_project}
-- 资产: {project_assets}{archive_context}
 
 ## 规则
 1. 回顾性词语（"之前"、"刚才"、"上次"）→ 用 view_* 查缓存，不要重新扫描
@@ -42,6 +38,12 @@ AI_DECISION_SYSTEM_PROMPT = """你是 VeriSure 智能合规验证助手。理解
 用户: "之前扫了什么" → {{"plan": [{{"capability": "view_open_ports", "parameters": {{}}}}]}}
 用户: "创建项目"（无名称）→ {{"plan": [{{"capability": "chat", "parameters": {{"message": "请提供项目名称"}}}}]}}
 用户: "继续"（有归档上下文）→ 根据归档的中断点继续执行
+"""
+
+# AI 决策系统提示 — 动态部分（每次都变，不 cache）
+AI_DECISION_SYSTEM_PROMPT_VARIABLE = """## 当前上下文
+- 项目: {current_project}
+- 资产: {project_assets}{archive_context}{assessment_context}
 """
 
 
@@ -82,19 +84,40 @@ class AIEngine:
             archive_context = ""
             if archives_summary:
                 archive_context = f"\n\n## 项目归档上下文（之前中断的工作）\n{archives_summary}"
-            
-            # 调用 LLM（使用精简 prompt）
-            messages = [
-                {"role": "system", "content": AI_DECISION_SYSTEM_PROMPT.format(
-                    capabilities=self.registry.format_compact_for_prompt(),
-                    current_project=self._format_current_project(context.get("current_project")),
-                    project_assets=self._format_project_assets(context.get("project_assets", [])),
-                    archive_context=archive_context,
-                )},
-                {"role": "user", "content": user_input},
-            ]
-            
-            # 如果有用户 ID，记录使用情况
+
+            # 构建测评状态上下文
+            assessment_state = context.get("assessment_state", {})
+            assessment_context = ""
+            if assessment_state and assessment_state.get("has_assessment"):
+                assessment_context = self._format_assessment_state(assessment_state)
+
+            # 构建 stable + variable 两层 system 消息
+            system_stable = AI_DECISION_SYSTEM_PROMPT_STABLE.format(
+                capabilities=self.registry.format_compact_for_prompt(),
+            )
+            system_variable = AI_DECISION_SYSTEM_PROMPT_VARIABLE.format(
+                current_project=self._format_current_project(context.get("current_project")),
+                project_assets=self._format_project_assets(context.get("project_assets", [])),
+                archive_context=archive_context,
+                assessment_context=assessment_context,
+            )
+
+            # 构造 messages：分层 system + 历史 + 当前 user
+            messages = [{"role": "system", "content": {
+                "stable": system_stable,
+                "variable": system_variable,
+            }}]
+
+            # 添加历史对话（如果配置启用）
+            history_turns = context.get("history_turns", 0)
+            recent_messages = context.get("recent_messages", [])
+            if history_turns > 0 and recent_messages:
+                # 只取最近 N 轮（已在 context_manager 中过滤）
+                messages.extend(recent_messages[-history_turns * 2:])  # user+assistant 为一轮
+
+            messages.append({"role": "user", "content": user_input})
+
+            # 调用 LLM
             if user_id:
                 import asyncio
                 try:
@@ -106,6 +129,7 @@ class AIEngine:
                             task_type="chat",
                             temperature=0.1,
                             max_tokens=1000,
+                            use_cache=True,
                         ),
                         timeout=60.0
                     )
@@ -225,8 +249,47 @@ class AIEngine:
         """格式化当前项目"""
         if not project:
             return "（未选择项目）"
-        
+
         return f"项目: {project['name']} (ID: {project['id']}, 等保等级: {project.get('compliance_level', '未知')}, 合规分数: {project.get('compliance_score', '未评分')})"
+
+    def _format_assessment_state(self, state: Dict) -> str:
+        """格式化测评状态（详细模式，~400 tokens）"""
+        if not state or not state.get("has_assessment"):
+            return ""
+
+        status_text = {
+            "not_started": "未开始",
+            "in_progress": "进行中",
+            "paused": "已暂停",
+            "completed": "已完成",
+            "failed": "失败",
+        }.get(state.get("status"), state.get("status", "未知"))
+
+        lines = [
+            "",
+            "## 测评状态（用户在做的事）",
+            f"- 测评: {state.get('name', '未命名')} ({status_text}, {state.get('progress', 0):.0f}%)",
+            f"- 阶段: {state.get('completed_phases', 0)}/{state.get('total_phases', 0)} 已完成",
+        ]
+
+        # 当前活跃阶段
+        current_phase = state.get("current_phase")
+        if current_phase:
+            lines.append(f"- 当前阶段: {current_phase.get('name', '')}")
+            pending_tasks = current_phase.get("pending_tasks", [])
+            if pending_tasks:
+                lines.append("  - 待办任务:")
+                for t in pending_tasks[:5]:
+                    desc = t.get("description", "")[:50]
+                    lines.append(f"    - {t.get('name', '')}: {desc}")
+        else:
+            lines.append("- 当前阶段: 无活跃阶段")
+
+        # 提示 AI 知道如何交互
+        lines.append("")
+        lines.append("（用户可以问'现在该做什么'、'继续测评'等。根据上述状态给出建议。）")
+
+        return "\n".join(lines)
     
     def _format_project_assets(self, assets: List[Dict]) -> str:
         """格式化项目资产列表"""

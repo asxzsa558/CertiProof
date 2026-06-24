@@ -14,6 +14,7 @@ from app.models.context import (
 from app.models.assessment import (
     FlowTemplate, Assessment, PhaseInstance, TaskInstance, FlowEvent
 )
+from app.models.config import SystemConfig
 
 __all__ = [
     "User",

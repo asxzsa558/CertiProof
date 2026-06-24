@@ -41,10 +41,11 @@ class ContextManager:
     async def build_context(self) -> Dict:
         """
         构建完整上下文
-        
+
         Returns:
             {
                 "conversation_history": [...],
+                "recent_messages": [...],          # 用于 LLM 调用的历史
                 "action_history": [...],
                 "result_cache": {...},
                 "project_memory": [...],
@@ -52,10 +53,15 @@ class ContextManager:
                 "current_project": {...},
                 "project_assets": [...],
                 "project_archives_summary": "...",
+                "assessment_state": {...},         # 测评流程状态
+                "history_turns": int,              # 配置项
             }
         """
+        history_turns = await self._get_config_value("ai.history_turns", 5)
+
         context = {
             "conversation_history": await self._get_conversation_history(),
+            "recent_messages": await self._get_recent_messages_for_llm(history_turns),
             "action_history": await self._get_action_history(),
             "result_cache": await self._get_result_cache(),
             "project_memory": await self._get_project_memory(),
@@ -63,9 +69,107 @@ class ContextManager:
             "current_project": await self._get_current_project(),
             "project_assets": await self._get_project_assets(),
             "project_archives_summary": await self.get_project_archives_summary(),
+            "assessment_state": await self._get_assessment_state(),
+            "history_turns": history_turns,
         }
-        
+
         return context
+
+    async def _get_config_value(self, key: str, default: Any = None) -> Any:
+        """从 system_config 表读取配置"""
+        try:
+            from app.models.config import SystemConfig
+            from sqlalchemy import select
+            result = await self.db.execute(
+                select(SystemConfig).where(SystemConfig.key == key)
+            )
+            config = result.scalar_one_or_none()
+            if config:
+                return config.value
+        except Exception as e:
+            logger.warning(f"Failed to read config {key}: {e}")
+        return default
+
+    async def _get_recent_messages_for_llm(self, turns: int) -> List[Dict]:
+        """获取最近 N 轮对话，用于 LLM 调用"""
+        if turns <= 0:
+            return []
+        # 每轮 = 1 user + 1 assistant = 2 messages
+        messages = await self._get_conversation_history(limit=turns * 2)
+        # 转换为 LLM 格式
+        return [
+            {"role": m["role"], "content": m["content"]}
+            for m in messages
+            if m.get("role") in ("user", "assistant")
+        ]
+
+    async def _get_assessment_state(self) -> Dict:
+        """获取当前项目的测评流程状态"""
+        if not self.project_id:
+            return {}
+
+        try:
+            from app.models.assessment import Assessment, PhaseInstance, TaskInstance
+            from sqlalchemy import select
+
+            # 获取最新测评
+            result = await self.db.execute(
+                select(Assessment)
+                .where(Assessment.project_id == self.project_id)
+                .order_by(Assessment.created_at.desc())
+                .limit(1)
+            )
+            assessment = result.scalar_one_or_none()
+            if not assessment:
+                return {"has_assessment": False}
+
+            # 获取所有阶段
+            result = await self.db.execute(
+                select(PhaseInstance)
+                .where(PhaseInstance.assessment_id == assessment.id)
+                .order_by(PhaseInstance.order)
+            )
+            phases = result.scalars().all()
+
+            # 获取当前活跃阶段
+            current_phase = None
+            for p in phases:
+                if p.status == "active":
+                    # 获取该阶段的待办任务
+                    result = await self.db.execute(
+                        select(TaskInstance)
+                        .where(
+                            TaskInstance.phase_id == p.id,
+                            TaskInstance.status.in_(["todo", "in_progress"])
+                        )
+                        .limit(5)
+                    )
+                    tasks = result.scalars().all()
+                    current_phase = {
+                        "id": p.id,
+                        "name": p.name,
+                        "order": p.order,
+                        "progress": p.progress,
+                        "pending_tasks": [
+                            {"id": t.id, "name": t.name, "description": t.description or "", "type": t.task_type}
+                            for t in tasks
+                        ],
+                    }
+                    break
+
+            return {
+                "has_assessment": True,
+                "id": assessment.id,
+                "name": assessment.name,
+                "status": assessment.status,
+                "progress": assessment.progress,
+                "completed_phases": assessment.completed_phases,
+                "total_phases": assessment.total_phases,
+                "current_phase": current_phase,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get assessment state: {e}")
+            return {}
     
     async def _get_conversation_history(self, limit: int = 20) -> List[Dict]:
         """获取最近的对话历史"""

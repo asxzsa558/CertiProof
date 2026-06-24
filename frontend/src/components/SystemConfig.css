@@ -1,0 +1,278 @@
+/* SystemConfig - 系统配置抽屉 */
+
+.system-config-drawer .ant-drawer-header {
+  background: #0a0a0b;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 16px 24px;
+}
+
+.system-config-drawer .ant-drawer-title {
+  color: #fff;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.system-config-drawer .ant-drawer-body {
+  background: #0a0a0b;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.system-config-drawer .ant-drawer-footer {
+  background: #0a0a0b;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px 24px;
+}
+
+.drawer-title {
+  display: flex;
+  align-items: center;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 600;
+}
+
+.drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.drawer-footer .ant-btn {
+  border-radius: 6px;
+}
+
+.drawer-footer .ant-btn-primary {
+  background: linear-gradient(135deg, #D4AF37, #C5A55A) !important;
+  border: none !important;
+  color: #0a0a0b !important;
+  font-weight: 600;
+}
+
+.drawer-footer .ant-btn-primary:hover {
+  background: linear-gradient(135deg, #E8C547, #D4AF37) !important;
+}
+
+/* Tabs */
+.config-tabs {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.config-tabs .ant-tabs-nav {
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px 16px 0;
+  margin: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.config-tabs .ant-tabs-tab {
+  color: rgba(255, 255, 255, 0.6) !important;
+  padding: 10px 16px !important;
+  font-size: 13px;
+}
+
+.config-tabs .ant-tabs-tab-active {
+  color: #C5A55A !important;
+}
+
+.config-tabs .ant-tabs-ink-bar {
+  background: linear-gradient(90deg, #D4AF37, #C5A55A) !important;
+  height: 2px;
+}
+
+.config-tabs .ant-tabs-content-holder {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.config-tabs .ant-tabs-content {
+  height: 100%;
+}
+
+.config-tabs .ant-tabs-tabpane {
+  padding: 20px 24px;
+}
+
+/* Content */
+.config-tab-content {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.config-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 200px;
+}
+
+.config-section {
+  margin-bottom: 24px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #C5A55A;
+  margin: 0 0 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(197, 165, 90, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Form */
+.config-tabs .ant-form-item-label > label {
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-size: 13px;
+}
+
+.config-tabs .ant-form-item {
+  margin-bottom: 20px;
+}
+
+.config-tabs .ant-form-item-extra {
+  color: rgba(255, 255, 255, 0.4) !important;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+/* Select */
+.full-width-select {
+  width: 100% !important;
+}
+
+.full-width-select .ant-select-selector {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 6px !important;
+  color: #fff !important;
+}
+
+.full-width-select .ant-select-selection-item {
+  color: #fff !important;
+}
+
+.full-width-select:hover .ant-select-selector {
+  border-color: #C5A55A !important;
+}
+
+.full-width-select.ant-select-focused .ant-select-selector {
+  border-color: #C5A55A !important;
+  box-shadow: 0 0 0 2px rgba(197, 165, 90, 0.1) !important;
+}
+
+/* Slider */
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.slider-row .ant-slider {
+  flex: 1;
+}
+
+.slider-value {
+  min-width: 32px;
+  text-align: center;
+  font-weight: 600;
+  color: #C5A55A;
+  background: rgba(197, 165, 90, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.config-tabs .ant-slider-rail {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.config-tabs .ant-slider-track {
+  background: linear-gradient(90deg, #D4AF37, #C5A55A) !important;
+}
+
+.config-tabs .ant-slider-handle::after {
+  box-shadow: 0 0 0 2px #C5A55A !important;
+}
+
+.config-tabs .ant-slider-mark-text {
+  color: rgba(255, 255, 255, 0.4) !important;
+  font-size: 10px;
+}
+
+/* Switch */
+.config-tabs .ant-switch {
+  background: rgba(255, 255, 255, 0.15) !important;
+}
+
+.config-tabs .ant-switch-checked {
+  background: linear-gradient(135deg, #D4AF37, #C5A55A) !important;
+}
+
+/* Model Info Card */
+.model-info-card {
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.info-row:last-child {
+  margin-bottom: 0;
+}
+
+.info-label {
+  color: rgba(255, 255, 255, 0.5);
+  margin-right: 8px;
+  min-width: 60px;
+}
+
+/* Model Option (in dropdown) */
+.model-option {
+  padding: 4px 0;
+}
+
+.model-option-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.model-option-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  padding-left: 24px;
+}
+
+.model-name {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.model-provider {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Header trigger button */
+.system-config-btn {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.system-config-btn:hover {
+  color: #C5A55A !important;
+  background: rgba(197, 165, 90, 0.1) !important;
+}

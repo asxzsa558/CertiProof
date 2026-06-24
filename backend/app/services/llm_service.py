@@ -38,38 +38,63 @@ class BaseProvider(ABC):
 
 
 class OpenAIProvider(BaseProvider):
-    """OpenAI API adapter"""
-    
+    """OpenAI API adapter - 自动 prompt cache (无 cache_control, OpenAI 自动处理)"""
+
     async def chat(self, messages: List[Dict], model_name: str, **kwargs) -> Dict[str, Any]:
         try:
             from openai import AsyncOpenAI
-            
+
             client = AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=self.api_base or "https://api.openai.com/v1",
                 timeout=120.0,
                 max_retries=2
             )
-            
+
+            # 合并分层 system 消息（OpenAI 自动 cache，>1024 tokens 自动启用）
+            processed_messages = self._merge_layered_messages(messages)
+
             response = await client.chat.completions.create(
                 model=model_name,
-                messages=messages,
+                messages=processed_messages,
                 **kwargs
             )
-            
+
+            # 提取 OpenAI 自己的 cache 命中信息（如果 SDK 支持）
+            usage = response.usage
+            cached_tokens = getattr(usage, 'cached_tokens', 0) or 0
+
             return {
                 "content": response.choices[0].message.content,
                 "usage": {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "total_tokens": usage.total_tokens,
+                    "cached_tokens": cached_tokens,
                 },
+                "cache_hit": cached_tokens > 0,
                 "model": response.model,
                 "provider": "openai"
             }
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
             raise
+
+    def _merge_layered_messages(self, messages: List[Dict]) -> List[Dict]:
+        """合并 stable + variable 为单个 system 消息（OpenAI 不支持分层）"""
+        result = []
+        for msg in messages:
+            if msg["role"] == "system":
+                content = msg["content"]
+                if isinstance(content, dict) and "stable" in content:
+                    # 合并 stable + variable
+                    merged = content.get("stable", "") + "\n\n" + content.get("variable", "")
+                    result.append({"role": "system", "content": merged})
+                else:
+                    result.append(msg)
+            else:
+                result.append(msg)
+        return result
     
     async def test_connection(self, model_name: str = None) -> bool:
         try:
@@ -88,47 +113,88 @@ class OpenAIProvider(BaseProvider):
 
 
 class AnthropicProvider(BaseProvider):
-    """Anthropic Claude API adapter"""
-    
+    """Anthropic Claude API adapter - 支持 prompt cache"""
+
     async def chat(self, messages: List[Dict], model_name: str, **kwargs) -> Dict[str, Any]:
         try:
             from anthropic import AsyncAnthropic
-            
+
             client = AsyncAnthropic(
                 api_key=self.api_key,
                 base_url=self.api_base or "https://api.anthropic.com"
             )
-            
+
             # Convert OpenAI format to Anthropic format
-            system_msg = None
+            system_blocks = None
             chat_messages = []
             for msg in messages:
                 if msg["role"] == "system":
-                    system_msg = msg["content"]
+                    content = msg["content"]
+                    # 支持分层结构 {"stable": "...", "variable": "..."}
+                    if isinstance(content, dict) and "stable" in content:
+                        system_blocks = self._build_cached_system_blocks(content)
+                    else:
+                        system_blocks = content if isinstance(content, list) else [{"type": "text", "text": content}]
                 else:
                     chat_messages.append(msg)
-            
+
             response = await client.messages.create(
                 model=model_name,
                 messages=chat_messages,
-                system=system_msg or "",
+                system=system_blocks or "",
                 max_tokens=kwargs.get("max_tokens", 4096),
                 **{k: v for k, v in kwargs.items() if k != "max_tokens"}
             )
-            
+
+            # 提取 cache 命中信息
+            usage = response.usage
+            cache_read = getattr(usage, 'cache_read_input_tokens', 0) or 0
+            cache_creation = getattr(usage, 'cache_creation_input_tokens', 0) or 0
+
             return {
                 "content": response.content[0].text,
                 "usage": {
-                    "prompt_tokens": response.usage.input_tokens,
-                    "completion_tokens": response.usage.output_tokens,
-                    "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                    "prompt_tokens": usage.input_tokens,
+                    "completion_tokens": usage.output_tokens,
+                    "total_tokens": usage.input_tokens + usage.output_tokens,
+                    "cache_read_tokens": cache_read,
+                    "cache_creation_tokens": cache_creation,
                 },
+                "cache_hit": cache_read > 0,
                 "model": response.model,
                 "provider": "anthropic"
             }
         except Exception as e:
             logger.error(f"Anthropic API error: {e}")
             raise
+
+    def _build_cached_system_blocks(self, content: Dict) -> List[Dict]:
+        """
+        构建带 cache_control 的 system blocks
+
+        Layer 1 (stable) → 加 cache_control: ephemeral
+        Layer 2 (variable) → 不缓存
+        """
+        blocks = []
+
+        stable = content.get("stable", "")
+        variable = content.get("variable", "")
+
+        # Stable layer — 标记为可缓存（Anthropic 要求 >= 1024 tokens）
+        if stable and len(stable) >= 100:  # 保守估计 100 字符 ≈ 50 tokens
+            blocks.append({
+                "type": "text",
+                "text": stable,
+                "cache_control": {"type": "ephemeral"}
+            })
+        elif stable:
+            blocks.append({"type": "text", "text": stable})
+
+        # Variable layer — 不缓存
+        if variable:
+            blocks.append({"type": "text", "text": variable})
+
+        return blocks
     
     async def test_connection(self, model_name: str = None) -> bool:
         try:
@@ -149,27 +215,30 @@ class AnthropicProvider(BaseProvider):
 
 
 class OllamaProvider(BaseProvider):
-    """Ollama local LLM adapter"""
-    
+    """Ollama local LLM adapter - 本地推理无 cache"""
+
     async def chat(self, messages: List[Dict], model_name: str, **kwargs) -> Dict[str, Any]:
         try:
             import httpx
-            
+
             api_base = self.api_base or "http://localhost:11434"
-            
+
+            # 合并分层 system 消息
+            processed = self._merge_layered_messages(messages)
+
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
                     f"{api_base}/api/chat",
                     json={
                         "model": model_name,
-                        "messages": messages,
+                        "messages": processed,
                         "stream": False,
                         **kwargs
                     }
                 )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 return {
                     "content": data["message"]["content"],
                     "usage": {
@@ -177,13 +246,29 @@ class OllamaProvider(BaseProvider):
                         "completion_tokens": data.get("eval_count", 0),
                         "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
                     },
+                    "cache_hit": False,
                     "model": model_name,
                     "provider": "ollama"
                 }
         except Exception as e:
             logger.error(f"Ollama API error: {e}")
             raise
-    
+
+    def _merge_layered_messages(self, messages: List[Dict]) -> List[Dict]:
+        """合并分层 system 消息为字符串"""
+        result = []
+        for msg in messages:
+            if msg["role"] == "system":
+                content = msg["content"]
+                if isinstance(content, dict) and "stable" in content:
+                    merged = content.get("stable", "") + "\n\n" + content.get("variable", "")
+                    result.append({"role": "system", "content": merged})
+                else:
+                    result.append(msg)
+            else:
+                result.append(msg)
+        return result
+
     async def test_connection(self, model_name: str = None) -> bool:
         try:
             import httpx

@@ -21,7 +21,7 @@ import {
 } from '@ant-design/icons'
 import { useAuthStore } from '../store/authStore'
 import ChatWorkspace from '../components/ChatWorkspace'
-import ModelSelector from '../components/ModelSelector'
+import SystemConfig from '../components/SystemConfig'
 import AssessmentProgress from '../components/AssessmentProgress'
 import VeriSureLogo from '../components/VeriSureLogo'
 import api from '../services/api'
@@ -539,7 +539,7 @@ function ChatPage() {
           </div>
           {!showManager && (
             <Space size="middle">
-              <ModelSelector value={selectedModel} onChange={setSelectedModel} />
+              <SystemConfig value={selectedModel} onChange={setSelectedModel} />
               <Tooltip title="通知">
                 <Button icon={<BellOutlined />} type="text" className="header-icon-btn" />
               </Tooltip>
