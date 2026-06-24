@@ -27,6 +27,7 @@ import {
   RocketOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
+import VeriSureLogo from './VeriSureLogo'
 import './ChatWorkspace.css'
 import './ScanAnimation.css'
 
@@ -1682,7 +1683,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       <div className="workspace-header">
         <div className="workspace-title">
           <div className="workspace-logo">
-            <img src="/verisure-logo.svg" alt="VeriSure" style={{ width: 56, height: 56 }} />
+            <VeriSureLogo size={56} />
           </div>
           <div>
             <div className="workspace-name">VeriSure Agent</div>

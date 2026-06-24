@@ -4,6 +4,7 @@ import { Form, Input, Button, message } from 'antd'
 import { LockOutlined, MailOutlined } from '@ant-design/icons'
 import api from '../services/api'
 import { useAuthStore } from '../store/authStore'
+import VeriSureLogo from '../components/VeriSureLogo'
 import './Auth.css'
 
 function Login() {
@@ -36,7 +37,7 @@ function Login() {
         <div className="auth-brand">
           <div className="brand-header">
             <div className="logo">
-              <div className="logo-mark"></div>
+              <VeriSureLogo size={72} />
               <span className="logo-text">VeriSure</span>
             </div>
             <div className="brand-badge">Intelligence · Compliance · Assurance</div>

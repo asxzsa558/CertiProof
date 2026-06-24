@@ -21,6 +21,7 @@ import { useAuthStore } from '../store/authStore'
 import ChatWorkspace from '../components/ChatWorkspace'
 import ModelSelector from '../components/ModelSelector'
 import AssessmentProgress from '../components/AssessmentProgress'
+import VeriSureLogo from '../components/VeriSureLogo'
 import api from '../services/api'
 import './ChatPage.css'
 
@@ -344,7 +345,7 @@ function ChatPage() {
       >
         <div className="sider-header">
           <div className="sider-logo">
-            <img src="/verisure-logo.svg" alt="VeriSure" style={{ width: 56, height: 56 }} />
+            <VeriSureLogo size={56} />
             <span className="logo-text">VeriSure</span>
           </div>
         </div>
