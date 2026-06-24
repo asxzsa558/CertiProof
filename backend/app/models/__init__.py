@@ -11,6 +11,9 @@ from app.models.context import (
     ConversationHistory, ActionHistory, ResultCache, ProjectMemory, UserMemory,
     ConversationArchive, ConversationThread
 )
+from app.models.assessment import (
+    FlowTemplate, Assessment, PhaseInstance, TaskInstance, FlowEvent
+)
 
 __all__ = [
     "User",
@@ -50,4 +53,9 @@ __all__ = [
     "UserMemory",
     "ConversationArchive",
     "ConversationThread",
+    "FlowTemplate",
+    "Assessment",
+    "PhaseInstance",
+    "TaskInstance",
+    "FlowEvent",
 ]

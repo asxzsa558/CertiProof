@@ -474,3 +474,15 @@
     display: none;
   }
 }
+
+/* Assessment Progress Section in Sidebar */
+.sider-assessment-section {
+  margin-top: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 8px 0;
+  flex-shrink: 0;
+}
+
+.sider-assessment-section .assessment-progress-container {
+  margin: 8px 12px;
+}

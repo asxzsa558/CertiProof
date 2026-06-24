@@ -11,6 +11,7 @@ from app.api.results import router as results_router
 from app.api.websocket import router as websocket_router
 from app.api.diagnostics import router as diagnostics_router
 from app.api.tasks import router as tasks_router
+from app.api.assessments import router as assessments_router
 
 api_router = APIRouter()
 
@@ -26,5 +27,6 @@ api_router.include_router(results_router)
 api_router.include_router(websocket_router)
 api_router.include_router(diagnostics_router)
 api_router.include_router(tasks_router)
+api_router.include_router(assessments_router)
 
 __all__ = ["api_router"]

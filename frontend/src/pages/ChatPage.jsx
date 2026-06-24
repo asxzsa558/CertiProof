@@ -20,6 +20,7 @@ import {
 import { useAuthStore } from '../store/authStore'
 import ChatWorkspace from '../components/ChatWorkspace'
 import ModelSelector from '../components/ModelSelector'
+import AssessmentProgress from '../components/AssessmentProgress'
 import api from '../services/api'
 import './ChatPage.css'
 
@@ -475,6 +476,16 @@ function ChatPage() {
               </div>
             )}
           </div>
+          
+          {/* Assessment Progress - 显示在侧边栏底部 */}
+          {selectedProject && !showManager && (
+            <div className="sider-assessment-section">
+              <AssessmentProgress 
+                projectId={selectedProject.id} 
+                projectName={selectedProject.name} 
+              />
+            </div>
+          )}
         </div>
       </Sider>
 
