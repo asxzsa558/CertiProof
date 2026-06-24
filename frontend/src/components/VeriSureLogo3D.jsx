@@ -31,29 +31,31 @@ function Shield() {
 
   return (
     <group ref={meshRef}>
-      {/* 外圈圆环 */}
+      {/* 外圈圆环 - 更亮的金色 */}
       <mesh rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[1, 0.08, 16, 64]} />
         <meshStandardMaterial 
-          color="#C5A55A" 
-          metalness={0.8} 
-          roughness={0.2}
-        />
-      </mesh>
-
-      {/* 盾牌主体 */}
-      <mesh position={[0, 0, 0]}>
-        <extrudeGeometry args={[shieldShape, extrudeSettings]} />
-        <meshStandardMaterial 
-          color="#1A3A6B" 
-          metalness={0.6} 
-          roughness={0.3}
-          emissive="#1A3A6B"
+          color="#FFD700" 
+          metalness={0.9} 
+          roughness={0.1}
+          emissive="#FFD700"
           emissiveIntensity={0.3}
         />
       </mesh>
 
-      {/* 对勾 */}
+      {/* 盾牌主体 - 更亮的蓝色 */}
+      <mesh position={[0, 0, 0]}>
+        <extrudeGeometry args={[shieldShape, extrudeSettings]} />
+        <meshStandardMaterial 
+          color="#2563EB" 
+          metalness={0.7} 
+          roughness={0.2}
+          emissive="#2563EB"
+          emissiveIntensity={0.5}
+        />
+      </mesh>
+
+      {/* 对勾 - 更亮的金色 */}
       <mesh position={[0, 0, 0.1]} rotation={[0, 0, 0]}>
         <tubeGeometry args={[
           new THREE.CatmullRomCurve3([
@@ -67,11 +69,11 @@ function Shield() {
           false
         ]} />
         <meshStandardMaterial 
-          color="#C5A55A" 
+          color="#FFD700" 
           metalness={0.9} 
           roughness={0.1}
-          emissive="#C5A55A"
-          emissiveIntensity={0.2}
+          emissive="#FFD700"
+          emissiveIntensity={0.4}
         />
       </mesh>
     </group>
@@ -102,14 +104,14 @@ function VeriSureLogo3D({ size = 56 }) {
   return (
     <div style={{ width: size, height: size }}>
       <Canvas
-        camera={{ position: [0, 0, 2.5], fov: 60 }}
+        camera={{ position: [0, 0, 2.0], fov: 75 }}
         style={{ background: 'transparent' }}
         onError={() => setWebglSupported(false)}
       >
-        <hemisphereLight args={['#C5A55A', '#0B1D3A', 1.0]} />
-        <pointLight position={[5, 5, 5]} intensity={1.5} color="#C5A55A" />
-        <pointLight position={[-5, -5, 5]} intensity={0.8} color="#1A3A6B" />
-        <pointLight position={[0, 5, -5]} intensity={0.5} color="#ffffff" />
+        <hemisphereLight args={['#FFD700', '#2563EB', 1.5]} />
+        <pointLight position={[5, 5, 5]} intensity={2.0} color="#FFD700" />
+        <pointLight position={[-5, -5, 5]} intensity={1.2} color="#2563EB" />
+        <pointLight position={[0, 5, -5]} intensity={0.8} color="#ffffff" />
         <Shield />
       </Canvas>
     </div>

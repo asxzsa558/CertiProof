@@ -1679,41 +1679,6 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
 
   return (
     <div className="chat-workspace">
-      {/* Header */}
-      <div className="workspace-header">
-        <div className="workspace-title">
-          {/* 项目名称已在 ChatPage.jsx 顶部 Header 显示，此处移除避免重复 */}
-        </div>
-        <div className="workspace-status">
-          <div className="status-indicator">
-            <div className="status-dot"></div>
-            <span>在线</span>
-          </div>
-          <div className="header-actions">
-            <Dropdown
-              menu={{
-                items: [
-                  { key: 'archive', icon: <FolderOutlined />, label: '归档当前对话' },
-                  { key: 'view-archives', icon: <HistoryOutlined />, label: '查看归档' },
-                  { type: 'divider' },
-                  { key: 'new-thread', icon: <SwapOutlined />, label: '新建线程' },
-                  { key: 'view-threads', icon: <SwapOutlined />, label: '切换线程' },
-                ],
-                onClick: ({ key }) => {
-                  if (key === 'archive') handleCreateArchive()
-                  else if (key === 'view-archives') { loadArchives(); setShowArchivePanel(true) }
-                  else if (key === 'new-thread') handleCreateThread()
-                  else if (key === 'view-threads') { loadThreads(); setShowThreadPanel(true) }
-                }
-              }}
-              trigger={['click']}
-            >
-              <Button type="text" icon={<HistoryOutlined />} className="header-action-btn" />
-            </Dropdown>
-          </div>
-        </div>
-      </div>
-
       {/* Archive Panel Modal */}
       <Modal
         title="对话归档"
