@@ -36,7 +36,6 @@ class Settings(BaseSettings):
     AI_CACHE_MIN_TOKENS: int = 1024  # 触发 cache 的最小 token 数（Anthropic 限制）
 
     # 测评流程配置
-    ASSESSMENT_DEFAULT_LEVEL: int = 3  # 默认等保级别（2/3）
     ASSESSMENT_AUTO_START: bool = False  # 创建后是否自动开始
     ASSESSMENT_AUTO_EXECUTE_TASKS: bool = True  # 是否自动执行扫描类任务
     ASSESSMENT_MAX_CONCURRENT: int = 5  # 多资产扫描最大并发数

@@ -35,11 +35,6 @@ DEFAULT_CONFIGS = {
         "category": "ai",
     },
     # 测评流程
-    "assessment.default_level": {
-        "value": settings.ASSESSMENT_DEFAULT_LEVEL,
-        "description": "新建测评时的默认等保级别（2/3）",
-        "category": "assessment",
-    },
     "assessment.auto_start": {
         "value": settings.ASSESSMENT_AUTO_START,
         "description": "创建测评后是否自动开始",

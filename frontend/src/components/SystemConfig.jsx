@@ -234,17 +234,6 @@ function SystemConfig({ trigger, value, onChange }) {
           </h3>
 
           <Form layout="vertical">
-            <Form.Item label="默认等保级别">
-              <Select
-                value={getCurrentValue('assessment.default_level') || 3}
-                onChange={(v) => handleConfigChange('assessment.default_level', v)}
-                className="full-width-select"
-              >
-                <Option value={2}>等保二级</Option>
-                <Option value={3}>等保三级</Option>
-              </Select>
-            </Form.Item>
-
             <Form.Item
               label="创建后自动开始"
               help="测评创建后是否自动启动第一阶段。"
