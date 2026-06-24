@@ -1679,6 +1679,36 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
 
   return (
     <div className="chat-workspace">
+      {/* 浮动操作按钮 - 归档/线程管理 */}
+      <div className="floating-actions">
+        <Dropdown
+          menu={{
+            items: [
+              { key: 'archive', icon: <FolderOutlined />, label: '归档当前对话' },
+              { key: 'view-archives', icon: <HistoryOutlined />, label: '查看归档' },
+              { type: 'divider' },
+              { key: 'new-thread', icon: <SwapOutlined />, label: '新建线程' },
+              { key: 'view-threads', icon: <SwapOutlined />, label: '切换线程' },
+            ],
+            onClick: ({ key }) => {
+              if (key === 'archive') handleCreateArchive()
+              else if (key === 'view-archives') { loadArchives(); setShowArchivePanel(true) }
+              else if (key === 'new-thread') handleCreateThread()
+              else if (key === 'view-threads') { loadThreads(); setShowThreadPanel(true) }
+            }
+          }}
+          trigger={['click']}
+          placement="topRight"
+        >
+          <Button 
+            type="text" 
+            icon={<HistoryOutlined />} 
+            className="floating-action-btn"
+            title="对话管理"
+          />
+        </Dropdown>
+      </div>
+
       {/* Archive Panel Modal */}
       <Modal
         title="对话归档"

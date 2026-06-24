@@ -8,6 +8,34 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   overflow: hidden;
+  position: relative;
+}
+
+/* 浮动操作按钮 */
+.floating-actions {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+}
+
+.floating-action-btn {
+  color: rgba(255, 255, 255, 0.6) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s !important;
+}
+
+.floating-action-btn:hover {
+  color: #C5A55A !important;
+  background: rgba(197, 165, 90, 0.1) !important;
+  border-color: rgba(197, 165, 90, 0.3) !important;
 }
 
 /* Messages */
