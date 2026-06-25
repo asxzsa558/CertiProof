@@ -42,6 +42,9 @@
 
 .sider-actions {
   padding: 16px 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .new-project-btn {
@@ -54,6 +57,21 @@
 
 .new-project-btn:hover {
   background: linear-gradient(135deg, #818cf8, #a78bfa) !important;
+}
+
+.dashboard-btn {
+  height: 40px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-weight: 500;
+}
+
+.dashboard-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+  color: #6366f1 !important;
 }
 
 .sider-section {

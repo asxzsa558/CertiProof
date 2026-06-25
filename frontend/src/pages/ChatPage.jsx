@@ -18,6 +18,7 @@ import {
   AppstoreOutlined,
   UpOutlined,
   DownOutlined,
+  DashboardOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../store/authStore'
 import ChatWorkspace from '../components/ChatWorkspace'
@@ -354,6 +355,14 @@ function ChatPage() {
         </div>
 
         <div className="sider-actions">
+          <Button
+            icon={<DashboardOutlined />}
+            onClick={() => navigate('/dashboard')}
+            block
+            className="dashboard-btn"
+          >
+            态势总览
+          </Button>
           <Button
             type="primary"
             icon={<PlusOutlined />}

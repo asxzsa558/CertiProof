@@ -7,6 +7,7 @@ import ChatPage from './pages/ChatPage'
 import ModelSettings from './pages/ModelSettings'
 import ResultsPage from './pages/ResultsPage'
 import ResultDetailPage from './pages/ResultDetailPage'
+import Dashboard from './pages/Dashboard'
 import './index.css'
 
 function ProtectedRoute({ children }) {
@@ -82,6 +83,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <ChatPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
               </ProtectedRoute>
             }
           />
