@@ -13,6 +13,8 @@ from app.models.finding import Finding
 from app.models.remediation import RemediationTicket
 from app.models.questionnaire import QuestionnaireRecord
 from app.models.evidence import Evidence
+from app.models.assessment import Assessment, PhaseInstance, TaskInstance, FlowEvent
+from app.models.monitoring import ScheduledScan, ScanHistory
 from app.models.context import (
     ConversationHistory, ActionHistory, ResultCache,
     ProjectMemory, ConversationArchive, ConversationThread,
@@ -139,6 +141,47 @@ async def delete_project(
     )
     await db.execute(delete(QuestionnaireRecord).where(QuestionnaireRecord.project_id == project_id))
     await db.execute(delete(Finding).where(Finding.project_id == project_id))
+    
+    # 删除测评流程相关记录
+    assessment_ids = await db.execute(
+        select(Assessment.id).where(Assessment.project_id == project_id)
+    )
+    assessment_id_list = [row[0] for row in assessment_ids.all()]
+    
+    if assessment_id_list:
+        # 删除 FlowEvent（引用 assessments, phase_instances, task_instances）
+        await db.execute(
+            delete(FlowEvent).where(FlowEvent.assessment_id.in_(assessment_id_list))
+        )
+        # 删除 TaskInstance（引用 phase_instances）
+        phase_ids = await db.execute(
+            select(PhaseInstance.id).where(PhaseInstance.assessment_id.in_(assessment_id_list))
+        )
+        phase_id_list = [row[0] for row in phase_ids.all()]
+        if phase_id_list:
+            await db.execute(
+                delete(TaskInstance).where(TaskInstance.phase_id.in_(phase_id_list))
+            )
+            await db.execute(
+                delete(PhaseInstance).where(PhaseInstance.assessment_id.in_(assessment_id_list))
+            )
+        # 删除 Assessment
+        await db.execute(delete(Assessment).where(Assessment.project_id == project_id))
+    
+    # 删除监控相关记录
+    scheduled_scan_ids = await db.execute(
+        select(ScheduledScan.id).where(ScheduledScan.project_id == project_id)
+    )
+    scheduled_scan_id_list = [row[0] for row in scheduled_scan_ids.all()]
+    
+    if scheduled_scan_id_list:
+        # 删除 ScanHistory（引用 scheduled_scans）
+        await db.execute(
+            delete(ScanHistory).where(ScanHistory.scheduled_scan_id.in_(scheduled_scan_id_list))
+        )
+        # 删除 ScheduledScan
+        await db.execute(delete(ScheduledScan).where(ScheduledScan.project_id == project_id))
+    
     await db.execute(delete(ScanTask).where(ScanTask.project_id == project_id))
     await db.execute(delete(Asset).where(Asset.project_id == project_id))
 

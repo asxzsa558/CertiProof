@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Spin, Tag, Tooltip, Progress, Empty } from 'antd'
 import {
   ProjectOutlined,
@@ -136,7 +135,6 @@ function RiskBar({ label, count, color, total }) {
 }
 
 export default function Dashboard() {
-  const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
