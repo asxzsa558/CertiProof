@@ -90,7 +90,7 @@ class Assessment(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # 关系
-    project = relationship("Project", backref="assessments")
+    project = relationship("Project", backref="flow_assessments")
     template = relationship("FlowTemplate", back_populates="assessments")
     phases = relationship("PhaseInstance", back_populates="assessment", cascade="all, delete-orphan", 
                          order_by="PhaseInstance.order")

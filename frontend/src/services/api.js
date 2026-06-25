@@ -11,9 +11,14 @@ const api = axios.create({
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
-    const token = useAuthStore.getState().token
+    const state = useAuthStore.getState()
+    const token = state.token
+    const orgId = state.currentOrgId
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
+    }
+    if (orgId) {
+      config.headers['X-Org-Id'] = String(orgId)
     }
     return config
   },
@@ -27,27 +32,27 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config
-    
+
     // Skip refresh endpoint to avoid infinite loop
     if (originalRequest.url.includes('/auth/refresh')) {
       return Promise.reject(error)
     }
-    
+
     // If 401 and not already retrying
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true
-      
+
       const refreshToken = useAuthStore.getState().refreshToken
-      
+
       if (refreshToken) {
         try {
           const response = await axios.post('/api/v1/auth/refresh', {
             refresh_token: refreshToken,
           })
-          
-          const { access_token, refresh_token: newRefreshToken, user } = response.data
-          useAuthStore.getState().setAuth(access_token, newRefreshToken, user)
-          
+
+          const { access_token, refresh_token: newRefreshToken, user, organizations } = response.data
+          useAuthStore.getState().setAuth(access_token, newRefreshToken, user, organizations)
+
           originalRequest.headers.Authorization = `Bearer ${access_token}`
           return api(originalRequest)
         } catch (refreshError) {
@@ -67,7 +72,7 @@ api.interceptors.response.use(
         }, 100)
       }
     }
-    
+
     return Promise.reject(error)
   }
 )

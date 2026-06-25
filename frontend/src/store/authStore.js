@@ -7,11 +7,32 @@ export const useAuthStore = create(
       token: null,
       refreshToken: null,
       user: null,
-      
-      setAuth: (token, refreshToken, user) => set({ token, refreshToken, user }),
-      
-      logout: () => set({ token: null, refreshToken: null, user: null }),
-      
+      organizations: [],
+      currentOrgId: null,
+
+      setAuth: (token, refreshToken, user, organizations = []) => set({
+        token,
+        refreshToken,
+        user,
+        organizations,
+        currentOrgId: organizations.length > 0 ? organizations[0].id : null,
+      }),
+
+      setOrganizations: (organizations) => set({
+        organizations,
+        currentOrgId: organizations.length > 0 ? organizations[0].id : null,
+      }),
+
+      setCurrentOrg: (orgId) => set({ currentOrgId: orgId }),
+
+      logout: () => set({
+        token: null,
+        refreshToken: null,
+        user: null,
+        organizations: [],
+        currentOrgId: null,
+      }),
+
       updateUser: (user) => set({ user }),
     }),
     {

@@ -1,4 +1,6 @@
 from app.models.user import User, UserRole, SubscriptionTier
+from app.models.organization import Organization, OrganizationMember, OrgRole
+from app.models.assessment_type import AssessmentType, ProjectAssessment
 from app.models.project import Project, ComplianceLevel, ProjectStatus
 from app.models.asset import Asset, AssetType, VerificationStatus, VerificationMethod
 from app.models.scan_task import ScanTask, ScanTaskType, ScanTaskStatus, TriggeredBy
@@ -21,6 +23,11 @@ __all__ = [
     "User",
     "UserRole",
     "SubscriptionTier",
+    "Organization",
+    "OrganizationMember",
+    "OrgRole",
+    "AssessmentType",
+    "ProjectAssessment",
     "Project",
     "ComplianceLevel",
     "ProjectStatus",

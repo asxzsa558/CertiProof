@@ -8,18 +8,19 @@ import ModelSettings from './pages/ModelSettings'
 import ResultsPage from './pages/ResultsPage'
 import ResultDetailPage from './pages/ResultDetailPage'
 import Dashboard from './pages/Dashboard'
+import OrganizationSettings from './pages/OrganizationSettings'
 import './index.css'
 
 function ProtectedRoute({ children }) {
   const token = useAuthStore((state) => state.token)
   const hasHydrated = useAuthStore((state) => state._hasHydrated)
-  
+
   if (hasHydrated === false) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
         height: '100vh',
         background: '#0a0a0b',
         color: '#fff',
@@ -28,7 +29,7 @@ function ProtectedRoute({ children }) {
       </div>
     )
   }
-  
+
   if (!token) {
     return <Navigate to="/login" replace />
   }
@@ -85,10 +86,10 @@ function App() {
             }
           />
           <Route
-            path="/settings/models"
+            path="/projects/:projectId"
             element={
               <ProtectedRoute>
-                <ModelSettings />
+                <ChatPage />
               </ProtectedRoute>
             }
           />
@@ -109,14 +110,31 @@ function App() {
             }
           />
           <Route
-            index
+            path="/settings/models"
             element={
               <ProtectedRoute>
-                <ChatPage />
+                <ModelSettings />
               </ProtectedRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route
+            path="/settings/organization"
+            element={
+              <ProtectedRoute>
+                <OrganizationSettings />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            index
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
     </ConfigProvider>

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-from typing import List
+from sqlalchemy.orm import selectinload
+from typing import List, Optional
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
@@ -14,7 +15,9 @@ from app.models.remediation import RemediationTicket
 from app.models.questionnaire import QuestionnaireRecord
 from app.models.evidence import Evidence
 from app.models.assessment import Assessment, PhaseInstance, TaskInstance, FlowEvent
+from app.models.assessment_type import AssessmentType, ProjectAssessment
 from app.models.monitoring import ScheduledScan, ScanHistory
+from app.models.organization import OrganizationMember
 from app.models.context import (
     ConversationHistory, ActionHistory, ResultCache,
     ProjectMemory, ConversationArchive, ConversationThread,
@@ -25,34 +28,120 @@ from app.services.report_service import generate_report, generate_json_report
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
 
+async def check_org_member(db: AsyncSession, org_id: int, user_id: int) -> None:
+    """检查用户是否属于该组织"""
+    result = await db.execute(
+        select(OrganizationMember).where(
+            OrganizationMember.organization_id == org_id,
+            OrganizationMember.user_id == user_id,
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not a member of this organization",
+        )
+
+
+async def get_project_for_user(db: AsyncSession, project_id: int, user_id: int) -> Project:
+    """获取项目并验证用户有权限访问（通过组织成员关系）"""
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project.organization_id:
+        await check_org_member(db, project.organization_id, user_id)
+    else:
+        # Fallback: old projects without org
+        if project.user_id != user_id:
+            raise HTTPException(status_code=403, detail="No access to this project")
+
+    return project
+
+
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(
     project_data: ProjectCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Verify user is member of organization
+    await check_org_member(db, project_data.organization_id, current_user.id)
+
     project = Project(
         user_id=current_user.id,
+        organization_id=project_data.organization_id,
+        owner_id=current_user.id,
         name=project_data.name,
+        system_name=project_data.system_name,
         description=project_data.description,
         compliance_level=project_data.compliance_level,
     )
     db.add(project)
+    await db.flush()
+
+    # Create ProjectAssessment records for each assessment type
+    if project_data.assessment_type_ids:
+        result = await db.execute(
+            select(AssessmentType).where(
+                AssessmentType.id.in_(project_data.assessment_type_ids),
+                AssessmentType.is_active == True,
+            )
+        )
+        assessment_types = result.scalars().all()
+        for atype in assessment_types:
+            level = None
+            if atype.code == "dengbao" and project_data.compliance_level:
+                level = project_data.compliance_level.value
+            pa = ProjectAssessment(
+                project_id=project.id,
+                assessment_type_id=atype.id,
+                level=level,
+                status="not_started",
+                progress=0.0,
+            )
+            db.add(pa)
+
     await db.commit()
-    await db.refresh(project)
+    result = await db.execute(
+        select(Project)
+        .where(Project.id == project.id)
+        .options(selectinload(Project.assessments).selectinload(ProjectAssessment.assessment_type))
+    )
+    project = result.scalar_one()
     return project
 
 
 @router.get("/", response_model=List[ProjectListResponse])
 async def list_projects(
+    organization_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(Project).where(Project.user_id == current_user.id).order_by(Project.created_at.desc())
-    )
-    projects = result.scalars().all()
-    return projects
+    if organization_id:
+        # Verify user is member of organization
+        await check_org_member(db, organization_id, current_user.id)
+        result = await db.execute(
+            select(Project)
+            .where(Project.organization_id == organization_id)
+            .order_by(Project.created_at.desc())
+        )
+    else:
+        # Return all projects from all organizations the user belongs to
+        org_ids_result = await db.execute(
+            select(OrganizationMember.organization_id)
+            .where(OrganizationMember.user_id == current_user.id)
+        )
+        org_ids = [row[0] for row in org_ids_result.all()]
+        if not org_ids:
+            return []
+        result = await db.execute(
+            select(Project)
+            .where(Project.organization_id.in_(org_ids))
+            .order_by(Project.created_at.desc())
+        )
+    return result.scalars().all()
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
@@ -61,18 +150,7 @@ async def get_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
-    
-    return project
+    return await get_project_for_user(db, project_id, current_user.id)
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
@@ -82,25 +160,18 @@ async def update_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
-    
+    project = await get_project_for_user(db, project_id, current_user.id)
+
     # Update fields
     if project_data.name is not None:
         project.name = project_data.name
     if project_data.description is not None:
         project.description = project_data.description
+    if project_data.system_name is not None:
+        project.system_name = project_data.system_name
     if project_data.status is not None:
         project.status = project_data.status
-    
+
     await db.commit()
     await db.refresh(project)
     return project
@@ -112,16 +183,7 @@ async def delete_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
+    project = await get_project_for_user(db, project_id, current_user.id)
 
     await db.execute(delete(RemediationTicket).where(RemediationTicket.project_id == project_id))
     await db.execute(delete(Evidence).where(Evidence.project_id == project_id))
@@ -141,19 +203,18 @@ async def delete_project(
     )
     await db.execute(delete(QuestionnaireRecord).where(QuestionnaireRecord.project_id == project_id))
     await db.execute(delete(Finding).where(Finding.project_id == project_id))
-    
+    await db.execute(delete(ProjectAssessment).where(ProjectAssessment.project_id == project_id))
+
     # 删除测评流程相关记录
     assessment_ids = await db.execute(
         select(Assessment.id).where(Assessment.project_id == project_id)
     )
     assessment_id_list = [row[0] for row in assessment_ids.all()]
-    
+
     if assessment_id_list:
-        # 删除 FlowEvent（引用 assessments, phase_instances, task_instances）
         await db.execute(
             delete(FlowEvent).where(FlowEvent.assessment_id.in_(assessment_id_list))
         )
-        # 删除 TaskInstance（引用 phase_instances）
         phase_ids = await db.execute(
             select(PhaseInstance.id).where(PhaseInstance.assessment_id.in_(assessment_id_list))
         )
@@ -165,23 +226,20 @@ async def delete_project(
             await db.execute(
                 delete(PhaseInstance).where(PhaseInstance.assessment_id.in_(assessment_id_list))
             )
-        # 删除 Assessment
         await db.execute(delete(Assessment).where(Assessment.project_id == project_id))
-    
+
     # 删除监控相关记录
     scheduled_scan_ids = await db.execute(
         select(ScheduledScan.id).where(ScheduledScan.project_id == project_id)
     )
     scheduled_scan_id_list = [row[0] for row in scheduled_scan_ids.all()]
-    
+
     if scheduled_scan_id_list:
-        # 删除 ScanHistory（引用 scheduled_scans）
         await db.execute(
             delete(ScanHistory).where(ScanHistory.scheduled_scan_id.in_(scheduled_scan_id_list))
         )
-        # 删除 ScheduledScan
         await db.execute(delete(ScheduledScan).where(ScheduledScan.project_id == project_id))
-    
+
     await db.execute(delete(ScanTask).where(ScanTask.project_id == project_id))
     await db.execute(delete(Asset).where(Asset.project_id == project_id))
 
@@ -211,22 +269,12 @@ async def download_report(
     current_user: User = Depends(get_current_user),
 ):
     """Generate and download PDF compliance report."""
-    # Verify project access
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
-    
+    await get_project_for_user(db, project_id, current_user.id)
+
     try:
         pdf_buffer = await generate_report(db, project_id)
         pdf_data = pdf_buffer.getvalue()
-        
+
         from fastapi.responses import Response
         return Response(
             content=pdf_data,
@@ -252,21 +300,11 @@ async def download_json_report(
     current_user: User = Depends(get_current_user),
 ):
     """Generate and download JSON compliance report."""
-    # Verify project access
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
-    
+    await get_project_for_user(db, project_id, current_user.id)
+
     try:
         report_data = await generate_json_report(db, project_id)
-        
+
         from fastapi.responses import JSONResponse
         return JSONResponse(
             content=report_data,

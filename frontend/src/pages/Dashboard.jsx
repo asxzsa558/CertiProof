@@ -1,149 +1,157 @@
 import { useState, useEffect } from 'react'
-import { Spin, Tag, Tooltip, Progress, Empty } from 'antd'
+import { useNavigate } from 'react-router-dom'
+import {
+  Spin,
+  Tag,
+  Tooltip,
+  Empty,
+  Modal,
+  Form,
+  Input,
+  Select,
+  Checkbox,
+  Radio,
+  message,
+  Dropdown,
+  Avatar,
+} from 'antd'
 import {
   ProjectOutlined,
-  SafetyCertificateOutlined,
-  AlertOutlined,
   RocketOutlined,
-  CloudServerOutlined,
-  TeamOutlined,
-  ArrowUpOutlined,
-  ArrowDownOutlined,
-  FireOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined,
-  ClockCircleOutlined,
+  PlusOutlined,
   ReloadOutlined,
+  UserOutlined,
+  LogoutOutlined,
+  SettingOutlined,
+  BankOutlined,
+  SafetyCertificateOutlined,
+  LockOutlined,
+  DatabaseOutlined,
+  CloudServerOutlined,
+  SearchOutlined,
+  FilterOutlined,
+  AppstoreOutlined,
+  BarsOutlined,
+  ArrowLeftOutlined,
 } from '@ant-design/icons'
+import {
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip as ReTooltip,
+  Legend,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+} from 'recharts'
 import api from '../services/api'
+import { useAuthStore } from '../store/authStore'
 import VeriSureLogo from '../components/VeriSureLogo'
+import ProjectCard from '../components/ProjectCard'
 import './Dashboard.css'
 
-const SEVERITY_COLORS = {
-  critical: '#ff4d4f',
-  high: '#fa8c16',
-  medium: '#fadb14',
-  low: '#52c41a',
-  info: '#1890ff',
+const SEVERITY_COLORS = ['#ff4d4f', '#fa8c16', '#fadb14', '#52c41a', '#1890ff']
+
+const ASSESSMENT_TYPE_COLORS = {
+  dengbao: '#00ff88',
+  miping: '#a855f7',
+  guanji: '#ff6b35',
+  data_security: '#00b4d8',
 }
 
-const STATUS_COLORS = {
-  active: '#52c41a',
-  pending: '#faad14',
-  running: '#1890ff',
-  completed: '#52c41a',
-  failed: '#ff4d4f',
-  archived: '#8c8c8c',
-  open: '#ff4d4f',
-  resolved: '#52c41a',
-  in_progress: '#1890ff',
+const ASSESSMENT_TYPE_ICONS = {
+  dengbao: SafetyCertificateOutlined,
+  miping: LockOutlined,
+  guanji: CloudServerOutlined,
+  data_security: DatabaseOutlined,
 }
 
-function StatCard({ icon, label, value, sub, color, accent }) {
+function StatPanel({ label, value, sub, accentColor, icon }) {
   return (
-    <div className="dash-stat-card" style={{ '--accent': accent || color }}>
-      <div className="dash-stat-icon" style={{ color }}>{icon}</div>
-      <div className="dash-stat-body">
-        <div className="dash-stat-label">{label}</div>
-        <div className="dash-stat-value">{value}</div>
-        {sub && <div className="dash-stat-sub">{sub}</div>}
+    <div className="dash-stat-panel" style={{ '--accent-color': accentColor }}>
+      <div className="dash-stat-corner-tl" />
+      <div className="dash-stat-corner-tr" />
+      <div className="dash-stat-corner-bl" />
+      <div className="dash-stat-corner-br" />
+      <div className="dash-stat-scanline" />
+      <div className="dash-stat-top">
+        <span className="dash-stat-label">{label}</span>
+        {icon && <span className="dash-stat-icon" style={{ color: accentColor }}>{icon}</span>}
       </div>
+      <div className="dash-stat-value">{value}</div>
+      {sub && <div className="dash-stat-sub">{sub}</div>}
     </div>
   )
 }
 
-function GaugeRing({ percent, color, label, size = 140 }) {
-  const r = (size - 16) / 2
-  const c = 2 * Math.PI * r
-  const offset = c - (Math.min(100, Math.max(0, percent)) / 100) * c
+function StatusDot({ status }) {
+  const colorMap = {
+    not_started: '#666',
+    in_progress: '#00ff88',
+    completed: '#d4af37',
+  }
+  const color = colorMap[status] || '#666'
   return (
-    <div className="dash-gauge" style={{ width: size, height: size }}>
-      <svg width={size} height={size}>
-        <defs>
-          <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor={color} stopOpacity="0.9" />
-            <stop offset="100%" stopColor={color} stopOpacity="0.4" />
-          </linearGradient>
-        </defs>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke="url(#gaugeGrad)"
-          strokeWidth="8"
-          strokeDasharray={c}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        />
-      </svg>
-      <div className="dash-gauge-center">
-        <div className="dash-gauge-value">{Math.round(percent)}%</div>
-        <div className="dash-gauge-label">{label}</div>
-      </div>
-    </div>
-  )
-}
-
-function BarRow({ section, total, passed, failed, passRate }) {
-  return (
-    <div className="dash-bar-row">
-      <div className="dash-bar-section">{section}</div>
-      <div className="dash-bar-track">
-        <div
-          className="dash-bar-fill"
-          style={{
-            width: `${passRate}%`,
-            background: `linear-gradient(90deg, #52c41a, #95de64)`,
-          }}
-        />
-        <div
-          className="dash-bar-fail"
-          style={{
-            width: `${100 - passRate}%`,
-            left: `${passRate}%`,
-            background: `linear-gradient(90deg, #ff4d4f, #ff7875)`,
-          }}
-        />
-      </div>
-      <div className="dash-bar-numbers">
-        <span style={{ color: '#52c41a' }}>{passed}</span>
-        <span style={{ color: '#666' }}>/</span>
-        <span style={{ color: '#ff4d4f' }}>{failed}</span>
-        <span className="dash-bar-rate">{passRate.toFixed(0)}%</span>
-      </div>
-    </div>
-  )
-}
-
-function RiskBar({ label, count, color, total }) {
-  const pct = total > 0 ? (count / total) * 100 : 0
-  return (
-    <div className="dash-risk-row">
-      <div className="dash-risk-label">{label}</div>
-      <div className="dash-risk-track">
-        <div
-          className="dash-risk-fill"
-          style={{ width: `${pct}%`, background: color, boxShadow: `0 0 12px ${color}40` }}
-        />
-      </div>
-      <div className="dash-risk-count" style={{ color }}>{count}</div>
-    </div>
+    <span className="dash-status-dot" style={{ background: color, boxShadow: `0 0 8px ${color}` }}>
+      <span className="dash-status-dot-pulse" style={{ borderColor: color }} />
+    </span>
   )
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [assessmentTypes, setAssessmentTypes] = useState([])
+  const [searchKeyword, setSearchKeyword] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [createLoading, setCreateLoading] = useState(false)
+  const [createForm] = Form.useForm()
+  const [selectedAssessmentTypes, setSelectedAssessmentTypes] = useState([])
+  const [radarData] = useState([
+    { pillar: '物理', dengbao: 85 },
+    { pillar: '网络', dengbao: 72 },
+    { pillar: '主机', dengbao: 90 },
+    { pillar: '应用', dengbao: 68 },
+    { pillar: '数据', dengbao: 78 },
+    { pillar: '管理', dengbao: 82 },
+  ])
+  const [trendData] = useState([
+    { date: '06-01', score: 65 },
+    { date: '06-05', score: 68 },
+    { date: '06-10', score: 70 },
+    { date: '06-15', score: 72 },
+    { date: '06-20', score: 75 },
+    { date: '06-25', score: 78 },
+  ])
+
+  const token = useAuthStore((state) => state.token)
+  const user = useAuthStore((state) => state.user)
+  const organizations = useAuthStore((state) => state.organizations)
+  const currentOrgId = useAuthStore((state) => state.currentOrgId)
+  const setCurrentOrg = useAuthStore((state) => state.setCurrentOrg)
+  const logout = useAuthStore((state) => state.logout)
+
+  const currentOrg = organizations.find((o) => o.id === currentOrgId)
 
   const loadData = async () => {
+    if (!currentOrgId) return
     try {
       setLoading(true)
       setError(null)
-      const res = await api.get('/dashboard/overview')
+      const res = await api.get(`/dashboard/overview?organization_id=${currentOrgId}`)
       setData(res.data)
     } catch (err) {
       console.error('Dashboard load error:', err)
@@ -153,339 +161,452 @@ export default function Dashboard() {
     }
   }
 
+  const loadAssessmentTypes = async () => {
+    try {
+      const res = await api.get('/dashboard/assessment-types')
+      setAssessmentTypes(res.data.assessment_types || [])
+    } catch (err) {
+      console.error('Failed to load assessment types:', err)
+    }
+  }
+
   useEffect(() => {
-    loadData()
-    const t = setInterval(loadData, 60000)
+    if (currentOrgId) {
+      loadData()
+      loadAssessmentTypes()
+    }
+    const t = setInterval(() => {
+      if (currentOrgId) loadData()
+    }, 60000)
     return () => clearInterval(t)
-  }, [])
+  }, [currentOrgId])
+
+  const handleOrgSwitch = (orgId) => {
+    setCurrentOrg(orgId)
+  }
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
+
+  const handleCreateProject = async (values) => {
+    setCreateLoading(true)
+    try {
+      const payload = {
+        name: values.name,
+        organization_id: currentOrgId,
+        system_name: values.systemName,
+        description: values.description,
+        assessment_type_ids: selectedAssessmentTypes,
+      }
+      if (values.assessmentTypeIds?.includes(1) && values.complianceLevel) {
+        payload.compliance_level = values.complianceLevel
+      }
+      await api.post('/projects/', payload)
+      message.success('项目创建成功')
+      setCreateModalOpen(false)
+      createForm.resetFields()
+      setSelectedAssessmentTypes([])
+      loadData()
+    } catch (err) {
+      message.error(err.response?.data?.detail || '创建失败')
+    } finally {
+      setCreateLoading(false)
+    }
+  }
+
+  const filteredProjects = data?.projects?.filter((p) => {
+    if (searchKeyword && !p.name.includes(searchKeyword) && !(p.system_name || '').includes(searchKeyword)) {
+      return false
+    }
+    if (statusFilter !== 'all' && p.overall_status !== statusFilter) {
+      return false
+    }
+    if (typeFilter !== 'all') {
+      const hasType = p.assessment_types?.some((at) => at.code === typeFilter)
+      if (!hasType) return false
+    }
+    return true
+  }) || []
+
+  const pieData = data ? [
+    { name: '未开始', value: data.summary.not_started, color: '#666' },
+    { name: '进行中', value: data.summary.in_progress, color: '#00ff88' },
+    { name: '已完成', value: data.summary.completed, color: '#d4af37' },
+  ] : []
+
+  const orgMenuItems = [
+    ...organizations.map((org) => ({
+      key: `org-${org.id}`,
+      label: (
+        <div className="dash-org-menu-item">
+          <BankOutlined />
+          <span>{org.name}</span>
+          <Tag color="default">{org.role}</Tag>
+        </div>
+      ),
+      onClick: () => handleOrgSwitch(org.id),
+    })),
+  ]
 
   if (loading && !data) {
     return (
       <div className="dash-loading">
         <Spin size="large" />
-        <div className="dash-loading-text">加载态势数据...</div>
+        <div className="dash-loading-text">INITIALIZING COMMAND CENTER...</div>
       </div>
     )
   }
-
-  if (error && !data) {
-    return (
-      <div className="dash-error">
-        <Empty description={error} />
-        <button className="dash-retry-btn" onClick={loadData}>
-          <ReloadOutlined /> 重试
-        </button>
-      </div>
-    )
-  }
-
-  if (!data) return null
-
-  const { overview, compliance, risk, progress, assets, users, generated_at } = data
-  const totalRisk = risk.critical + risk.high + risk.medium + risk.low + risk.info
-  const totalUsers = users.total_users || 1
 
   return (
     <div className="dash-root">
       <div className="dash-bg-grid" />
-      <div className="dash-bg-glow" />
+      <div className="dash-bg-logo">
+        <VeriSureLogo size={400} />
+      </div>
+      <div className="dash-bg-scan" />
+      <div className="dash-bg-vignette" />
 
       <header className="dash-header">
         <div className="dash-header-left">
-          <VeriSureLogo size={36} />
-          <div>
-            <div className="dash-title">态势总览</div>
-            <div className="dash-subtitle">等保测评合规态势 · 实时监控</div>
+          <VeriSureLogo size={32} />
+          <div className="dash-brand">
+            <span className="dash-brand-name">VeriSure</span>
+            <span className="dash-brand-sub">INTELLIGENCE COMMAND CENTER</span>
           </div>
+          <div className="dash-classification">CLASSIFIED // TOP SECRET</div>
         </div>
+
+        <div className="dash-header-center">
+          <Dropdown menu={{ items: orgMenuItems }} placement="bottomLeft">
+            <div className="dash-org-switcher">
+              <BankOutlined />
+              <span className="dash-org-name">{currentOrg?.name || '选择组织'}</span>
+              <Tag color={currentOrg?.role === 'admin' ? 'gold' : 'default'} className="dash-org-role">
+                {currentOrg?.role?.toUpperCase()}
+              </Tag>
+            </div>
+          </Dropdown>
+        </div>
+
         <div className="dash-header-right">
-          <div className="dash-updated">
-            <ClockCircleOutlined /> 最后更新：{new Date(generated_at).toLocaleString('zh-CN')}
+          <div className="dash-user-info">
+            <Avatar size="small" icon={<UserOutlined />} className="dash-user-avatar" />
+            <span className="dash-user-name">{user?.username || 'User'}</span>
           </div>
-          <button className="dash-icon-btn" onClick={loadData} title="刷新">
-            <ReloadOutlined spin={loading} />
+          {currentOrg?.role === 'admin' && (
+            <button
+              className="dash-icon-btn"
+              onClick={() => navigate('/settings/organization')}
+              title="组织管理"
+            >
+              <BankOutlined />
+            </button>
+          )}
+          <button
+            className="dash-icon-btn"
+            onClick={() => navigate('/settings/models')}
+            title="系统设置"
+          >
+            <SettingOutlined />
+          </button>
+          <button
+            className="dash-icon-btn"
+            onClick={handleLogout}
+            title="退出登录"
+          >
+            <LogoutOutlined />
           </button>
         </div>
       </header>
 
       <section className="dash-section">
         <div className="dash-section-header">
-          <ProjectOutlined className="dash-section-icon" />
-          <span>项目总览</span>
+          <span className="dash-section-tag">// STATUS OVERVIEW</span>
+          <span className="dash-section-title">态势总览</span>
+          <span className="dash-section-meta">
+            实时监控 · 最后更新：{data ? new Date(data.generated_at).toLocaleString('zh-CN') : '-'}
+          </span>
+          <button className="dash-icon-btn" onClick={loadData} title="刷新">
+            <ReloadOutlined spin={loading} />
+          </button>
         </div>
         <div className="dash-stats-grid">
-          <StatCard
+          <StatPanel
+            label="PROJECT DOSSIERS"
+            value={data?.summary?.total ?? 0}
+            sub={`ACTIVE ${data?.summary?.in_progress ?? 0} · COMPLETED ${data?.summary?.completed ?? 0}`}
+            accentColor="#00ff88"
             icon={<ProjectOutlined />}
-            label="项目总数"
-            value={overview.total}
-            sub={<><ArrowUpOutlined /> 7 天新增 {overview.recent_7d}</>}
-            color="#6366f1"
-            accent="rgba(99,102,241,0.3)"
           />
-          <StatCard
+          <StatPanel
+            label="AVG COMPLIANCE"
+            value={data?.summary?.avg_score?.toFixed(1) ?? '0.0'}
+            sub="满分 100 · 系统权重"
+            accentColor="#00b4d8"
             icon={<SafetyCertificateOutlined />}
-            label="进行中"
-            value={overview.active}
-            sub={`已归档 ${overview.archived}`}
-            color="#52c41a"
-            accent="rgba(82,196,26,0.3)"
           />
-          <StatCard
+          <StatPanel
+            label="IN PROGRESS"
+            value={data?.summary?.in_progress ?? 0}
+            sub={`NOT STARTED ${data?.summary?.not_started ?? 0}`}
+            accentColor="#d4af37"
             icon={<RocketOutlined />}
-            label="二级项目"
-            value={overview.level2_count}
-            sub={`三级项目 ${overview.level3_count}`}
-            color="#fa8c16"
-            accent="rgba(250,140,22,0.3)"
           />
-          <StatCard
-            icon={<SafetyCertificateOutlined />}
-            label="平均合规分"
-            value={overview.avg_score ? overview.avg_score.toFixed(1) : '-'}
-            sub="满分 100"
-            color="#722ed1"
-            accent="rgba(114,46,209,0.3)"
+          <StatPanel
+            label="COMPLETED"
+            value={data?.summary?.completed ?? 0}
+            sub="已完成测评项目"
+            accentColor="#a855f7"
+            icon={<CheckCircleOutlined />}
           />
         </div>
       </section>
 
-      <section className="dash-section dash-row-2">
-        <div className="dash-card dash-compliance">
-          <div className="dash-card-header">
-            <SafetyCertificateOutlined className="dash-card-icon" style={{ color: '#52c41a' }} />
-            <span>合规态势</span>
-            <Tag color="green" style={{ marginLeft: 'auto' }}>实时</Tag>
-          </div>
-          <div className="dash-card-body dash-compliance-body">
-            <GaugeRing percent={compliance.pass_rate} color="#52c41a" label="通过率" />
-            <GaugeRing percent={compliance.score} color="#1890ff" label="综合得分" size={120} />
-            <div className="dash-compliance-meta">
-              <div className="dash-meta-row">
-                <span className="dash-meta-label">已测条款</span>
-                <span className="dash-meta-value">{compliance.tested}</span>
-              </div>
-              <div className="dash-meta-row">
-                <span className="dash-meta-label">未测条款</span>
-                <span className="dash-meta-value">{compliance.not_tested}</span>
-              </div>
-              <div className="dash-meta-row">
-                <span className="dash-meta-label">部分符合</span>
-                <span className="dash-meta-value" style={{ color: '#faad14' }}>{compliance.partial}</span>
-              </div>
-              <div className="dash-meta-row">
-                <span className="dash-meta-label">形式符合</span>
-                <span className="dash-meta-value" style={{ color: '#1890ff' }}>{compliance.paper_compliant}</span>
-              </div>
-            </div>
-          </div>
-          <div className="dash-card-footer">
-            <div className="dash-bars">
-              {compliance.by_pillar.length === 0 ? (
-                <Empty description="暂无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              ) : (
-                compliance.by_pillar.map((p) => (
-                  <BarRow key={p.section} {...p} />
-                ))
-              )}
-            </div>
-          </div>
+      <section className="dash-section">
+        <div className="dash-section-header">
+          <span className="dash-section-tag">// ANALYTICS</span>
+          <span className="dash-section-title">数据分析</span>
         </div>
-
-        <div className="dash-card dash-risk">
-          <div className="dash-card-header">
-            <AlertOutlined className="dash-card-icon" style={{ color: '#ff4d4f' }} />
-            <span>风险地图</span>
-            <Tag color="red" style={{ marginLeft: 'auto' }}>{totalRisk} 项</Tag>
+        <div className="dash-charts-grid">
+          <div className="dash-chart-card">
+            <div className="dash-chart-header">
+              <span className="dash-chart-title">等保各支柱合规度</span>
+              <span className="dash-chart-sub">RADAR ANALYSIS</span>
+            </div>
+            <ResponsiveContainer width="100%" height={260}>
+              <RadarChart data={radarData}>
+                <PolarGrid stroke="rgba(0, 255, 136, 0.15)" />
+                <PolarAngleAxis dataKey="pillar" tick={{ fill: 'rgba(255,255,255,0.7)', fontSize: 12 }} />
+                <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} />
+                <Radar name="等保" dataKey="dengbao" stroke="#00ff88" fill="#00ff88" fillOpacity={0.3} />
+              </RadarChart>
+            </ResponsiveContainer>
           </div>
-          <div className="dash-card-body">
-            <div className="dash-risk-list">
-              <RiskBar label="严重" count={risk.critical} color={SEVERITY_COLORS.critical} total={totalRisk} />
-              <RiskBar label="高危" count={risk.high} color={SEVERITY_COLORS.high} total={totalRisk} />
-              <RiskBar label="中危" count={risk.medium} color={SEVERITY_COLORS.medium} total={totalRisk} />
-              <RiskBar label="低危" count={risk.low} color={SEVERITY_COLORS.low} total={totalRisk} />
-              <RiskBar label="提示" count={risk.info} color={SEVERITY_COLORS.info} total={totalRisk} />
+
+          <div className="dash-chart-card">
+            <div className="dash-chart-header">
+              <span className="dash-chart-title">项目状态分布</span>
+              <span className="dash-chart-sub">STATUS BREAKDOWN</span>
             </div>
-            <div className="dash-divider" />
-            <div className="dash-risk-status">
-              <Tooltip title="待处理">
-                <div className="dash-status-chip" style={{ borderColor: STATUS_COLORS.open }}>
-                  <CloseCircleOutlined style={{ color: STATUS_COLORS.open }} />
-                  <span>{risk.open}</span>
-                  <em>待处理</em>
-                </div>
-              </Tooltip>
-              <Tooltip title="处理中">
-                <div className="dash-status-chip" style={{ borderColor: STATUS_COLORS.in_progress }}>
-                  <ClockCircleOutlined style={{ color: STATUS_COLORS.in_progress }} />
-                  <span>{risk.in_progress}</span>
-                  <em>进行</em>
-                </div>
-              </Tooltip>
-              <Tooltip title="已解决">
-                <div className="dash-status-chip" style={{ borderColor: STATUS_COLORS.resolved }}>
-                  <CheckCircleOutlined style={{ color: STATUS_COLORS.resolved }} />
-                  <span>{risk.resolved}</span>
-                  <em>已解决</em>
-                </div>
-              </Tooltip>
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={95}
+                  paddingAngle={4}
+                  dataKey="value"
+                  label={(e) => `${e.name} ${e.value}`}
+                  labelLine={false}
+                >
+                  {pieData.map((entry, i) => (
+                    <Cell key={i} fill={entry.color} stroke="#0a0a0b" strokeWidth={2} />
+                  ))}
+                </Pie>
+                <ReTooltip
+                  contentStyle={{ background: 'rgba(17,17,19,0.95)', border: '1px solid rgba(0,255,136,0.3)', borderRadius: 8 }}
+                  labelStyle={{ color: '#fff' }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="dash-chart-card">
+            <div className="dash-chart-header">
+              <span className="dash-chart-title">合规分数趋势 (30天)</span>
+              <span className="dash-chart-sub">TREND ANALYSIS</span>
             </div>
-            <div className="dash-divider" />
-            <div className="dash-top-clauses">
-              <div className="dash-top-title">失分条款 TOP 10</div>
-              {risk.top_clauses.length === 0 ? (
-                <Empty description="暂无失分条款" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              ) : (
-                risk.top_clauses.map((c, i) => (
-                  <div className="dash-top-row" key={c.clause_id}>
-                    <span className="dash-top-rank" data-rank={i + 1}>{i + 1}</span>
-                    <span className="dash-top-id">{c.clause_id}</span>
-                    <Tooltip title={c.name}>
-                      <span className="dash-top-name">{c.name}</span>
-                    </Tooltip>
-                    <Tag color="red">{c.count}</Tag>
-                  </div>
-                ))
-              )}
-            </div>
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={trendData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 255, 136, 0.1)" />
+                <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} />
+                <YAxis tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }} />
+                <ReTooltip
+                  contentStyle={{ background: 'rgba(17,17,19,0.95)', border: '1px solid rgba(0,255,136,0.3)', borderRadius: 8 }}
+                  labelStyle={{ color: '#fff' }}
+                />
+                <Line type="monotone" dataKey="score" stroke="#00ff88" strokeWidth={2} dot={{ fill: '#00ff88', r: 4 }} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
         </div>
       </section>
 
-      <section className="dash-section dash-row-3">
-        <div className="dash-card">
-          <div className="dash-card-header">
-            <RocketOutlined className="dash-card-icon" style={{ color: '#1890ff' }} />
-            <span>测评进度</span>
+      <section className="dash-section">
+        <div className="dash-section-header">
+          <span className="dash-section-tag">// DOSSIERS</span>
+          <span className="dash-section-title">项目档案</span>
+          <div className="dash-filters">
+            <Select
+              size="small"
+              value={typeFilter}
+              onChange={setTypeFilter}
+              style={{ width: 120 }}
+              options={[
+                { value: 'all', label: '全部测评' },
+                ...assessmentTypes.map((t) => ({ value: t.code, label: t.name })),
+              ]}
+            />
+            <Select
+              size="small"
+              value={statusFilter}
+              onChange={setStatusFilter}
+              style={{ width: 100 }}
+              options={[
+                { value: 'all', label: '全部状态' },
+                { value: 'not_started', label: '未开始' },
+                { value: 'in_progress', label: '进行中' },
+                { value: 'completed', label: '已完成' },
+              ]}
+            />
+            <Input
+              size="small"
+              prefix={<SearchOutlined />}
+              placeholder="搜索项目..."
+              value={searchKeyword}
+              onChange={(e) => setSearchKeyword(e.target.value)}
+              style={{ width: 180 }}
+            />
           </div>
-          <div className="dash-card-body">
-            <div className="dash-progress-grid">
-              <div className="dash-progress-cell">
-                <div className="dash-progress-label">活跃任务</div>
-                <div className="dash-progress-value" style={{ color: '#1890ff' }}>{progress.active_tasks}</div>
-                <div className="dash-progress-sub">待 {progress.pending} · 跑 {progress.running}</div>
-              </div>
-              <div className="dash-progress-cell">
-                <div className="dash-progress-label">7 天完成</div>
-                <div className="dash-progress-value" style={{ color: '#52c41a' }}>{progress.completed_7d}</div>
-                <div className="dash-progress-sub">失败 {progress.failed_7d}</div>
-              </div>
-              <div className="dash-progress-cell">
-                <div className="dash-progress-label">问卷</div>
-                <div className="dash-progress-value" style={{ color: '#722ed1' }}>{progress.questionnaires_completed}</div>
-                <Progress
-                  percent={progress.questionnaires_total ? Math.round(progress.questionnaires_completed / progress.questionnaires_total * 100) : 0}
-                  size="small"
-                  showInfo={false}
-                  strokeColor="#722ed1"
-                  trailColor="rgba(255,255,255,0.06)"
-                />
-                <div className="dash-progress-sub">/{progress.questionnaires_total}</div>
-              </div>
-              <div className="dash-progress-cell">
-                <div className="dash-progress-label">整改</div>
-                <div className="dash-progress-value" style={{ color: '#fa8c16' }}>{progress.remediation_completed}</div>
-                <Progress
-                  percent={progress.remediation_total ? Math.round(progress.remediation_completed / progress.remediation_total * 100) : 0}
-                  size="small"
-                  showInfo={false}
-                  strokeColor="#fa8c16"
-                  trailColor="rgba(255,255,255,0.06)"
-                />
-                <div className="dash-progress-sub">/{progress.remediation_total}</div>
-              </div>
-            </div>
-          </div>
+          <button
+            className="dash-create-btn"
+            onClick={() => setCreateModalOpen(true)}
+          >
+            <PlusOutlined /> 新建项目
+          </button>
         </div>
 
-        <div className="dash-card">
-          <div className="dash-card-header">
-            <CloudServerOutlined className="dash-card-icon" style={{ color: '#13c2c2' }} />
-            <span>资产态势</span>
-          </div>
-          <div className="dash-card-body">
-            <div className="dash-asset-summary">
-              <div className="dash-asset-big">{assets.total}</div>
-              <div className="dash-asset-label">资产总数 · 7 天新增 {assets.new_7d}</div>
+        <div className="dash-projects-grid">
+          {filteredProjects.length === 0 ? (
+            <div className="dash-empty">
+              <Empty description={data ? "暂无符合条件的项目" : "加载中..."} />
+              {data && data.summary.total === 0 && (
+                <button
+                  className="dash-create-btn-large"
+                  onClick={() => setCreateModalOpen(true)}
+                >
+                  <PlusOutlined /> 创建第一个项目
+                </button>
+              )}
             </div>
-            <div className="dash-asset-types">
-              <div className="dash-asset-type">
-                <div className="dash-asset-type-label">IP 资产</div>
-                <div className="dash-asset-type-value">{assets.by_type.ip || 0}</div>
-              </div>
-              <div className="dash-asset-type">
-                <div className="dash-asset-type-label">域名</div>
-                <div className="dash-asset-type-value">{assets.by_type.domain || 0}</div>
-              </div>
-              <div className="dash-asset-type">
-                <div className="dash-asset-type-label">云资源</div>
-                <div className="dash-asset-type-value">{assets.by_type.cloud_resource || 0}</div>
-              </div>
-            </div>
-            <div className="dash-divider" />
-            <div className="dash-asset-verify">
-              <Tooltip title="已验证">
-                <div className="dash-status-chip" style={{ borderColor: '#52c41a' }}>
-                  <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                  <span>{assets.verified}</span>
-                  <em>已验证</em>
-                </div>
-              </Tooltip>
-              <Tooltip title="待验证">
-                <div className="dash-status-chip" style={{ borderColor: '#faad14' }}>
-                  <ClockCircleOutlined style={{ color: '#faad14' }} />
-                  <span>{assets.pending}</span>
-                  <em>待验证</em>
-                </div>
-              </Tooltip>
-              <Tooltip title="验证失败">
-                <div className="dash-status-chip" style={{ borderColor: '#ff4d4f' }}>
-                  <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
-                  <span>{assets.failed}</span>
-                  <em>失败</em>
-                </div>
-              </Tooltip>
-            </div>
-          </div>
-        </div>
-
-        <div className="dash-card">
-          <div className="dash-card-header">
-            <TeamOutlined className="dash-card-icon" style={{ color: '#eb2f96' }} />
-            <span>人员负载</span>
-          </div>
-          <div className="dash-card-body">
-            <div className="dash-user-summary">
-              <div className="dash-user-big">{users.total_users}</div>
-              <div className="dash-user-label">总用户 · 7 天活跃 {users.active_users_7d}</div>
-            </div>
-            <div className="dash-divider" />
-            <div className="dash-roles">
-              {Object.entries(users.by_role).map(([role, count]) => {
-                const pct = totalUsers > 0 ? Math.round(count / totalUsers * 100) : 0
-                return (
-                  <div className="dash-role-row" key={role}>
-                    <Tag color={role === 'admin' ? 'red' : role === 'operator' ? 'blue' : role === 'approver' ? 'purple' : 'default'}>
-                      {role}
-                    </Tag>
-                    <div className="dash-role-track">
-                      <div className="dash-role-fill" style={{ width: `${pct}%` }} />
-                    </div>
-                    <span className="dash-role-count">{count}</span>
-                  </div>
-                )
-              })}
-            </div>
-            <div className="dash-divider" />
-            <div className="dash-load-stats">
-              <div className="dash-load-stat">
-                <FireOutlined style={{ color: '#ff4d4f' }} />
-                <span>已分派漏洞</span>
-                <strong>{users.assigned_findings}</strong>
-              </div>
-            </div>
-          </div>
+          ) : (
+            filteredProjects.map((project) => (
+              <ProjectCard
+                key={project.id}
+                project={project}
+                onClick={() => navigate(`/projects/${project.id}`)}
+              />
+            ))
+          )}
         </div>
       </section>
+
+      <Modal
+        title={
+          <div className="dash-modal-title">
+            <span className="dash-modal-tag">// NEW DOSSIER</span>
+            <span>创建新项目</span>
+          </div>
+        }
+        open={createModalOpen}
+        onCancel={() => {
+          setCreateModalOpen(false)
+          createForm.resetFields()
+          setSelectedAssessmentTypes([])
+        }}
+        footer={null}
+        width={640}
+        className="dash-create-modal"
+      >
+        <Form
+          form={createForm}
+          layout="vertical"
+          onFinish={handleCreateProject}
+          className="dash-create-form"
+        >
+          <Form.Item
+            name="name"
+            label="项目名称"
+            rules={[{ required: true, message: '请输入项目名称' }]}
+          >
+            <Input placeholder="例如：电商平台等保测评" size="large" />
+          </Form.Item>
+
+          <Form.Item
+            name="systemName"
+            label="被测系统名称"
+            rules={[{ required: true, message: '请输入被测系统名称' }]}
+          >
+            <Input placeholder="例如：电商交易系统" size="large" />
+          </Form.Item>
+
+          <Form.Item name="description" label="描述（可选）">
+            <Input.TextArea placeholder="项目描述" rows={3} />
+          </Form.Item>
+
+          <Form.Item label="测评类型" required>
+            <div className="dash-type-checkboxes">
+              {assessmentTypes.map((t) => (
+                <Checkbox
+                  key={t.id}
+                  value={t.id}
+                  checked={selectedAssessmentTypes.includes(t.id)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedAssessmentTypes([...selectedAssessmentTypes, t.id])
+                    } else {
+                      setSelectedAssessmentTypes(selectedAssessmentTypes.filter((id) => id !== t.id))
+                    }
+                  }}
+                >
+                  <span style={{ color: ASSESSMENT_TYPE_COLORS[t.code] || '#fff' }}>
+                    {t.name}
+                  </span>
+                  <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, marginLeft: 6 }}>
+                    {t.description}
+                  </span>
+                </Checkbox>
+              ))}
+            </div>
+          </Form.Item>
+
+          {selectedAssessmentTypes.includes(1) && (
+            <Form.Item
+              name="complianceLevel"
+              label="等保级别"
+              rules={[{ required: true, message: '请选择等保级别' }]}
+            >
+              <Radio.Group>
+                <Radio.Button value="二级">二级</Radio.Button>
+                <Radio.Button value="三级">三级</Radio.Button>
+              </Radio.Group>
+            </Form.Item>
+          )}
+
+          <Form.Item>
+            <div className="dash-create-actions">
+              <button
+                type="button"
+                className="dash-btn-cancel"
+                onClick={() => {
+                  setCreateModalOpen(false)
+                  createForm.resetFields()
+                  setSelectedAssessmentTypes([])
+                }}
+              >
+                取消
+              </button>
+              <button type="submit" className="dash-btn-primary" loading={createLoading}>
+                创建项目
+              </button>
+            </div>
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   )
 }

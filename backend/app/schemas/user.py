@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from app.models.user import UserRole, SubscriptionTier
 import re
@@ -39,6 +39,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=12)
+    organization_name: str = Field(..., min_length=1, max_length=200)
     
     @field_validator('password')
     @classmethod
@@ -51,12 +52,23 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = None
 
 
+class OrganizationBrief(BaseModel):
+    id: int
+    name: str
+    code: str
+    role: str
+
+    class Config:
+        from_attributes = True
+
+
 class UserResponse(UserBase):
     id: int
     role: UserRole
     subscription_tier: SubscriptionTier
     is_active: bool
     is_verified: bool
+    organizations: List[OrganizationBrief] = []
     created_at: datetime
     last_login_at: Optional[datetime] = None
     
@@ -74,6 +86,7 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: UserResponse
+    organizations: List[OrganizationBrief] = []
 
 
 class RefreshTokenRequest(BaseModel):

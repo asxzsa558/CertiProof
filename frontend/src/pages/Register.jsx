@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Form, Input, Button, message, Steps, Progress } from 'antd'
-import { UserOutlined, LockOutlined, MailOutlined, CheckOutlined } from '@ant-design/icons'
+import { UserOutlined, LockOutlined, MailOutlined, CheckOutlined, BankOutlined } from '@ant-design/icons'
 import api from '../services/api'
 import './Auth.css'
 
@@ -41,6 +41,7 @@ function Register() {
         username: formData.username,
         password: formData.password,
         full_name: formData.fullName,
+        organization_name: formData.organizationName,
       })
       message.success('注册成功，请登录')
       navigate('/login')
@@ -131,6 +132,12 @@ function Register() {
                   </Form.Item>
                   <Form.Item label="姓名（可选）" name="fullName">
                     <Input prefix={<UserOutlined className="input-icon" />} placeholder="姓名" size="large" />
+                  </Form.Item>
+                  <Form.Item label="组织名称" name="organizationName" rules={[
+                    { required: true, message: '请输入组织名称' },
+                    { min: 2, message: '组织名称至少2个字符' }
+                  ]}>
+                    <Input prefix={<BankOutlined className="input-icon" />} placeholder="你的公司/组织名称" size="large" />
                   </Form.Item>
                   <Form.Item>
                     <Button type="primary" onClick={onNext} block size="large" className="submit-btn">下一步</Button>
@@ -244,9 +251,13 @@ function Register() {
                       <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.875rem' }}>邮箱：</span>
                       <span style={{ color: '#fff', fontWeight: 500, marginLeft: '0.5rem' }}>{formData.email}</span>
                     </div>
-                    <div>
+                    <div style={{ marginBottom: '0.75rem' }}>
                       <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.875rem' }}>用户名：</span>
                       <span style={{ color: '#fff', fontWeight: 500, marginLeft: '0.5rem' }}>{formData.username}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.875rem' }}>组织：</span>
+                      <span style={{ color: '#fff', fontWeight: 500, marginLeft: '0.5rem' }}>{formData.organizationName}</span>
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '1rem' }}>

@@ -19,11 +19,11 @@ function Login() {
         email: values.email,
         password: values.password,
       })
-      
-      const { access_token, refresh_token, user } = response.data
-      setAuth(access_token, refresh_token, user)
+
+      const { access_token, refresh_token, user, organizations } = response.data
+      setAuth(access_token, refresh_token, user, organizations)
       message.success('登录成功')
-      navigate('/')
+      navigate('/dashboard')
     } catch (error) {
       message.error(error.response?.data?.detail || '登录失败')
     } finally {

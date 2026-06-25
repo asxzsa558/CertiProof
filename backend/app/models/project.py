@@ -20,11 +20,14 @@ class Project(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     
     # Basic info
     name = Column(String(200), nullable=False)
+    system_name = Column(String(500), nullable=True)
     description = Column(Text, nullable=True)
-    compliance_level = Column(SQLEnum(ComplianceLevel), nullable=False)
+    compliance_level = Column(SQLEnum(ComplianceLevel), nullable=True)
     
     # Status
     status = Column(SQLEnum(ProjectStatus), default=ProjectStatus.ACTIVE, nullable=False)
@@ -37,12 +40,15 @@ class Project(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relationships
-    user = relationship("User", backref="projects")
+    user = relationship("User", foreign_keys=[user_id], backref="projects")
+    owner = relationship("User", foreign_keys=[owner_id], backref="owned_projects")
+    organization = relationship("Organization", back_populates="projects")
     assets = relationship("Asset", back_populates="project", cascade="all, delete-orphan")
     scan_tasks = relationship("ScanTask", back_populates="project", cascade="all, delete-orphan")
     findings = relationship("Finding", back_populates="project", cascade="all, delete-orphan")
     remediation_tickets = relationship("RemediationTicket", back_populates="project", cascade="all, delete-orphan")
     questionnaires = relationship("QuestionnaireRecord", back_populates="project", cascade="all, delete-orphan")
+    assessments = relationship("ProjectAssessment", back_populates="project", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Project(id={self.id}, name={self.name}, level={self.compliance_level})>"
