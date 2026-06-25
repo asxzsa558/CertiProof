@@ -35,19 +35,57 @@ async def check_org_member(db: AsyncSession, org_id: int, user_id: int) -> None:
         )
 
 
+async def resolve_organization_id(
+    db: AsyncSession, organization_id: Optional[int], user_id: int
+) -> int:
+    """解析 organization_id。如果未提供，则取该用户最早加入的组织。
+
+    安全说明：
+    - 严格限定在 current_user 的 memberships 中查找
+    - 即使 logic 有 bug，check_org_member 也会兜底验证
+    - 不会返回其他用户的数据
+    """
+    if organization_id is not None:
+        return organization_id
+
+    result = await db.execute(
+        select(OrganizationMember)
+        .where(OrganizationMember.user_id == user_id)
+        .order_by(OrganizationMember.joined_at.asc())
+        .limit(1)
+    )
+    first = result.scalar_one_or_none()
+    if not first:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No organization found for this user. Please contact administrator.",
+        )
+    return first.organization_id
+
+
 @router.get("/overview", response_model=DashboardResponse)
 async def get_dashboard_overview(
-    organization_id: int = Query(..., description="组织ID"),
+    organization_id: Optional[int] = Query(
+        None,
+        description="组织ID（可选）。未提供时自动使用当前用户的默认组织。",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取组织的 Dashboard 总览数据"""
-    await check_org_member(db, organization_id, current_user.id)
+    """获取组织的 Dashboard 总览数据
+
+    安全：
+    - organization_id 可选。未提供时自动取 current_user 最早的 membership
+    - check_org_member 强制验证 current_user 属于该 org
+    - current_user 来自 JWT，是可信身份标识
+    """
+    org_id = await resolve_organization_id(db, organization_id, current_user.id)
+    await check_org_member(db, org_id, current_user.id)
 
     # Get all projects in this organization
     proj_result = await db.execute(
         select(Project)
-        .where(Project.organization_id == organization_id)
+        .where(Project.organization_id == org_id)
         .order_by(Project.updated_at.desc())
     )
     projects = proj_result.scalars().all()

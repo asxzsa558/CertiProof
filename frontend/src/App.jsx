@@ -14,6 +14,7 @@ import './index.css'
 function ProtectedRoute({ children }) {
   const token = useAuthStore((state) => state.token)
   const hasHydrated = useAuthStore((state) => state._hasHydrated)
+  const organizations = useAuthStore((state) => state.organizations)
 
   if (hasHydrated === false) {
     return (
@@ -30,9 +31,16 @@ function ProtectedRoute({ children }) {
     )
   }
 
+  // 没有 token，重定向到登录页
   if (!token) {
     return <Navigate to="/login" replace />
   }
+
+  // 有 token 但 organizations 为空，强制重新登录
+  if (organizations.length === 0) {
+    return <Navigate to="/login" replace />
+  }
+
   return children
 }
 

@@ -1,5 +1,5 @@
 /* ============================================
-   Dashboard - CIA Intelligence Command Center
+   Dashboard - 《碟中谍》CIA 指挥中心风格
    ============================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
@@ -9,24 +9,19 @@
   min-height: 100vh;
   background: #0a0a0b;
   color: #fff;
-  padding: 24px 40px 60px;
   overflow-x: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
-/* Background Layers */
-.dash-bg-grid {
-  position: fixed;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(0, 255, 136, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 255, 136, 0.025) 1px, transparent 1px);
-  background-size: 48px 48px;
-  pointer-events: none;
-  z-index: 0;
+/* 内容层 */
+.dash-content-layer {
+  position: relative;
+  z-index: 10;
+  padding: 0 40px 60px;
 }
 
-.dash-bg-logo {
+/* 品牌水印层 */
+.dash-bg-watermark {
   position: fixed;
   top: 50%;
   left: 50%;
@@ -37,53 +32,24 @@
   filter: blur(0.5px);
 }
 
-.dash-bg-scan {
-  position: fixed;
-  inset: 0;
-  background: linear-gradient(
-    180deg,
-    transparent 0%,
-    transparent 49%,
-    rgba(0, 255, 136, 0.04) 50%,
-    transparent 51%,
-    transparent 100%
-  );
-  background-size: 100% 8px;
-  pointer-events: none;
-  z-index: 0;
-  animation: dash-bg-scroll 12s linear infinite;
+.dash-bg-watermark .logo-container {
+  width: 600px !important;
+  height: 600px !important;
 }
 
-@keyframes dash-bg-scroll {
-  0% { background-position: 0 -100%; }
-  100% { background-position: 0 100%; }
-}
-
-.dash-bg-vignette {
-  position: fixed;
-  inset: 0;
-  background: radial-gradient(
-    ellipse at center,
-    transparent 30%,
-    rgba(0, 0, 0, 0.5) 100%
-  );
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* Header */
+/* 顶部导航栏 */
 .dash-header {
-  position: relative;
-  z-index: 10;
+  position: sticky;
+  top: 0;
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
+  padding: 16px 40px;
   background: rgba(10, 10, 11, 0.85);
-  border: 1px solid rgba(0, 255, 136, 0.15);
-  border-radius: 4px;
+  border-bottom: 1px solid rgba(0, 255, 136, 0.2);
   backdrop-filter: blur(20px);
-  margin-bottom: 24px;
+  margin: 0 -40px 32px;
 }
 
 .dash-header::before {
@@ -99,19 +65,19 @@
 .dash-header-left {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
 }
 
 .dash-brand {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding-left: 12px;
-  border-left: 1px solid rgba(0, 255, 136, 0.2);
+  gap: 2px;
+  padding-left: 16px;
+  border-left: 1px solid rgba(0, 255, 136, 0.3);
 }
 
 .dash-brand-name {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: 1px;
   background: linear-gradient(135deg, #00ff88 0%, #d4af37 100%);
@@ -121,22 +87,23 @@
 }
 
 .dash-brand-sub {
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.4);
-  letter-spacing: 1.5px;
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 2px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
 }
 
 .dash-classification {
-  margin-left: 12px;
-  padding: 3px 8px;
-  font-size: 9px;
+  margin-left: 16px;
+  padding: 4px 12px;
+  font-size: 10px;
   font-weight: 700;
   color: #ff4d4f;
   border: 1px solid rgba(255, 77, 79, 0.5);
-  background: rgba(255, 77, 79, 0.08);
-  letter-spacing: 1.5px;
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  background: rgba(255, 77, 79, 0.1);
+  letter-spacing: 2px;
+  font-family: 'JetBrains Mono', monospace;
   animation: dash-classify-blink 3s ease-in-out infinite;
 }
 
@@ -154,120 +121,135 @@
 .dash-org-switcher {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 14px;
-  background: rgba(0, 255, 136, 0.06);
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(0, 255, 136, 0.05);
   border: 1px solid rgba(0, 255, 136, 0.2);
   border-radius: 4px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s;
 }
 
 .dash-org-switcher:hover {
-  background: rgba(0, 255, 136, 0.12);
+  background: rgba(0, 255, 136, 0.1);
   border-color: rgba(0, 255, 136, 0.4);
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
 }
 
 .dash-org-name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: #fff;
 }
 
 .dash-org-role {
-  font-size: 9px !important;
+  font-size: 10px !important;
   font-weight: 700 !important;
-  letter-spacing: 0.5px;
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  letter-spacing: 1px;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .dash-header-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 
 .dash-user-info {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 10px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .dash-user-avatar {
   background: linear-gradient(135deg, #00ff88, #00b4d8) !important;
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
 }
 
 .dash-user-name {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.9);
 }
 
 .dash-icon-btn {
-  background: rgba(0, 255, 136, 0.04);
-  border: 1px solid rgba(0, 255, 136, 0.15);
+  background: rgba(0, 255, 136, 0.05);
+  border: 1px solid rgba(0, 255, 136, 0.2);
   color: rgba(255, 255, 255, 0.7);
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 4px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .dash-icon-btn:hover {
-  background: rgba(0, 255, 136, 0.12);
-  border-color: rgba(0, 255, 136, 0.4);
+  background: rgba(0, 255, 136, 0.15);
+  border-color: rgba(0, 255, 136, 0.5);
   color: #00ff88;
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+}
+
+/* 主内容区域 - 左右分栏 */
+.dash-main {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: 32px;
+  margin-bottom: 40px;
+}
+
+.dash-left-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.dash-right-panel {
+  position: sticky;
+  top: 100px;
+  height: fit-content;
 }
 
 /* Section */
 .dash-section {
-  position: relative;
-  z-index: 5;
-  margin-bottom: 28px;
+  margin-bottom: 40px;
 }
 
 .dash-section-header {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(0, 255, 136, 0.1);
+  margin-bottom: 20px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(0, 255, 136, 0.15);
 }
 
 .dash-section-tag {
-  font-size: 10px;
+  font-size: 11px;
   color: #00ff88;
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-family: 'JetBrains Mono', monospace;
   letter-spacing: 2px;
   font-weight: 600;
 }
 
 .dash-section-title {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
   color: #fff;
   letter-spacing: 0.5px;
 }
 
-.dash-section-meta {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  margin-left: auto;
-}
-
 .dash-filters {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   margin-left: auto;
 }
 
@@ -277,230 +259,308 @@
   border: 1px solid rgba(0, 255, 136, 0.2) !important;
 }
 
-/* Stat Panel */
+/* 统计面板网格 */
 .dash-stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  gap: 20px;
 }
 
 .dash-stat-panel {
-  position: relative;
-  padding: 20px 22px;
-  background: rgba(17, 17, 19, 0.85);
-  border: 1px solid rgba(0, 255, 136, 0.1);
-  border-radius: 4px;
-  overflow: hidden;
-  backdrop-filter: blur(12px);
-}
-
-.dash-stat-corner-tl,
-.dash-stat-corner-tr,
-.dash-stat-corner-bl,
-.dash-stat-corner-br {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  border: 1.5px solid var(--accent-color, #00ff88);
-  opacity: 0.6;
-}
-
-.dash-stat-corner-tl { top: 0; left: 0; border-right: none; border-bottom: none; }
-.dash-stat-corner-tr { top: 0; right: 0; border-left: none; border-bottom: none; }
-.dash-stat-corner-bl { bottom: 0; left: 0; border-right: none; border-top: none; }
-.dash-stat-corner-br { bottom: 0; right: 0; border-left: none; border-top: none; }
-
-.dash-stat-scanline {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: var(--accent-color, #00ff88);
-  animation: dash-stat-scan 3s linear infinite;
-  opacity: 0.4;
-}
-
-@keyframes dash-stat-scan {
-  0% { top: 0; opacity: 0; }
-  10% { opacity: 0.6; }
-  90% { opacity: 0.6; }
-  100% { top: 100%; opacity: 0; }
+  text-align: left;
 }
 
 .dash-stat-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .dash-stat-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 1.5px;
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 2px;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .dash-stat-icon {
-  font-size: 14px;
+  font-size: 16px;
   opacity: 0.8;
 }
 
 .dash-stat-value {
-  font-size: 32px;
+  font-size: 48px;
   font-weight: 700;
-  color: #fff;
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  letter-spacing: 0;
-  line-height: 1.1;
-  text-shadow: 0 0 16px var(--accent-color, #00ff88);
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1;
+  margin-bottom: 8px;
 }
 
 .dash-stat-sub {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
-  margin-top: 6px;
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: 'JetBrains Mono', monospace;
   letter-spacing: 0.5px;
 }
 
-/* Charts */
+/* 图表区域 */
 .dash-charts-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+  gap: 20px;
 }
 
 .dash-chart-card {
-  position: relative;
   padding: 20px;
-  background: rgba(17, 17, 19, 0.85);
-  border: 1px solid rgba(0, 255, 136, 0.1);
-  border-radius: 4px;
-  backdrop-filter: blur(12px);
-}
-
-.dash-chart-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(0, 255, 136, 0.4), transparent);
 }
 
 .dash-chart-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(0, 255, 136, 0.08);
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(0, 255, 136, 0.1);
 }
 
 .dash-chart-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: #fff;
   letter-spacing: 0.5px;
 }
 
 .dash-chart-sub {
-  font-size: 9px;
-  color: rgba(0, 255, 136, 0.6);
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  letter-spacing: 1.5px;
+  font-size: 10px;
+  color: rgba(0, 255, 136, 0.7);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 2px;
   font-weight: 600;
 }
 
-/* Projects Grid */
+/* 风险态势面板 */
+.dash-risk-panel {
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-risk-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(0, 255, 136, 0.1);
+}
+
+.dash-risk-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ff6b35;
+  letter-spacing: 2px;
+  font-family: 'JetBrains Mono', monospace;
+  display: block;
+}
+
+.dash-risk-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 1px;
+}
+
+.dash-risk-chart {
+  padding: 16px 24px;
+  border-bottom: 1px solid rgba(0, 255, 136, 0.1);
+}
+
+.dash-risk-status {
+  padding: 16px 24px;
+  display: flex;
+  justify-content: space-around;
+  border-bottom: 1px solid rgba(0, 255, 136, 0.1);
+}
+
+.dash-risk-status-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dash-risk-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.dash-risk-status-item strong {
+  font-size: 18px;
+  color: #fff;
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: 4px;
+}
+
+.dash-risk-top {
+  padding: 16px 24px;
+  flex: 1;
+}
+
+.dash-risk-top-title {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 2px;
+  font-family: 'JetBrains Mono', monospace;
+  margin-bottom: 12px;
+}
+
+.dash-risk-top-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.dash-risk-top-rank {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 77, 79, 0.2);
+  color: #ff4d4f;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dash-risk-top-id {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: 'JetBrains Mono', monospace;
+  min-width: 70px;
+}
+
+.dash-risk-top-name {
+  flex: 1;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-risk-top-count {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ff4d4f;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.dash-risk-top-empty {
+  text-align: center;
+  padding: 20px;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 12px;
+}
+
+/* 项目卡片网格 */
 .dash-projects-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 20px;
 }
 
 .dash-empty {
   grid-column: 1 / -1;
   text-align: center;
-  padding: 60px 20px;
+  padding: 80px 20px;
   background: rgba(17, 17, 19, 0.4);
-  border: 1px dashed rgba(0, 255, 136, 0.15);
+  border: 1px dashed rgba(0, 255, 136, 0.2);
   border-radius: 8px;
 }
 
-/* Create Button */
+/* 创建按钮 */
 .dash-create-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 16px;
-  height: 32px;
-  background: linear-gradient(135deg, #00ff88, #00b4d8);
-  border: none;
-  border-radius: 4px;
-  color: #0a0a0b;
-  font-weight: 600;
-  font-size: 12px;
-  letter-spacing: 0.5px;
-  cursor: pointer;
-  transition: all 0.2s;
-  margin-left: 12px;
-}
-
-.dash-create-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 0 16px rgba(0, 255, 136, 0.4);
-}
-
-.dash-create-btn-large {
-  display: inline-flex;
-  align-items: center;
   gap: 8px;
-  padding: 10px 24px;
+  padding: 0 20px;
+  height: 36px;
   background: linear-gradient(135deg, #00ff88, #00b4d8);
   border: none;
   border-radius: 4px;
   color: #0a0a0b;
   font-weight: 600;
   font-size: 13px;
+  letter-spacing: 0.5px;
   cursor: pointer;
-  margin-top: 16px;
+  transition: all 0.3s;
+  margin-left: 16px;
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
 }
 
-/* Modal */
+.dash-create-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 30px rgba(0, 255, 136, 0.5);
+}
+
+.dash-create-btn-large {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 28px;
+  background: linear-gradient(135deg, #00ff88, #00b4d8);
+  border: none;
+  border-radius: 4px;
+  color: #0a0a0b;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  margin-top: 20px;
+  box-shadow: 0 0 25px rgba(0, 255, 136, 0.4);
+  transition: all 0.3s;
+}
+
+.dash-create-btn-large:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 35px rgba(0, 255, 136, 0.6);
+}
+
+/* 模态框 */
 .dash-create-modal .ant-modal-content {
   background: rgba(17, 17, 19, 0.98) !important;
-  border: 1px solid rgba(0, 255, 136, 0.2) !important;
+  border: 1px solid rgba(0, 255, 136, 0.3) !important;
   backdrop-filter: blur(20px);
+  box-shadow: 0 0 40px rgba(0, 255, 136, 0.2);
 }
 
 .dash-create-modal .ant-modal-header {
   background: transparent !important;
-  border-bottom: 1px solid rgba(0, 255, 136, 0.1) !important;
+  border-bottom: 1px solid rgba(0, 255, 136, 0.15) !important;
 }
 
 .dash-modal-title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   color: #fff;
 }
 
 .dash-modal-tag {
-  font-size: 10px;
+  font-size: 11px;
   color: #00ff88;
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
-  letter-spacing: 1.5px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 2px;
   font-weight: 600;
 }
 
 .dash-create-form .ant-form-item-label > label {
-  color: rgba(255, 255, 255, 0.7) !important;
-  font-size: 12px !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+  font-size: 13px !important;
   font-weight: 500 !important;
 }
 
@@ -508,8 +568,8 @@
 .dash-create-form .ant-input-affix-wrapper,
 .dash-create-form .ant-select-selector,
 .dash-create-form textarea {
-  background: rgba(0, 0, 0, 0.4) !important;
-  border: 1px solid rgba(0, 255, 136, 0.15) !important;
+  background: rgba(0, 0, 0, 0.5) !important;
+  border: 1px solid rgba(0, 255, 136, 0.2) !important;
   color: #fff !important;
 }
 
@@ -517,48 +577,49 @@
 .dash-create-form .ant-input-affix-wrapper:focus,
 .dash-create-form textarea:focus {
   border-color: rgba(0, 255, 136, 0.6) !important;
-  box-shadow: 0 0 0 2px rgba(0, 255, 136, 0.1) !important;
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.2) !important;
 }
 
 .dash-type-checkboxes {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
+  gap: 12px;
+  padding: 16px;
   background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(0, 255, 136, 0.1);
+  border: 1px solid rgba(0, 255, 136, 0.15);
   border-radius: 4px;
 }
 
 .dash-type-checkboxes .ant-checkbox-wrapper {
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .dash-create-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 8px;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .dash-btn-cancel {
-  padding: 0 20px;
-  height: 36px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.7);
+  padding: 0 24px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.8);
   border-radius: 4px;
   cursor: pointer;
+  transition: all 0.3s;
 }
 
 .dash-btn-cancel:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
 
 .dash-btn-primary {
-  padding: 0 24px;
-  height: 36px;
+  padding: 0 28px;
+  height: 40px;
   background: linear-gradient(135deg, #00ff88, #00b4d8);
   border: none;
   color: #0a0a0b;
@@ -566,21 +627,23 @@
   border-radius: 4px;
   cursor: pointer;
   letter-spacing: 0.5px;
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+  transition: all 0.3s;
 }
 
 .dash-btn-primary:hover {
-  box-shadow: 0 0 16px rgba(0, 255, 136, 0.4);
+  box-shadow: 0 0 30px rgba(0, 255, 136, 0.5);
 }
 
-/* Org menu */
+/* 组织菜单 */
 .dash-org-menu-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 200px;
+  gap: 10px;
+  min-width: 220px;
 }
 
-/* Loading */
+/* 加载状态 */
 .dash-loading {
   min-height: 100vh;
   display: flex;
@@ -589,26 +652,56 @@
   justify-content: center;
   background: #0a0a0b;
   color: #fff;
-  gap: 16px;
+  gap: 20px;
+  position: relative;
 }
 
 .dash-loading-text {
-  font-size: 11px;
-  color: rgba(0, 255, 136, 0.7);
+  font-size: 12px;
+  color: rgba(0, 255, 136, 0.8);
   letter-spacing: 3px;
-  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-weight: 600;
+  animation: dash-loading-pulse 2s ease-in-out infinite;
+  position: relative;
+  z-index: 10;
 }
 
-/* Responsive */
+@keyframes dash-loading-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* 响应式 */
+@media (max-width: 1600px) {
+  .dash-main {
+    grid-template-columns: 1fr 350px;
+  }
+}
+
+@media (max-width: 1400px) {
+  .dash-main {
+    grid-template-columns: 1fr;
+  }
+  
+  .dash-right-panel {
+    position: relative;
+    top: 0;
+  }
+  
+  .dash-risk-panel {
+    height: 500px;
+  }
+}
+
 @media (max-width: 1280px) {
   .dash-stats-grid { grid-template-columns: repeat(2, 1fr); }
   .dash-charts-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 960px) {
-  .dash-root { padding: 16px; }
-  .dash-header { flex-wrap: wrap; gap: 12px; }
+  .dash-content-layer { padding: 0 20px 40px; }
+  .dash-header { flex-wrap: wrap; gap: 16px; padding: 16px 20px; margin: 0 -20px 24px; }
   .dash-stats-grid { grid-template-columns: 1fr; }
   .dash-projects-grid { grid-template-columns: 1fr; }
 }

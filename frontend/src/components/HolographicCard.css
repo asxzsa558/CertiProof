@@ -1,0 +1,136 @@
+.holographic-card {
+  position: relative;
+  background: rgba(0, 20, 40, 0.4);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 255, 136, 0.2);
+  border-radius: 8px;
+  padding: 24px;
+  transition: transform 0.1s ease-out, box-shadow 0.3s ease;
+  transform-style: preserve-3d;
+  overflow: hidden;
+}
+
+.holographic-card:hover {
+  box-shadow: 
+    0 0 30px rgba(0, 255, 136, 0.3),
+    0 0 60px rgba(0, 255, 136, 0.15),
+    inset 0 0 30px rgba(0, 255, 136, 0.05);
+}
+
+/* 扫描线效果 */
+.holographic-scanline {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(0, 255, 136, 0.8),
+    transparent
+  );
+  animation: holographic-scan 4s linear infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+
+@keyframes holographic-scan {
+  0% {
+    top: 0;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+
+/* 边框发光动画 */
+.holographic-border {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    rgba(0, 255, 136, 0.5),
+    rgba(0, 180, 216, 0.3),
+    rgba(0, 255, 136, 0.5)
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: holographic-border-rotate 3s linear infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@keyframes holographic-border-rotate {
+  0% {
+    filter: hue-rotate(0deg);
+  }
+  100% {
+    filter: hue-rotate(360deg);
+  }
+}
+
+/* 内容层 */
+.holographic-content {
+  position: relative;
+  z-index: 3;
+}
+
+/* 四角装饰 */
+.holographic-corner {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(0, 255, 136, 0.6);
+  z-index: 4;
+  pointer-events: none;
+}
+
+.holographic-corner-tl {
+  top: 0;
+  left: 0;
+  border-right: none;
+  border-bottom: none;
+  border-top-left-radius: 8px;
+}
+
+.holographic-corner-tr {
+  top: 0;
+  right: 0;
+  border-left: none;
+  border-bottom: none;
+  border-top-right-radius: 8px;
+}
+
+.holographic-corner-bl {
+  bottom: 0;
+  left: 0;
+  border-right: none;
+  border-top: none;
+  border-bottom-left-radius: 8px;
+}
+
+.holographic-corner-br {
+  bottom: 0;
+  right: 0;
+  border-left: none;
+  border-top: none;
+  border-bottom-right-radius: 8px;
+}
+
+/* 悬停时角标发光 */
+.holographic-card:hover .holographic-corner {
+  border-color: rgba(0, 255, 136, 1);
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+}
