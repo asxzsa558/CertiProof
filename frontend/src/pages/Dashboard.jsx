@@ -285,7 +285,7 @@ export default function Dashboard() {
     <div className="dash-root">
       {/* 品牌水印层 */}
       <div className="dash-bg-watermark">
-        <VeriSureLogo size={600} />
+        <img src="/verisure-logo.svg" alt="VeriSure" />
       </div>
       
       {/* 3D 背景层 */}
