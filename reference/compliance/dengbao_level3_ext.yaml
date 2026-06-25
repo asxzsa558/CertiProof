@@ -1,0 +1,535 @@
+name: "等保三级扩展条款"
+base: "dengbao_base"
+level: 3
+description: "等保三级特有的检查条款和要求"
+
+# 三级扩展条款
+clauses:
+  # ===== 安全物理环境 - 三级补充 =====
+  - id: "8.1.1.3.1"
+    name: "物理环境三级要求"
+    pillar: "physical"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统物理环境高级要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "机房是否配备视频监控，录像保存时间不少于90天？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现机房进出电子认证（如刷卡+指纹）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否有24小时值守或远程监控？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 2.0
+    pass_threshold: 1.0
+
+  # ===== 安全通信网络 - 三级补充 =====
+  - id: "8.1.2.5"
+    name: "网络架构三级要求"
+    pillar: "network"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统网络架构高级要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实现网络冗余（双链路、双设备）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否部署网络入侵检测系统（NIDS）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现网络流量分析和异常检测？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 2.5
+    pass_threshold: 1.0
+
+  - id: "8.1.2.6"
+    name: "通信加密三级要求"
+    pillar: "network"
+    level: [3]
+    check_type: "scan"
+    description: "三级系统通信加密高级要求"
+    tools:
+      - name: "testssl_scan"
+        params:
+          target: "{{asset}}"
+          port: 443
+          check_tls13: true
+        output_key: "ssl_result"
+    pass_condition: "tls_version >= '1.2' and tls13_supported and no_weak_ciphers and hsts_enabled"
+    weight: 2.5
+
+  # ===== 安全区域边界 - 三级补充 =====
+  - id: "8.1.3.7"
+    name: "边界防护三级要求"
+    pillar: "boundary"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统边界防护高级要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署下一代防火墙（NGFW）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否部署入侵防御系统（IPS）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现应用层访问控制？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q4"
+          text: "是否实现恶意代码检测和防护？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 3.0
+    pass_threshold: 1.0
+
+  - id: "8.1.3.8"
+    name: "安全审计三级要求"
+    pillar: "boundary"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统安全审计高级要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署集中日志审计系统？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "日志保存时间是否不少于180天？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现日志关联分析和告警？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 2.5
+    pass_threshold: 1.0
+
+  # ===== 安全计算环境 - 三级补充 =====
+  - id: "8.1.4.14"
+    name: "身份鉴别三级要求"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统身份鉴别高级要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实现双因素认证（如密码+动态令牌）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现统一身份认证和单点登录？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现登录失败锁定和审计？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q4"
+          text: "是否实现密码复杂度策略（长度>=8，包含大小写、数字、特殊字符）？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 3.0
+    pass_threshold: 1.0
+
+  - id: "8.1.4.15"
+    name: "访问控制三级要求"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统访问控制高级要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实现强制访问控制（MAC）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现细粒度权限控制（到字段级别）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现权限动态调整和回收？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q4"
+          text: "是否实现特权账号管理和审计？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 3.0
+    pass_threshold: 1.0
+
+  - id: "8.1.4.16"
+    name: "安全审计三级要求"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统安全审计高级要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实现全量操作审计？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现数据库操作审计？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现网络流量审计？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q4"
+          text: "是否实现审计日志防篡改？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 2.5
+    pass_threshold: 1.0
+
+  - id: "8.1.4.17"
+    name: "入侵防范三级要求"
+    pillar: "computing"
+    level: [3]
+    check_type: "scan"
+    description: "三级系统入侵防范高级要求"
+    tools:
+      - name: "nuclei_scan"
+        params:
+          target: "{{asset}}"
+          severity: "critical,high,medium"
+          templates: "cve,misconfig,exposure,default-logins"
+        output_key: "vuln_result"
+    pass_condition: "no_critical_vulns and no_high_vulns"
+    weight: 2.5
+
+  - id: "8.1.4.18"
+    name: "数据完整性三级要求"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统数据完整性高级要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实现数据传输完整性校验（如数字签名）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现数据存储完整性校验（如哈希校验）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现数据版本控制和防篡改？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 2.0
+    pass_threshold: 1.0
+
+  - id: "8.1.4.19"
+    name: "数据保密性三级要求"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统数据保密性高级要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实现数据传输加密（TLS 1.2+）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现数据存储加密（如AES-256）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现敏感数据脱敏？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q4"
+          text: "是否实现密钥管理和轮换？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 2.5
+    pass_threshold: 1.0
+
+  - id: "8.1.4.20"
+    name: "数据备份恢复三级要求"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统数据备份恢复高级要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实现实时数据备份？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现异地灾备（RPO<=1小时）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否定期进行备份恢复演练？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q4"
+          text: "是否实现业务连续性计划（BCP）？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 3.0
+    pass_threshold: 1.0
+
+  # ===== 安全管理中心 - 三级特有 =====
+  - id: "8.1.6.1"
+    name: "系统管理"
+    pillar: "management_center"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统安全管理中心要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否建立统一的安全管理平台？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现集中身份认证和权限管理？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现集中安全策略下发？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 2.5
+    pass_threshold: 1.0
+
+  - id: "8.1.6.2"
+    name: "审计管理"
+    pillar: "management_center"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统审计管理要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署集中日志审计系统（SIEM）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现日志集中采集和分析？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现安全事件关联分析？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 2.5
+    pass_threshold: 1.0
+
+  - id: "8.1.6.3"
+    name: "安全管理"
+    pillar: "management_center"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统安全管理要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实现资产集中管理？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现漏洞集中管理？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现安全事件集中处置？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 2.5
+    pass_threshold: 1.0
+
+  - id: "8.1.6.4"
+    name: "集中管控"
+    pillar: "management_center"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统集中管控要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实现安全设备集中管控？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现网络流量集中监控？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现安全态势可视化？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 2.5
+    pass_threshold: 1.0
+
+  # ===== 安全管理制度 - 三级补充 =====
+  - id: "8.1.5.1.4"
+    name: "管理制度三级要求"
+    pillar: "policy"
+    level: [3]
+    check_type: "document"
+    description: "三级系统管理制度高级要求"
+    document:
+      required_docs:
+        - "信息安全管理体系文件（三级版）"
+        - "风险管理策略"
+        - "合规性评估报告"
+    weight: 2.0
+
+  # ===== 安全管理机构 - 三级补充 =====
+  - id: "8.1.5.2.4"
+    name: "安全管理机构三级要求"
+    pillar: "organization"
+    level: [3]
+    check_type: "questionnaire"
+    description: "三级系统安全管理机构高级要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否成立信息安全委员会？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否配备专职安全管理人员（不少于2人）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否建立安全责任制？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 2.0
+    pass_threshold: 1.0
+
+  # ===== 安全管理人员 - 三级补充 =====
+  - id: "8.1.5.3.5"
+    name: "人员管理三级要求"
+    pillar: "personnel"
+    level: [3]
+    check_type: "document"
+    description: "三级系统人员管理高级要求"
+    document:
+      required_docs:
+        - "人员安全管理制度（三级版）"
+        - "关键岗位人员背景审查记录"
+        - "安全培训记录和考核"
+        - "保密协议"
+    weight: 2.0
+
+  # ===== 安全建设管理 - 三级补充 =====
+  - id: "8.1.5.4.5"
+    name: "安全建设三级要求"
+    pillar: "construction"
+    level: [3]
+    check_type: "document"
+    description: "三级系统安全建设管理高级要求"
+    document:
+      required_docs:
+        - "安全建设方案（三级版）"
+        - "安全产品选型报告"
+        - "安全测试报告"
+        - "验收报告"
+    weight: 2.0
+
+  # ===== 安全运维管理 - 三级补充 =====
+  - id: "8.1.5.5.17"
+    name: "运维管理三级要求"
+    pillar: "operation"
+    level: [3]
+    check_type: "document"
+    description: "三级系统运维管理高级要求"
+    document:
+      required_docs:
+        - "运维管理制度（三级版）"
+        - "变更管理流程"
+        - "配置管理数据库（CMDB）"
+        - "定期安全评估报告"
+    weight: 2.5
+
+  - id: "8.1.5.5.18"
+    name: "漏洞管理三级要求"
+    pillar: "operation"
+    level: [3]
+    check_type: "document"
+    description: "三级系统漏洞管理高级要求"
+    document:
+      required_docs:
+        - "漏洞扫描报告（月度）"
+        - "漏洞修复记录和验证"
+        - "漏洞应急响应预案"
+    weight: 2.5
+
+  - id: "8.1.5.5.19"
+    name: "安全事件管理三级要求"
+    pillar: "operation"
+    level: [3]
+    check_type: "document"
+    description: "三级系统安全事件管理高级要求"
+    document:
+      required_docs:
+        - "安全事件管理制度（三级版）"
+        - "安全事件应急响应预案"
+        - "安全事件处置记录"
+        - "安全事件分析报告"
+    weight: 2.5
+
+  - id: "8.1.5.5.20"
+    name: "应急预案管理三级要求"
+    pillar: "operation"
+    level: [3]
+    check_type: "document"
+    description: "三级系统应急预案管理高级要求"
+    document:
+      required_docs:
+        - "应急预案管理制度（三级版）"
+        - "各类应急预案（网络攻击、数据泄露、系统故障等）"
+        - "应急演练计划"
+        - "应急演练记录和总结"
+    weight: 2.5
+
+# 三级特有评分规则
+scoring:
+  # 三级通过标准更严格
+  pass_threshold: 70  # 70分才可通过
+  levels:
+    - min: 90
+      max: 100
+      name: "优秀"
+      color: "#10b981"
+    - min: 80
+      max: 89
+      name: "良好"
+      color: "#6366f1"
+    - min: 70
+      max: 79
+      name: "合格"
+      color: "#f59e0b"
+    - min: 0
+      max: 69
+      name: "不合格"
+      color: "#ef4444"

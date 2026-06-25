@@ -1,0 +1,211 @@
+name: "等保二级扩展条款"
+base: "dengbao_base"
+level: 2
+description: "等保二级特有的检查条款和要求"
+
+# 二级扩展条款
+clauses:
+  # ===== 安全物理环境 - 二级补充 =====
+  - id: "8.1.1.2.1"
+    name: "物理环境二级补充"
+    pillar: "physical"
+    level: [2]
+    check_type: "questionnaire"
+    description: "二级系统物理环境补充要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否有机房出入登记制度？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否有定期巡检记录？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 1.0
+    pass_threshold: 1.0
+
+  # ===== 安全通信网络 - 二级补充 =====
+  - id: "8.1.2.4"
+    name: "网络架构二级要求"
+    pillar: "network"
+    level: [2]
+    check_type: "questionnaire"
+    description: "二级系统网络架构要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否绘制网络拓扑图？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否划分安全域？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 1.5
+    pass_threshold: 1.0
+
+  # ===== 安全区域边界 - 二级补充 =====
+  - id: "8.1.3.6"
+    name: "边界防护二级补充"
+    pillar: "boundary"
+    level: [2]
+    check_type: "questionnaire"
+    description: "二级系统边界防护补充要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署防火墙？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "防火墙规则是否定期审查？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 1.5
+    pass_threshold: 1.0
+
+  # ===== 安全计算环境 - 二级补充 =====
+  - id: "8.1.4.12"
+    name: "身份鉴别二级要求"
+    pillar: "computing"
+    level: [2]
+    check_type: "questionnaire"
+    description: "二级系统身份鉴别要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否要求用户使用强密码？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否定期更换密码？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 1.5
+    pass_threshold: 1.0
+
+  - id: "8.1.4.13"
+    name: "访问控制二级要求"
+    pillar: "computing"
+    level: [2]
+    check_type: "questionnaire"
+    description: "二级系统访问控制要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实现基于角色的访问控制？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否遵循最小权限原则？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 1.5
+    pass_threshold: 1.0
+
+  # ===== 安全管理制度 - 二级补充 =====
+  - id: "8.1.5.1.3"
+    name: "管理制度二级补充"
+    pillar: "policy"
+    level: [2]
+    check_type: "document"
+    description: "二级系统管理制度补充要求"
+    document:
+      required_docs:
+        - "信息安全管理制度（二级版）"
+        - "操作规程"
+    weight: 1.5
+
+  # ===== 安全管理机构 - 二级补充 =====
+  - id: "8.1.5.2.3"
+    name: "安全管理机构二级要求"
+    pillar: "organization"
+    level: [2]
+    check_type: "questionnaire"
+    description: "二级系统安全管理机构要求"
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否明确安全管理责任人？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否建立安全管理制度？"
+          type: "yes_no"
+          evidence_required: true
+    weight: 1.5
+    pass_threshold: 1.0
+
+  # ===== 安全管理人员 - 二级补充 =====
+  - id: "8.1.5.3.4"
+    name: "人员管理二级要求"
+    pillar: "personnel"
+    level: [2]
+    check_type: "document"
+    description: "二级系统人员管理要求"
+    document:
+      required_docs:
+        - "人员安全管理制度（二级版）"
+        - "关键岗位人员清单"
+    weight: 1.5
+
+  # ===== 安全建设管理 - 二级补充 =====
+  - id: "8.1.5.4.4"
+    name: "安全建设二级要求"
+    pillar: "construction"
+    level: [2]
+    check_type: "document"
+    description: "二级系统安全建设管理要求"
+    document:
+      required_docs:
+        - "安全建设方案（二级版）"
+        - "产品采购清单"
+    weight: 1.5
+
+  # ===== 安全运维管理 - 二级补充 =====
+  - id: "8.1.5.5.15"
+    name: "运维管理二级补充"
+    pillar: "operation"
+    level: [2]
+    check_type: "document"
+    description: "二级系统运维管理补充要求"
+    document:
+      required_docs:
+        - "运维管理制度（二级版）"
+        - "日常巡检记录"
+    weight: 1.5
+
+  - id: "8.1.5.5.16"
+    name: "安全事件管理二级要求"
+    pillar: "operation"
+    level: [2]
+    check_type: "document"
+    description: "二级系统安全事件管理要求"
+    document:
+      required_docs:
+        - "安全事件报告制度"
+        - "安全事件处置记录"
+    weight: 1.5
+
+# 二级特有评分规则
+scoring:
+  # 二级通过标准相对宽松
+  pass_threshold: 60  # 60分即可通过
+  levels:
+    - min: 90
+      max: 100
+      name: "优秀"
+      color: "#10b981"
+    - min: 75
+      max: 89
+      name: "良好"
+      color: "#6366f1"
+    - min: 60
+      max: 74
+      name: "合格"
+      color: "#f59e0b"
+    - min: 0
+      max: 59
+      name: "不合格"
+      color: "#ef4444"
