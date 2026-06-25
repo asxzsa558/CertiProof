@@ -15,6 +15,7 @@ from app.models.assessment import (
     FlowTemplate, Assessment, PhaseInstance, TaskInstance, FlowEvent
 )
 from app.models.config import SystemConfig
+from app.models.questionnaire import QuestionnaireRecord
 
 __all__ = [
     "User",
@@ -59,4 +60,5 @@ __all__ = [
     "PhaseInstance",
     "TaskInstance",
     "FlowEvent",
+    "QuestionnaireRecord",
 ]
