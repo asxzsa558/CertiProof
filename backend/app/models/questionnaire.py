@@ -34,6 +34,7 @@ class QuestionnaireRecord(Base):
     completed_at = Column(DateTime(timezone=True))
     
     # Relationships
+    project = relationship("Project", back_populates="questionnaires")
     evidences = relationship("Evidence", back_populates="questionnaire_record", cascade="all, delete-orphan")
     
     def __repr__(self):

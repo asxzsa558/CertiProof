@@ -72,6 +72,7 @@ class Finding(Base):
     project = relationship("Project", back_populates="findings")
     scan_task = relationship("ScanTask", back_populates="findings")
     evidences = relationship("Evidence", back_populates="finding", cascade="all, delete-orphan")
+    remediation_ticket = relationship("RemediationTicket", back_populates="finding", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Finding(id={self.id}, clause={self.clause_id}, judgment={self.judgment})>"

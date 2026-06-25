@@ -258,7 +258,15 @@ function ChatPage() {
       }
       fetchProjects()
     } catch (error) {
-      message.error('删除失败')
+      const status = error.response?.status
+      const detail = error.response?.data?.detail
+      if (status === 404) {
+        message.error('项目不存在或您无权删除')
+      } else if (status === 403) {
+        message.error('权限不足')
+      } else {
+        message.error(detail || '删除失败')
+      }
     }
   }
 

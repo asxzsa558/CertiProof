@@ -42,8 +42,8 @@ class RemediationTicket(Base):
     verified_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
-    finding = relationship("Finding", backref="remediation_ticket")
-    project = relationship("Project", backref="remediation_tickets")
+    finding = relationship("Finding", back_populates="remediation_ticket")
+    project = relationship("Project", back_populates="remediation_tickets")
     assignee = relationship("User", foreign_keys=[assigned_to], backref="assigned_tickets")
     assigner = relationship("User", foreign_keys=[assigned_by])
     

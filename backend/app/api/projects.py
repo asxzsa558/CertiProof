@@ -1,12 +1,22 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from typing import List
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.project import Project
+from app.models.asset import Asset
+from app.models.scan_task import ScanTask
+from app.models.finding import Finding
+from app.models.remediation import RemediationTicket
+from app.models.questionnaire import QuestionnaireRecord
+from app.models.evidence import Evidence
+from app.models.context import (
+    ConversationHistory, ActionHistory, ResultCache,
+    ProjectMemory, ConversationArchive, ConversationThread,
+)
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse
 from app.services.report_service import generate_report, generate_json_report
 
@@ -104,13 +114,48 @@ async def delete_project(
         select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
     )
     project = result.scalar_one_or_none()
-    
+
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found",
         )
-    
+
+    await db.execute(delete(RemediationTicket).where(RemediationTicket.project_id == project_id))
+    await db.execute(delete(Evidence).where(Evidence.project_id == project_id))
+    await db.execute(
+        delete(Evidence).where(
+            Evidence.finding_id.in_(
+                select(Finding.id).where(Finding.project_id == project_id)
+            )
+        )
+    )
+    await db.execute(
+        delete(Evidence).where(
+            Evidence.questionnaire_record_id.in_(
+                select(QuestionnaireRecord.id).where(QuestionnaireRecord.project_id == project_id)
+            )
+        )
+    )
+    await db.execute(delete(QuestionnaireRecord).where(QuestionnaireRecord.project_id == project_id))
+    await db.execute(delete(Finding).where(Finding.project_id == project_id))
+    await db.execute(delete(ScanTask).where(ScanTask.project_id == project_id))
+    await db.execute(delete(Asset).where(Asset.project_id == project_id))
+
+    await db.execute(delete(ProjectMemory).where(ProjectMemory.project_id == project_id))
+    await db.execute(delete(ActionHistory).where(ActionHistory.project_id == project_id))
+    await db.execute(delete(ResultCache).where(ResultCache.project_id == project_id))
+
+    await db.execute(
+        delete(ConversationHistory).where(ConversationHistory.project_id == project_id)
+    )
+    await db.execute(
+        delete(ConversationArchive).where(ConversationArchive.project_id == project_id)
+    )
+    await db.execute(
+        delete(ConversationThread).where(ConversationThread.project_id == project_id)
+    )
+
     await db.delete(project)
     await db.commit()
     return None
