@@ -76,12 +76,37 @@ class SkillLoader:
         ext_name = f"dengbao_level{level}_ext"
         ext_file = self._find_skill_file(ext_name)
         
+        # 加载扩展条款库
+        extensions_files = [
+            self._find_skill_file("dengbao_extensions"),
+            self._find_skill_file("dengbao_management_p0_p1"),
+            self._find_skill_file("dengbao_physical_computing"),
+            self._find_skill_file("dengbao_network_extra"),
+            self._find_skill_file("dengbao_phase2_p1"),
+            self._find_skill_file("dengbao_phase2_final"),
+            self._find_skill_file("dengbao_phase2_90"),
+        ]
+        
+        merged_ext_config = None
         if ext_file:
             with open(ext_file, 'r', encoding='utf-8') as f:
-                ext_config = yaml.safe_load(f)
-            
+                merged_ext_config = yaml.safe_load(f)
+        
+        for ext_file_path in extensions_files:
+            if ext_file_path:
+                with open(ext_file_path, 'r', encoding='utf-8') as f:
+                    ext_extensions_config = yaml.safe_load(f)
+                    ext_clauses = ext_extensions_config.get("clauses", [])
+                    if merged_ext_config:
+                        if "clauses" not in merged_ext_config:
+                            merged_ext_config["clauses"] = []
+                        merged_ext_config["clauses"].extend(ext_clauses)
+                    else:
+                        merged_ext_config = ext_extensions_config
+        
+        if merged_ext_config:
             # 合并条款
-            merged_config = self._merge_clauses(base_config, ext_config, level)
+            merged_config = self._merge_clauses(base_config, merged_ext_config, level)
         else:
             # 如果没有扩展文件，只返回基础条款中适用于该等级的部分
             merged_config = self._filter_clauses_by_level(base_config, level)

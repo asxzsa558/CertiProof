@@ -1,0 +1,514 @@
+name: "等保阶段2 最终补充（第六批）"
+standard: "GB/T 22239-2019"
+version: "1.0"
+description: "达到 90% 覆盖率的最终补充"
+base: "dengbao_base"
+
+clauses:
+  # ===== 8.1.2 通信网络补充 =====
+  - id: "8.1.2.26"
+    name: "网络时间同步"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应部署网络时间协议（NTP）服务"
+    weight: 1.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了 NTP 时间同步？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署 NTP"
+      short_term:
+        - "冗余 NTP"
+      long_term:
+        - "授时服务"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.27"
+    name: "网络设备口令"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应管理网络设备口令"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "网络设备口令是否满足复杂度要求？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "网络设备口令是否定期更换？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "审查口令策略"
+      short_term:
+        - "定期更换"
+      long_term:
+        - "集中认证"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.2.28"
+    name: "网络设备日志"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应记录网络设备日志"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否启用网络设备日志记录？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "日志是否集中收集和分析？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "启用日志记录"
+      short_term:
+        - "集中分析"
+      long_term:
+        - "智能分析"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  # ===== 8.1.3 边界补充 =====
+  - id: "8.1.3.20"
+    name: "网络设备物理安全"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应保护网络边界设备的物理安全"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "边界设备是否放置在安全区域？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "边界设备是否实施物理访问控制？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "保护物理安全"
+      short_term:
+        - "实施访问控制"
+      long_term:
+        - "建立机房管理体系"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.3.21"
+    name: "边界设备冗余"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应部署冗余的边界防护设备"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了双防火墙？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否部署了双 IDS/IPS？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署冗余设备"
+      short_term:
+        - "测试切换"
+      long_term:
+        - "高可用架构"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  # ===== 8.1.4 计算环境补充 =====
+  - id: "8.1.4.34"
+    name: "用户行为分析"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应部署用户行为分析（UEBA）"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了 UEBA 系统？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "评估 UEBA 需求"
+      short_term:
+        - "部署 UEBA"
+      long_term:
+        - "持续优化"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.4.35"
+    name: "数据脱敏"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对敏感数据进行脱敏"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否对敏感数据脱敏？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "脱敏是否覆盖所有敏感字段？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施数据脱敏"
+      short_term:
+        - "完善脱敏规则"
+      long_term:
+        - "建立 DLP"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.36"
+    name: "API 安全"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应保护 API 安全"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "API 是否实施身份认证？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "API 是否实施访问控制和速率限制？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "API 是否记录访问日志？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施 API 认证"
+      short_term:
+        - "完善访问控制"
+      long_term:
+        - "建立 API 网关"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.37"
+    name: "微服务安全"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应保护微服务架构安全"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "微服务之间是否实施服务网格？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "微服务通信是否加密？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "评估微服务安全"
+      short_term:
+        - "实施服务网格"
+      long_term:
+        - "零信任微服务"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.4.38"
+    name: "Serverless 安全"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应保护 Serverless 架构安全"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否对 Serverless 函数实施权限控制？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "Serverless 函数是否扫描漏洞？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "评估 Serverless"
+      short_term:
+        - "实施权限控制"
+      long_term:
+        - "持续监控"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  # ===== 8.1.5 管理补充 =====
+  - id: "8.1.5.1.16"
+    name: "制度可访问性"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应确保制度可被相关人员访问"
+    weight: 1.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "所有相关人员是否能够访问相关制度？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立访问机制"
+      short_term:
+        - "提供多种访问渠道"
+      long_term:
+        - "建立门户"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.3.13"
+    name: "人员离岗交接"
+    pillar: "personnel"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立人员离岗交接制度"
+    weight: 2.0
+    document:
+      required_docs:
+        - "离岗交接清单"
+        - "交接记录"
+        - "权限回收记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立离岗流程"
+      short_term:
+        - "记录交接"
+      long_term:
+        - "电子化交接"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.41"
+    name: "运维自动化工具"
+    pillar: "operation"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应部署运维自动化工具"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了配置管理工具？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否部署了自动化部署工具？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署自动化工具"
+      short_term:
+        - "扩展自动化范围"
+      long_term:
+        - "完善自动化体系"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.42"
+    name: "运维监控大屏"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应建立运维监控大屏"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了运维监控大屏？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署监控大屏"
+      short_term:
+        - "完善展示内容"
+      long_term:
+        - "智能化大屏"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.43"
+    name: "故障演练"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期开展故障演练"
+    weight: 2.0
+    document:
+      required_docs:
+        - "故障演练计划"
+        - "演练记录"
+        - "改进措施"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定演练计划"
+      short_term:
+        - "定期演练"
+      long_term:
+        - "持续改进"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  # ===== 8.1.6 安全管理中心补充 =====
+  - id: "8.1.6.9"
+    name: "集中监控告警"
+    pillar: "management_center"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应建立集中监控告警机制"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否建立集中监控告警机制？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否能够实时响应告警？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立告警机制"
+      short_term:
+        - "完善响应流程"
+      long_term:
+        - "建立 SOC"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.6.10"
+    name: "运维自动化"
+    pillar: "management_center"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应实施运维自动化"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署自动化运维工具？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实施自动化的安全运维？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "规划自动化运维"
+      short_term:
+        - "实施关键自动化"
+      long_term:
+        - "全面自动化"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  # ===== 8.1.2 补充 =====
+  - id: "8.1.2.29"
+    name: "IPv6 安全部署"
+    pillar: "network"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应保护 IPv6 网络安全"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "IPv6 网络是否有独立的安全策略？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "审查 IPv6 安全"
+      short_term:
+        - "完善 IPv6 防护"
+      long_term:
+        - "统一安全管理"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.2.30"
+    name: "5G 网络安全"
+    pillar: "network"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应保护 5G 网络安全"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "5G 网络是否有专门的安全防护？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "评估 5G 安全"
+      short_term:
+        - "部署 5G 防护"
+      long_term:
+        - "建立 5G 安全体系"
+    risk_level: "medium"
+    usage_frequency: "low"

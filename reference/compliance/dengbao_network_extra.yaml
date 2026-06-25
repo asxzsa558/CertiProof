@@ -1,0 +1,578 @@
+name: "等保网络与剩余条款（第四批）"
+standard: "GB/T 22239-2019"
+version: "1.0"
+description: "补充的网络和剩余等保条款"
+base: "dengbao_base"
+
+clauses:
+  # ===== 8.1.2 通信网络补充 P1 条款 =====
+  - id: "8.1.2.21"
+    name: "IPv6 安全"
+    pillar: "network"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应保护 IPv6 网络安全"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了 IPv6 安全防护？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "IPv6 是否有独立的安全策略？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "评估 IPv6 安全风险"
+      short_term:
+        - "部署 IPv6 防护"
+      long_term:
+        - "完善 IPv6 治理"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.2.22"
+    name: "网络 QoS"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应实施网络 QoS 保障关键业务"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否对关键业务实施 QoS 保障？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施 QoS 策略"
+      short_term:
+        - "优化流量分配"
+      long_term:
+        - "建立带宽管理体系"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.23"
+    name: "网络运维管理"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立网络运维管理制度"
+    weight: 2.0
+    document:
+      required_docs:
+        - "网络运维制度"
+        - "网络巡检记录"
+        - "故障处理记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立运维制度"
+      short_term:
+        - "完善记录"
+      long_term:
+        - "自动化运维"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.24"
+    name: "网络应急预案"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "document"
+    description: "应制定网络应急预案"
+    weight: 2.0
+    document:
+      required_docs:
+        - "网络应急预案"
+        - "演练记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定预案"
+      short_term:
+        - "定期演练"
+      long_term:
+        - "持续优化"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.25"
+    name: "网络性能监控"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对网络性能进行监控"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否监控网络带宽使用率？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否监控网络延迟和丢包率？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署性能监控"
+      short_term:
+        - "完善监控项"
+      long_term:
+        - "智能告警"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  # ===== 8.1.5 补充剩余条款 =====
+  - id: "8.1.5.1.13"
+    name: "制度解释和咨询"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应提供制度解释和咨询服务"
+    weight: 1.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否提供制度解释和咨询服务？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立咨询机制"
+      short_term:
+        - "完善服务渠道"
+      long_term:
+        - "建立知识库"
+    risk_level: "low"
+    usage_frequency: "low"
+
+  - id: "8.1.5.1.14"
+    name: "制度合规性评估"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期评估制度合规性"
+    weight: 1.5
+    document:
+      required_docs:
+        - "合规性评估报告"
+        - "差距分析"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立评估机制"
+      short_term:
+        - "定期评估"
+      long_term:
+        - "持续合规"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.5.2.11"
+    name: "安全文化建设"
+    pillar: "organization"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立安全文化"
+    weight: 1.5
+    document:
+      required_docs:
+        - "安全文化建设方案"
+        - "活动记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定建设方案"
+      short_term:
+        - "开展活动"
+      long_term:
+        - "形成文化氛围"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.2.12"
+    name: "外部专家咨询"
+    pillar: "organization"
+    level: [3]
+    check_type: "document"
+    description: "应建立外部专家咨询机制"
+    weight: 1.5
+    document:
+      required_docs:
+        - "外部专家合同"
+        - "咨询记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立咨询机制"
+      short_term:
+        - "签订专家合同"
+      long_term:
+        - "持续合作"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.5.3.10"
+    name: "人员安全意识考核"
+    pillar: "personnel"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期开展人员安全意识考核"
+    weight: 2.0
+    document:
+      required_docs:
+        - "安全意识考核方案"
+        - "考核记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定考核方案"
+      short_term:
+        - "定期考核"
+      long_term:
+        - "提升意识水平"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.3.11"
+    name: "人员违规处理"
+    pillar: "personnel"
+    level: [2, 3]
+    check_type: "document"
+    description: "应对违规人员进行处罚"
+    weight: 1.5
+    document:
+      required_docs:
+        - "违规处理制度"
+        - "处理记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立处理制度"
+      short_term:
+        - "执行处罚"
+      long_term:
+        - "形成威慑"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.5.4.9"
+    name: "项目验收安全测试"
+    pillar: "construction"
+    level: [2, 3]
+    check_type: "document"
+    description: "项目验收应包含安全测试"
+    weight: 2.5
+    document:
+      required_docs:
+        - "安全测试方案"
+        - "测试报告"
+        - "问题整改记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立测试规范"
+      short_term:
+        - "执行安全测试"
+      long_term:
+        - "持续改进"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.4.10"
+    name: "项目后评估"
+    pillar: "construction"
+    level: [3]
+    check_type: "document"
+    description: "应对项目进行后评估"
+    weight: 1.5
+    document:
+      required_docs:
+        - "后评估报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立评估机制"
+      short_term:
+        - "定期评估"
+      long_term:
+        - "持续改进"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.5.5.21"
+    name: "运维知识库"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立运维知识库"
+    weight: 1.5
+    document:
+      required_docs:
+        - "运维知识库"
+        - "运维手册"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立知识库"
+      short_term:
+        - "完善内容"
+      long_term:
+        - "持续维护"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.22"
+    name: "运维监控告警"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立运维监控告警机制"
+    weight: 2.0
+    document:
+      required_docs:
+        - "监控告警规则"
+        - "告警处理记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立告警规则"
+      short_term:
+        - "完善告警处理"
+      long_term:
+        - "智能告警"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.23"
+    name: "运维值班"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立运维值班制度"
+    weight: 1.5
+    document:
+      required_docs:
+        - "值班制度"
+        - "值班记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立值班制度"
+      short_term:
+        - "规范值班流程"
+      long_term:
+        - "7x24 值班"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.24"
+    name: "运维交接班"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立运维交接班制度"
+    weight: 1.0
+    document:
+      required_docs:
+        - "交接班记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立交接班规范"
+      short_term:
+        - "记录交接内容"
+      long_term:
+        - "建立电子交接"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.25"
+    name: "运维巡检"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期开展运维巡检"
+    weight: 2.0
+    document:
+      required_docs:
+        - "巡检计划"
+        - "巡检记录"
+        - "问题整改"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定巡检计划"
+      short_term:
+        - "定期巡检"
+      long_term:
+        - "自动化巡检"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  # ===== 8.1.5.5 补充高级条款 =====
+  - id: "8.1.5.5.26"
+    name: "安全运维自动化"
+    pillar: "operation"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应实施安全运维自动化"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了运维自动化工具？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现了自动化的安全巡检？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否实现了自动化的漏洞修复？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署自动化工具"
+      short_term:
+        - "实施自动化巡检"
+      long_term:
+        - "全面自动化"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.27"
+    name: "DevSecOps"
+    pillar: "operation"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应实施 DevSecOps 流程"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否在 CI/CD 中集成了安全测试？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实施了自动化安全扫描？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "规划 DevSecOps"
+      short_term:
+        - "集成安全测试"
+      long_term:
+        - "完善流程"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.5.5.28"
+    name: "云安全"
+    pillar: "operation"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应保护云环境安全"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否使用云服务商的安全最佳实践？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否启用云访问安全审计？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "云数据是否加密？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施云安全最佳实践"
+      short_term:
+        - "启用云审计"
+      long_term:
+        - "建立云安全体系"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.29"
+    name: "物联网安全"
+    pillar: "operation"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应保护物联网设备安全"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否对 IoT 设备进行身份认证？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "IoT 设备是否定期更新？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "IoT 网络是否与其他网络隔离？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施 IoT 身份认证"
+      short_term:
+        - "建立更新机制"
+      long_term:
+        - "IoT 安全治理"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.5.5.30"
+    name: "供应链安全"
+    pillar: "operation"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应建立供应链安全管理"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否评估供应商的安全能力？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否签订供应链安全协议？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否定期审计供应商？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立供应链安全管理"
+      short_term:
+        - "签订安全协议"
+      long_term:
+        - "建立供应链安全体系"
+    risk_level: "high"
+    usage_frequency: "medium"

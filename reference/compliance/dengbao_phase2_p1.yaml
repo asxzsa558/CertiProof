@@ -1,0 +1,787 @@
+name: "等保阶段2 P1 补充条款（第五批）"
+standard: "GB/T 22239-2019"
+version: "1.0"
+description: "补充更多等保 P1 条款以达到 90% 覆盖率"
+base: "dengbao_base"
+
+clauses:
+  # ===== 8.1.4 计算环境更多细节 =====
+  - id: "8.1.4.26"
+    name: "代码审计"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期开展代码安全审计"
+    weight: 2.0
+    document:
+      required_docs:
+        - "代码审计报告"
+        - "漏洞修复记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立代码审计机制"
+      short_term:
+        - "定期审计"
+      long_term:
+        - "自动化审计"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.27"
+    name: "渗透测试"
+    pillar: "computing"
+    level: [3]
+    check_type: "document"
+    description: "应定期开展渗透测试"
+    weight: 2.5
+    document:
+      required_docs:
+        - "渗透测试方案"
+        - "渗透测试报告"
+        - "漏洞修复记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定渗透测试计划"
+      short_term:
+        - "开展渗透测试"
+      long_term:
+        - "持续改进"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.28"
+    name: "漏洞扫描"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "scan"
+    description: "应定期开展漏洞扫描"
+    weight: 2.5
+    tools:
+      - name: "nuclei_scan"
+        params:
+          target: "{{asset}}"
+          severity: "critical,high,medium"
+          templates: "cve,misconfig,exposure"
+        output_key: "vuln_scan_result"
+    pass_condition: "no_critical_vulns"
+    remediation:
+      immediate:
+        - "部署漏洞扫描"
+      short_term:
+        - "修复已知漏洞"
+      long_term:
+        - "建立漏洞管理"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.4.29"
+    name: "配置审计"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应定期开展系统配置审计"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否定期进行系统配置审计？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "配置审计是否覆盖所有关键系统？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立配置审计"
+      short_term:
+        - "定期审计"
+      long_term:
+        - "自动化审计"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.30"
+    name: "安全事件响应"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立安全事件响应流程"
+    weight: 2.5
+    document:
+      required_docs:
+        - "事件响应计划"
+        - "响应流程图"
+        - "演练记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定响应计划"
+      short_term:
+        - "建立响应团队"
+      long_term:
+        - "持续改进"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.31"
+    name: "加密算法合规"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应使用国家认可的加密算法"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否使用国家认可的商用密码算法？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否避免使用已破解的算法（如MD5、SHA1）？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "审查加密算法"
+      short_term:
+        - "替换不安全算法"
+      long_term:
+        - "建立密码管理体系"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.4.32"
+    name: "密钥管理"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立密钥管理体系"
+    weight: 2.5
+    document:
+      required_docs:
+        - "密钥管理制度"
+        - "密钥生成记录"
+        - "密钥更新记录"
+        - "密钥销毁记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立密钥管理制度"
+      short_term:
+        - "实施密钥生命周期管理"
+      long_term:
+        - "建立 KMS"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.33"
+    name: "安全开发生命周期"
+    pillar: "computing"
+    level: [3]
+    check_type: "document"
+    description: "应建立安全开发生命周期（SDL）"
+    weight: 2.5
+    document:
+      required_docs:
+        - "SDL 规范"
+        - "威胁建模报告"
+        - "代码审计报告"
+        - "安全测试报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立 SDL 规范"
+      short_term:
+        - "实施 SDL"
+      long_term:
+        - "持续改进"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  # ===== 8.1.3 更多细节 =====
+  - id: "8.1.3.16"
+    name: "网络访问控制列表"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "document"
+    description: "应配置网络访问控制列表"
+    weight: 2.0
+    document:
+      required_docs:
+        - "ACL 配置文档"
+        - "ACL 审计记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立 ACL 配置"
+      short_term:
+        - "定期审查 ACL"
+      long_term:
+        - "自动化 ACL 管理"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.3.17"
+    name: "网络分段隔离"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对不同安全等级的网络进行分段隔离"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否根据业务重要程度划分安全域？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "安全域之间是否有访问控制？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "划分安全域"
+      short_term:
+        - "实施访问控制"
+      long_term:
+        - "微分段"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.3.18"
+    name: "无线网络管控"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对无线网络进行管控"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否对无线设备实施认证？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否部署无线入侵检测？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "访客无线网络是否与业务网络隔离？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署无线认证"
+      short_term:
+        - "实施 WIDS"
+      long_term:
+        - "建立无线管理体系"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.3.19"
+    name: "远程访问控制"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对远程访问进行严格控制"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "远程访问是否使用 VPN？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实施双因素认证？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否记录远程访问日志？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署 VPN"
+      short_term:
+        - "实施双因素"
+      long_term:
+        - "零信任远程访问"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  # ===== 8.1.5 更多管理细节 =====
+  - id: "8.1.5.1.15"
+    name: "制度电子化"
+    pillar: "policy"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应实现制度电子化管理"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实现制度电子化发布？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实现制度电子化归档？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立电子化平台"
+      short_term:
+        - "完善归档"
+      long_term:
+        - "全面电子化"
+    risk_level: "low"
+    usage_frequency: "low"
+
+  - id: "8.1.5.2.13"
+    name: "安全创新"
+    pillar: "organization"
+    level: [3]
+    check_type: "document"
+    description: "应鼓励安全技术创新"
+    weight: 1.0
+    document:
+      required_docs:
+        - "安全创新计划"
+        - "创新成果"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定创新计划"
+      short_term:
+        - "开展创新活动"
+      long_term:
+        - "建立创新机制"
+    risk_level: "low"
+    usage_frequency: "low"
+
+  - id: "8.1.5.3.12"
+    name: "人员能力评估"
+    pillar: "personnel"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期评估人员安全能力"
+    weight: 1.5
+    document:
+      required_docs:
+        - "能力评估方案"
+        - "评估记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立评估机制"
+      short_term:
+        - "定期评估"
+      long_term:
+        - "建立能力模型"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.4.11"
+    name: "代码所有权管理"
+    pillar: "construction"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应建立代码所有权管理"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "代码是否有明确的所有权？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "代码仓库是否实施访问控制？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立代码所有权"
+      short_term:
+        - "实施访问控制"
+      long_term:
+        - "建立代码审计"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.5.5.31"
+    name: "容量规划"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应进行容量规划和预测"
+    weight: 1.5
+    document:
+      required_docs:
+        - "容量规划方案"
+        - "容量预测报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定容量规划"
+      short_term:
+        - "定期评估"
+      long_term:
+        - "自动化扩容"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.32"
+    name: "性能基线"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立性能基线"
+    weight: 1.5
+    document:
+      required_docs:
+        - "性能基线文档"
+        - "性能监控报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立基线"
+      short_term:
+        - "持续监控"
+      long_term:
+        - "智能告警"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.33"
+    name: "服务目录"
+    pillar: "operation"
+    level: [3]
+    check_type: "document"
+    description: "应建立服务目录"
+    weight: 1.5
+    document:
+      required_docs:
+        - "服务目录"
+        - "服务说明"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立服务目录"
+      short_term:
+        - "完善内容"
+      long_term:
+        - "自动化服务管理"
+    risk_level: "low"
+    usage_frequency: "low"
+
+  - id: "8.1.5.5.34"
+    name: "运维 SLA"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立运维 SLA"
+    weight: 1.5
+    document:
+      required_docs:
+        - "SLA 协议"
+        - "SLA 监控报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "签订 SLA"
+      short_term:
+        - "监控 SLA"
+      long_term:
+        - "持续改进"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  # ===== 8.1.5.5 补充高级条款 =====
+  - id: "8.1.5.5.35"
+    name: "数字资产管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立数字资产管理体系"
+    weight: 1.5
+    document:
+      required_docs:
+        - "数字资产清单"
+        - "数字资产管理制度"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立资产清单"
+      short_term:
+        - "完善管理"
+      long_term:
+        - "建立数字资产管理平台"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.36"
+    name: "软件正版化"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应使用正版软件"
+    weight: 1.5
+    document:
+      required_docs:
+        - "软件授权清单"
+        - "采购凭证"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "清查软件授权"
+      short_term:
+        - "采购正版"
+      long_term:
+        - "建立授权管理"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.37"
+    name: "开源软件管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应对开源软件进行管理"
+    weight: 2.0
+    document:
+      required_docs:
+        - "开源软件清单"
+        - "许可证管理"
+        - "漏洞跟踪"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立 SBOM"
+      short_term:
+        - "许可证审计"
+      long_term:
+        - "持续跟踪"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.38"
+    name: "终端 EDR"
+    pillar: "operation"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应部署终端检测与响应（EDR）"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了 EDR 系统？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "EDR 是否覆盖所有终端？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署 EDR"
+      short_term:
+        - "全面覆盖"
+      long_term:
+        - "智能分析"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.39"
+    name: "网络访问控制（NAC 详细）"
+    pillar: "operation"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应实施网络访问控制（NAC）"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实施 802.1X 认证？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否对接入设备进行合规检查？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署 NAC"
+      short_term:
+        - "覆盖所有接入"
+      long_term:
+        - "零信任网络"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.40"
+    name: "特权账号管理"
+    pillar: "operation"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应对特权账号进行专门管理"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否实施特权账号管理（PAM）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "特权账号是否定期审计？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "特权账号是否记录所有操作？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立 PAM"
+      short_term:
+        - "定期审计"
+      long_term:
+        - "持续监控"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  # ===== 8.1.1 物理环境补充 =====
+  - id: "8.1.1.1.21"
+    name: "机房访问记录"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应记录所有机房访问"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否记录所有进出机房的人员？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "访问记录保留时间是否不少于 180 天？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立访问记录"
+      short_term:
+        - "电子化记录"
+      long_term:
+        - "建立审计系统"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.1.1.22"
+    name: "机房监控视频"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应部署机房监控视频"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "机房是否部署视频监控？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "视频记录保留时间是否不少于 90 天？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署视频监控"
+      short_term:
+        - "电子化存储"
+      long_term:
+        - "智能视频分析"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.1.1.23"
+    name: "机房运维规范"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立机房运维规范"
+    weight: 1.5
+    document:
+      required_docs:
+        - "机房运维手册"
+        - "运维记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立运维规范"
+      short_term:
+        - "记录运维"
+      long_term:
+        - "自动化运维"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.1.1.24"
+    name: "机房清洁维护"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期进行机房清洁维护"
+    weight: 1.0
+    document:
+      required_docs:
+        - "清洁计划"
+        - "清洁记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定清洁计划"
+      short_term:
+        - "定期清洁"
+      long_term:
+        - "专业外包"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.1.1.25"
+    name: "机房应急预案"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "document"
+    description: "应制定机房应急预案"
+    weight: 2.5
+    document:
+      required_docs:
+        - "机房应急预案"
+        - "演练记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定预案"
+      short_term:
+        - "定期演练"
+      long_term:
+        - "持续优化"
+    risk_level: "high"
+    usage_frequency: "medium"

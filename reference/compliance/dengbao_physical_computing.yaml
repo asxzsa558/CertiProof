@@ -1,0 +1,865 @@
+name: "等保物理与计算环境扩展条款（第三批）"
+standard: "GB/T 22239-2019"
+version: "1.0"
+description: "补充的物理环境和计算环境等保条款"
+base: "dengbao_base"
+
+clauses:
+  # ===== 8.1.1 物理环境补充条款 =====
+  - id: "8.1.1.1.11"
+    name: "机房选址"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "机房应选择在具有防震、防风和防雨等能力的建筑内"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "机房所在建筑是否具有防震能力？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "机房所在建筑是否具有防风能力？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "机房所在建筑是否具有防雨能力？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q4"
+          text: "机房是否远离强电磁场、强振动源？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "评估机房选址合规性"
+      short_term:
+        - "加固机房建筑"
+      long_term:
+        - "迁址或重建机房"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.1.1.12"
+    name: "机房防火"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "机房应设置灭火设备，并采用自动消防设施"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "机房是否配备了灭火器？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "机房是否采用气体灭火系统？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "机房是否安装了火灾自动报警系统？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "配备灭火器"
+      short_term:
+        - "安装气体灭火"
+      long_term:
+        - "建立消防体系"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.1.1.13"
+    name: "机房防水防潮"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应采取措施防止雨水渗透，对系统设备进行防水和防潮处理"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "机房是否采取了防水措施？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "机房是否安装了除湿设备？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "机房是否配备了防水报警？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "安装防水设施"
+      short_term:
+        - "部署除湿设备"
+      long_term:
+        - "建立防水监测"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.1.1.14"
+    name: "机房防静电"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应采用防静电地板，关键设备应采取防静电措施"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "机房是否铺设防静电地板？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "关键设备是否采取了防静电措施？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "铺设防静电地板"
+      short_term:
+        - "设备防静电接地"
+      long_term:
+        - "定期检测静电"
+    risk_level: "low"
+    usage_frequency: "low"
+
+  - id: "8.1.1.1.15"
+    name: "机房温湿度控制"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应配备温湿度调节设施，使机房温湿度满足要求"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "机房是否配备了空调系统？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "机房温度是否保持在 18-27°C？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "机房湿度是否保持在 40%-60%？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "配备空调系统"
+      short_term:
+        - "部署温湿度监控"
+      long_term:
+        - "建立精密空调"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.1.1.16"
+    name: "机房电力供应"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应在机房供电线路上配置稳压器和过电压防护设备"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "机房是否配置了稳压器？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "机房是否配置了过电压防护？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "机房是否配备了 UPS？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q4"
+          text: "UPS 续航时间是否满足要求？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "配置稳压器"
+      short_term:
+        - "配备 UPS"
+      long_term:
+        - "建立双路供电"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.1.1.17"
+    name: "机房电磁防护"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应采用接地方式防止静电和电磁干扰"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "机房是否采用了接地方式防止静电？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "机房是否采用了电磁屏蔽？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施接地保护"
+      short_term:
+        - "部署电磁屏蔽"
+      long_term:
+        - "定期检测"
+    risk_level: "low"
+    usage_frequency: "low"
+
+  - id: "8.1.1.1.18"
+    name: "机房环境监控"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对机房环境进行实时监控"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了机房环境监控系统？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实时监控温湿度？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否监控烟感和水浸？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署环境监控"
+      short_term:
+        - "完善监控项"
+      long_term:
+        - "建立机房运维体系"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.1.1.19"
+    name: "机房人员管理"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "document"
+    description: "应对机房人员进出进行严格管理"
+    weight: 2.0
+    document:
+      required_docs:
+        - "机房出入登记"
+        - "访客登记表"
+        - "机房管理制度"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立出入登记"
+      short_term:
+        - "实施门禁系统"
+      long_term:
+        - "建立访客系统"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.1.1.20"
+    name: "机房设备管理"
+    pillar: "physical"
+    level: [2, 3]
+    check_type: "document"
+    description: "应对机房设备进行台账管理"
+    weight: 1.5
+    document:
+      required_docs:
+        - "设备台账"
+        - "设备清单"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立设备台账"
+      short_term:
+        - "完善设备信息"
+      long_term:
+        - "实施 CMDB"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  # ===== 8.1.4 计算环境补充条款 =====
+  - id: "8.1.4.16"
+    name: "操作系统安全"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应使用安全的操作系统"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否使用正版操作系统？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否定期更新操作系统？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否关闭了不必要的服务？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "使用正版系统"
+      short_term:
+        - "关闭不必要服务"
+      long_term:
+        - "建立补丁管理"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.4.17"
+    name: "数据库安全"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应保护数据库安全"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "数据库是否启用访问控制？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "数据库敏感数据是否加密？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否启用数据库审计？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施访问控制"
+      short_term:
+        - "加密敏感数据"
+      long_term:
+        - "部署数据库审计"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.4.18"
+    name: "中间件安全"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应保护中间件安全"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "中间件是否启用安全配置？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "中间件是否定期更新？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "加固中间件配置"
+      short_term:
+        - "定期更新"
+      long_term:
+        - "建立配置基线"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.19"
+    name: "应用安全"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应保护应用系统安全"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "应用是否进行安全测试？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否修复了已知漏洞？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否启用输入验证？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "开展安全测试"
+      short_term:
+        - "修复已知漏洞"
+      long_term:
+        - "建立 SDL"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.4.20"
+    name: "Web 应用安全"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "scan"
+    description: "应对 Web 应用进行安全防护"
+    weight: 2.5
+    tools:
+      - name: "nuclei_scan"
+        params:
+          target: "{{asset}}"
+          severity: "critical,high"
+          templates: "cves,misconfig,exposures,default-logins"
+        output_key: "webapp_scan_result"
+    pass_condition: "no_critical_vulns"
+    remediation:
+      immediate:
+        - "部署 WAF"
+      short_term:
+        - "修复已知漏洞"
+      long_term:
+        - "建立应用安全体系"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.4.21"
+    name: "终端安全"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对终端进行安全管理"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "终端是否安装防病毒软件？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "终端是否启用磁盘加密？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "终端是否实施准入控制？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署防病毒"
+      short_term:
+        - "实施磁盘加密"
+      long_term:
+        - "建立 EDR"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.4.22"
+    name: "移动设备管理"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应对移动设备进行统一管理"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了 MDM 系统？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实施远程擦除能力？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署 MDM"
+      short_term:
+        - "实施远程擦除"
+      long_term:
+        - "完善移动安全"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.23"
+    name: "虚拟化安全"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应保护虚拟化环境安全"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "虚拟机之间是否实施隔离？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "虚拟机管理是否启用强认证？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "虚拟机镜像是否安全管理？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施 VM 隔离"
+      short_term:
+        - "强化管理认证"
+      long_term:
+        - "完善镜像管理"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.24"
+    name: "容器安全"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应保护容器环境安全"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否使用官方镜像？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否进行镜像扫描？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "运行时是否实施安全策略？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "使用可信镜像"
+      short_term:
+        - "实施镜像扫描"
+      long_term:
+        - "建立容器安全平台"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.25"
+    name: "日志审计"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对系统日志进行集中审计"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否集中收集系统日志？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "日志保留时间是否不少于 180 天？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否进行日志关联分析？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署日志收集"
+      short_term:
+        - "建立日志保留策略"
+      long_term:
+        - "SIEM 关联分析"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  # ===== 8.1.6 安全管理中心补充 =====
+  - id: "8.1.6.5"
+    name: "系统管理详细要求"
+    pillar: "management_center"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应通过安全管理员对系统中的安全策略配置进行集中管理"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否通过集中管理平台配置安全策略？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否对系统账户进行集中管理？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立集中管理平台"
+      short_term:
+        - "实施账户集中管理"
+      long_term:
+        - "自动化策略下发"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.6.6"
+    name: "审计管理详细要求"
+    pillar: "management_center"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应通过安全管理员对系统中的用户和审计记录进行集中管理"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否集中管理审计记录？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "审计记录是否防篡改？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "集中管理审计"
+      short_term:
+        - "实施防篡改"
+      long_term:
+        - "WORM 存储"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.6.7"
+    name: "安全管理详细要求"
+    pillar: "management_center"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应通过安全管理员对系统中的安全相关状态进行集中管理"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否集中管理安全状态？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否能够统一查看安全态势？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立态势感知"
+      short_term:
+        - "实施可视化"
+      long_term:
+        - "智能分析"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.6.8"
+    name: "集中管控详细要求"
+    pillar: "management_center"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应能够对安全设备、网络设备、服务器等进行集中管控"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否集中管控安全设备？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否集中管控网络设备？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否集中管控服务器？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立集中管控"
+      short_term:
+        - "覆盖更多设备"
+      long_term:
+        - "自动化运维"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  # ===== 8.1.5 补充 P1 条款 =====
+  - id: "8.1.5.1.11"
+    name: "制度宣贯"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "document"
+    description: "应对安全管理制度进行宣贯"
+    weight: 1.5
+    document:
+      required_docs:
+        - "宣贯计划"
+        - "宣贯记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定宣贯计划"
+      short_term:
+        - "定期宣贯"
+      long_term:
+        - "建立学习平台"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.1.12"
+    name: "制度培训"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "document"
+    description: "应对相关人员进行制度培训"
+    weight: 1.5
+    document:
+      required_docs:
+        - "培训计划"
+        - "培训签到"
+        - "培训效果评估"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立培训计划"
+      short_term:
+        - "定期开展培训"
+      long_term:
+        - "在线学习平台"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.2.9"
+    name: "安全绩效考核"
+    pillar: "organization"
+    level: [2, 3]
+    check_type: "document"
+    description: "应将安全工作纳入绩效考核"
+    weight: 2.0
+    document:
+      required_docs:
+        - "安全绩效考核制度"
+        - "考核记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立考核制度"
+      short_term:
+        - "实施安全考核"
+      long_term:
+        - "完善激励机制"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.2.10"
+    name: "安全预算"
+    pillar: "organization"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立安全专项预算"
+    weight: 1.5
+    document:
+      required_docs:
+        - "安全预算"
+        - "预算执行记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "设立安全预算"
+      short_term:
+        - "规范预算执行"
+      long_term:
+        - "ROI 评估"
+    risk_level: "low"
+    usage_frequency: "low"
+
+  - id: "8.1.5.3.8"
+    name: "保密协议"
+    pillar: "personnel"
+    level: [2, 3]
+    check_type: "document"
+    description: "应与员工签订保密协议"
+    weight: 2.0
+    document:
+      required_docs:
+        - "保密协议模板"
+        - "签订记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "签订保密协议"
+      short_term:
+        - "完善协议内容"
+      long_term:
+        - "持续监督执行"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.5.3.9"
+    name: "安全奖惩"
+    pillar: "personnel"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立安全奖惩机制"
+    weight: 1.5
+    document:
+      required_docs:
+        - "安全奖惩制度"
+        - "奖惩记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立奖惩制度"
+      short_term:
+        - "实施奖惩"
+      long_term:
+        - "持续改进"
+    risk_level: "low"
+    usage_frequency: "low"

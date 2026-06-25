@@ -1,0 +1,922 @@
+name: "等保扩展条款库（阶段1+2补充）"
+standard: "GB/T 22239-2019"
+version: "1.0"
+description: "补充的等保二级/三级条款（阶段1+2）"
+base: "dengbao_base"
+
+# 8.1.2 通信网络安全 - 补充条款
+clauses:
+  # ===== 8.1.2 网络架构 =====
+  - id: "8.1.2.1"
+    name: "网络架构安全"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应保证网络设备的业务处理能力具备冗余，应保证网络各个部分的带宽满足业务高峰期需要"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "关键网络节点是否采用双机热备或负载均衡？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "网络带宽是否能满足业务高峰期需要？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否定期进行网络设备冗余切换演练？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 0.67
+    remediation:
+      immediate:
+        - "部署双机热备或负载均衡"
+      short_term:
+        - "制定网络冗余切换演练计划"
+      long_term:
+        - "建立业务连续性计划（BCP）"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.2.5"
+    name: "带宽保障"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应保证网络各个部分的带宽满足业务高峰期需要"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否对网络带宽使用情况进行定期监控？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "高峰期带宽利用率是否低于70%？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "升级网络带宽"
+      short_term:
+        - "实施流量整形和QoS策略"
+      long_term:
+        - "建立带宽扩容预案"
+    risk_level: "low"
+    usage_frequency: "high"
+
+  - id: "8.1.2.6"
+    name: "关键节点冗余"
+    pillar: "network"
+    level: [3]
+    check_type: "questionnaire"
+    description: "关键网络设备的业务处理能力应具备冗余"
+    weight: 3.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "关键网络节点是否采用双机热备？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否部署了负载均衡设备？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否定期进行故障切换演练？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 0.67
+    remediation:
+      immediate:
+        - "部署关键节点冗余"
+      short_term:
+        - "制定切换演练计划"
+      long_term:
+        - "建立容灾中心"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.7"
+    name: "网络拓扑"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "document"
+    description: "应绘制完整的网络拓扑图，并标注关键节点"
+    weight: 2.0
+    document:
+      required_docs:
+        - "网络拓扑图"
+        - "设备清单"
+        - "IP 地址规划表"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "绘制完整网络拓扑图"
+      short_term:
+        - "建立设备清单和IP规划"
+      long_term:
+        - "实施网络配置管理（CMDB）"
+    risk_level: "low"
+    usage_frequency: "high"
+
+  - id: "8.1.2.8"
+    name: "路由控制"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应基于安全策略对路由进行控制"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否在路由器上配置了访问控制列表（ACL）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "路由协议是否使用认证（如OSPF MD5）？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "配置路由协议认证"
+      short_term:
+        - "实施动态路由安全控制"
+      long_term:
+        - "建立路由安全策略"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.9"
+    name: "通信完整性"
+    pillar: "network"
+    level: [3]
+    check_type: "scan"
+    description: "应采用校验技术保证通信过程中数据的完整性"
+    weight: 2.5
+    tools:
+      - name: "testssl_scan"
+        params:
+          target: "{{asset}}"
+          port: 443
+          check_integrity: true
+        output_key: "ssl_integrity_result"
+    pass_condition: "data_integrity_verified"
+    remediation:
+      immediate:
+        - "启用 TLS 1.2+ 和完整性校验"
+      short_term:
+        - "部署数字签名验证机制"
+      long_term:
+        - "建立端到端完整性保护"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.2.10"
+    name: "通信保密性"
+    pillar: "network"
+    level: [3]
+    check_type: "scan"
+    description: "应采用密码技术保证通信过程中数据的保密性"
+    weight: 2.5
+    tools:
+      - name: "testssl_scan"
+        params:
+          target: "{{asset}}"
+          port: 443
+        output_key: "ssl_confidentiality_result"
+    pass_condition: "tls_version >= '1.2' and no_weak_ciphers"
+    remediation:
+      immediate:
+        - "升级到 TLS 1.2+，禁用弱加密"
+      short_term:
+        - "实施端到端加密"
+      long_term:
+        - "建立密钥管理基础设施（KMI）"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  # ===== 8.1.2 补充 P1 条款 =====
+  - id: "8.1.2.11"
+    name: "网络设备安全"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "网络设备应配置安全策略，关闭不必要的服务"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "网络设备是否关闭了不必要的服务（如Telnet、HTTP）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否使用SSH/HTTPS管理网络设备？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "网络设备管理密码是否定期更换？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "关闭不必要的服务，启用SSH/HTTPS"
+      short_term:
+        - "建立密码定期更换制度"
+      long_term:
+        - "实施集中认证和授权"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.2.12"
+    name: "网络分段"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应划分不同的网络区域（如DMZ、内网、办公网）"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否划分了DMZ区域？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否划分了办公网和业务网？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "不同区域之间是否部署了访问控制？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "划分DMZ区域"
+      short_term:
+        - "部署区域间访问控制"
+      long_term:
+        - "实施微分段网络架构"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.2.13"
+    name: "VLAN 划分"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应通过VLAN技术隔离不同业务网络"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否使用VLAN隔离不同业务部门？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "VLAN间是否配置了访问控制？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施VLAN划分"
+      short_term:
+        - "配置VLAN间ACL"
+      long_term:
+        - "采用VXLAN或SDN"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.14"
+    name: "无线网络安全"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应采用加密技术保证无线网络安全"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "无线网络是否使用WPA2/WPA3加密？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否禁用WEP等弱加密？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否部署了无线入侵检测系统（WIDS）？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "升级到WPA2/WPA3"
+      short_term:
+        - "部署WIDS"
+      long_term:
+        - "实施802.1X认证"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.15"
+    name: "VPN 安全"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "VPN连接应采用强加密和认证"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "VPN是否使用IPSec或SSL VPN？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "VPN认证是否使用双因素？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "VPN通道是否使用强加密算法（AES-256）？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "升级VPN加密算法"
+      short_term:
+        - "实施双因素认证"
+      long_term:
+        - "采用零信任VPN"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.16"
+    name: "DNS 安全"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应保护DNS服务器免受攻击"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "DNS服务器是否启用DNSSEC？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否部署了DNS防火墙？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否限制DNS区域传输？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "启用DNSSEC"
+      short_term:
+        - "部署DNS防火墙"
+      long_term:
+        - "建立DNS监控体系"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.17"
+    name: "IP地址管理"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立规范的IP地址分配和管理制度"
+    weight: 1.0
+    document:
+      required_docs:
+        - "IP地址分配表"
+        - "IP地址管理制度"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立IP地址分配表"
+      short_term:
+        - "制定IP地址管理制度"
+      long_term:
+        - "实施DHCP集中管理"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.18"
+    name: "网络监控"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对网络流量和安全事件进行监控"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了网络监控系统？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否记录网络流量日志？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "日志保留时间是否不少于180天？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署网络监控"
+      short_term:
+        - "建立日志保留制度"
+      long_term:
+        - "实施AI异常检测"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.2.19"
+    name: "网络变更管理"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "document"
+    description: "网络变更应经过审批和测试"
+    weight: 2.0
+    document:
+      required_docs:
+        - "网络变更流程"
+        - "变更审批记录"
+        - "变更测试报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立变更审批流程"
+      short_term:
+        - "实施变更测试规范"
+      long_term:
+        - "建立配置管理数据库"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.2.20"
+    name: "网络设备账户"
+    pillar: "network"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "网络设备应使用专用账户，禁止共享账户"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "网络设备是否使用个人账户而非共享账户？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否记录网络设备的操作日志？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立个人账户体系"
+      short_term:
+        - "实施操作日志审计"
+      long_term:
+        - "采用集中认证（RADIUS/TACACS+）"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  # ===== 8.1.3 区域边界 P0 条款 =====
+  - id: "8.1.3.6"
+    name: "边界完整性检查"
+    pillar: "boundary"
+    level: [3]
+    check_type: "scan"
+    description: "应能够对非授权设备私自联到内部网络的行为进行检查"
+    weight: 2.5
+    tools:
+      - name: "nmap_scan"
+        params:
+          target: "{{internal_network}}"
+          port_range: "1-1000"
+          service_detection: true
+        output_key: "internal_scan_result"
+    pass_condition: "no_unauthorized_devices"
+    remediation:
+      immediate:
+        - "部署 NAC（网络访问控制）"
+      short_term:
+        - "实施端口安全策略"
+      long_term:
+        - "建立 802.1X 认证"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.3.7"
+    name: "恶意代码检测"
+    pillar: "boundary"
+    level: [3]
+    check_type: "scan"
+    description: "应在网络边界处对恶意代码进行检测和防护"
+    weight: 2.5
+    tools:
+      - name: "nuclei_scan"
+        params:
+          target: "{{asset}}"
+          severity: "critical,high"
+          templates: "malware,backdoor,cve"
+        output_key: "malware_scan_result"
+    pass_condition: "no_malware_detected"
+    remediation:
+      immediate:
+        - "部署边界防病毒网关"
+      short_term:
+        - "集成威胁情报"
+      long_term:
+        - "建立 APT 检测体系"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.3.8"
+    name: "垃圾邮件防范"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应在邮件网关处对垃圾邮件进行防范"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了反垃圾邮件网关？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否启用 SPF、DKIM、DMARC 邮件认证？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署反垃圾邮件网关"
+      short_term:
+        - "配置邮件认证协议"
+      long_term:
+        - "建立邮件安全监控"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.3.9"
+    name: "边界设备配置"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "document"
+    description: "边界设备应配置安全策略并定期审查"
+    weight: 2.0
+    document:
+      required_docs:
+        - "边界设备配置清单"
+        - "安全策略配置文档"
+        - "定期审查记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立边界设备清单"
+      short_term:
+        - "制定配置基线"
+      long_term:
+        - "实施配置管理"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.3.10"
+    name: "跨边界访问控制"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应在边界对跨域访问进行严格控制"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "边界防火墙是否默认拒绝所有未明确允许的流量？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否对出站流量进行过滤？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否记录所有跨边界访问？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施白名单策略"
+      short_term:
+        - "部署出站流量监控"
+      long_term:
+        - "建立零信任架构"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  # ===== 8.1.3 区域边界 P1 条款 =====
+  - id: "8.1.3.11"
+    name: "边界防护设备部署"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应在网络边界部署防火墙、入侵检测等安全设备"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否在网络边界部署了防火墙？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否部署了入侵检测系统（IDS）？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否部署了入侵防御系统（IPS）？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "部署边界防护设备"
+      short_term:
+        - "实施 IDS/IPS"
+      long_term:
+        - "建立 SOC"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.3.12"
+    name: "DMZ 区域"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对外提供服务应部署在DMZ区域"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "对外服务器是否部署在 DMZ 区域？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "DMZ 是否与内网进行了严格隔离？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "DMZ 是否有独立的访问控制策略？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "划分 DMZ 区域"
+      short_term:
+        - "建立 DMZ 访问控制"
+      long_term:
+        - "实施微隔离"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.3.13"
+    name: "应用层防护"
+    pillar: "boundary"
+    level: [2, 3]
+    check_type: "scan"
+    description: "应在应用层提供WAF等防护"
+    weight: 2.5
+    tools:
+      - name: "nuclei_scan"
+        params:
+          target: "{{asset}}"
+          severity: "critical,high"
+          templates: "tech,misconfig,exposure"
+        output_key: "waf_scan_result"
+    pass_condition: "waf_detected or no_critical_vulns"
+    remediation:
+      immediate:
+        - "部署 WAF"
+      short_term:
+        - "配置 WAF 规则"
+      long_term:
+        - "建立 RASP"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.3.14"
+    name: "APT 检测"
+    pillar: "boundary"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应部署 APT 高级持续威胁检测系统"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了 APT 检测系统？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否定期更新威胁情报？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "评估 APT 检测需求"
+      short_term:
+        - "部署 APT 解决方案"
+      long_term:
+        - "建立威胁情报体系"
+    risk_level: "medium"
+    usage_frequency: "low"
+
+  - id: "8.1.3.15"
+    name: "网络访问控制（NAC）"
+    pillar: "boundary"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应部署网络访问控制系统，控制接入设备"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了 NAC 系统？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "接入设备是否进行身份认证？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否对接入设备进行安全状态检查？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "评估 NAC 需求"
+      short_term:
+        - "部署 NAC"
+      long_term:
+        - "实施 802.1X"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  # ===== 8.1.4 计算环境细节 P1 条款 =====
+  - id: "8.1.4.11"
+    name: "软件容错"
+    pillar: "computing"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应提供软件容错功能"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "关键应用是否部署了集群或主备？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否进行故障切换演练？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立主备机制"
+      short_term:
+        - "部署集群"
+      long_term:
+        - "建立业务连续性"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.12"
+    name: "资源控制"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对重要主体进行资源分配和控制"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否对用户进行资源配额管理？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否限制单个用户的资源使用？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施资源配额"
+      short_term:
+        - "建立资源监控"
+      long_term:
+        - "自动化资源调度"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.4.13"
+    name: "系统加固"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应按照安全基线对系统进行加固"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否制定了系统安全基线？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否定期进行系统加固检查？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否移除了不必要的服务和组件？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定安全基线"
+      short_term:
+        - "定期加固检查"
+      long_term:
+        - "自动化合规检查"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.4.14"
+    name: "补丁管理"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应及时安装安全补丁"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否建立了补丁管理流程？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否定期扫描漏洞并安装补丁？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "关键补丁是否在 7 天内安装？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立补丁管理流程"
+      short_term:
+        - "实施自动化补丁"
+      long_term:
+        - "建立漏洞管理平台"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.4.15"
+    name: "配置管理"
+    pillar: "computing"
+    level: [2, 3]
+    check_type: "document"
+    description: "应对系统配置进行规范管理"
+    weight: 2.0
+    document:
+      required_docs:
+        - "配置基线文档"
+        - "配置变更记录"
+        - "配置审计报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立配置基线"
+      short_term:
+        - "实施配置审计"
+      long_term:
+        - "建立 CMDB"
+    risk_level: "medium"
+    usage_frequency: "medium"

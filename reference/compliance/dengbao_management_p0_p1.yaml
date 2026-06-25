@@ -1,0 +1,862 @@
+name: "等保管理类扩展条款（阶段2补充）"
+standard: "GB/T 22239-2019"
+version: "1.0"
+description: "补充的管理类等保条款（8.1.5.1-8.1.5.5）"
+base: "dengbao_base"
+
+clauses:
+  # ===== 8.1.5.1 管理制度 =====
+  - id: "8.1.5.1.3"
+    name: "制度制定和发布"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "document"
+    description: "应制定信息安全管理工作的总体方针和政策"
+    weight: 2.5
+    document:
+      required_docs:
+        - "信息安全方针"
+        - "总体策略文档"
+        - "制度发布文件"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定信息安全方针"
+      short_term:
+        - "建立制度发布流程"
+      long_term:
+        - "完善安全管理体系"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.5.1.4"
+    name: "制度评审和修订"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期对安全管理制度进行评审和修订"
+    weight: 2.0
+    document:
+      required_docs:
+        - "制度评审记录"
+        - "制度修订记录"
+        - "版本变更说明"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立定期评审机制"
+      short_term:
+        - "记录评审结果"
+      long_term:
+        - "建立持续改进流程"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.1.5"
+    name: "安全管理体系"
+    pillar: "policy"
+    level: [3]
+    check_type: "document"
+    description: "应建立信息安全管理体系"
+    weight: 2.5
+    document:
+      required_docs:
+        - "信息安全管理体系文件"
+        - "体系运行记录"
+        - "体系评审报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立安全管理体系"
+      short_term:
+        - "实施体系运行"
+      long_term:
+        - "持续改进体系"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.5.1.6"
+    name: "制度分类"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立完善的制度分类体系"
+    weight: 1.5
+    document:
+      required_docs:
+        - "制度分类清单"
+        - "制度目录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立制度分类"
+      short_term:
+        - "编制制度目录"
+      long_term:
+        - "建立制度检索系统"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.1.7"
+    name: "制度发布流程"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立规范的制度发布流程"
+    weight: 2.0
+    document:
+      required_docs:
+        - "制度发布流程文档"
+        - "发布审批记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立发布流程"
+      short_term:
+        - "实施发布审批"
+      long_term:
+        - "建立电子发布系统"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.1.8"
+    name: "制度执行检查"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期检查制度的执行情况"
+    weight: 2.0
+    document:
+      required_docs:
+        - "制度执行检查计划"
+        - "检查报告"
+        - "整改记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立检查机制"
+      short_term:
+        - "定期开展检查"
+      long_term:
+        - "建立 PDCA 循环"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.1.9"
+    name: "制度评审周期"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应定期评审安全管理制度"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否每年至少进行一次制度评审？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定年度评审计划"
+      short_term:
+        - "建立评审机制"
+      long_term:
+        - "持续改进"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.1.10"
+    name: "制度修订流程"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立制度修订的规范流程"
+    weight: 1.5
+    document:
+      required_docs:
+        - "修订流程文档"
+        - "修订记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立修订流程"
+      short_term:
+        - "记录修订历史"
+      long_term:
+        - "版本管理"
+    risk_level: "low"
+    usage_frequency: "low"
+
+  # ===== 8.1.5.2 管理机构 =====
+  - id: "8.1.5.2.4"
+    name: "授权审批"
+    pillar: "organization"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立安全相关事项的授权审批机制"
+    weight: 2.5
+    document:
+      required_docs:
+        - "授权审批制度"
+        - "审批记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立授权机制"
+      short_term:
+        - "实施审批流程"
+      long_term:
+        - "建立电子审批系统"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.5.2.5"
+    name: "沟通与合作"
+    pillar: "organization"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立内外部安全沟通与合作机制"
+    weight: 1.5
+    document:
+      required_docs:
+        - "沟通合作制度"
+        - "外部合作记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立沟通机制"
+      short_term:
+        - "建立外部合作"
+      long_term:
+        - "建立行业联盟"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.2.6"
+    name: "审核与检查"
+    pillar: "organization"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期开展安全审核与检查"
+    weight: 2.0
+    document:
+      required_docs:
+        - "审核检查计划"
+        - "审核报告"
+        - "整改记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立审核机制"
+      short_term:
+        - "定期开展审核"
+      long_term:
+        - "建立内部审计体系"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.2.7"
+    name: "安全管理委员会"
+    pillar: "organization"
+    level: [3]
+    check_type: "document"
+    description: "应成立信息安全委员会"
+    weight: 2.5
+    document:
+      required_docs:
+        - "委员会成立文件"
+        - "委员会章程"
+        - "会议记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "成立委员会"
+      short_term:
+        - "建立运作机制"
+      long_term:
+        - "完善治理结构"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.2.8"
+    name: "安全职责分工"
+    pillar: "organization"
+    level: [2, 3]
+    check_type: "document"
+    description: "应明确各部门和岗位的安全职责"
+    weight: 2.0
+    document:
+      required_docs:
+        - "安全职责分工文档"
+        - "岗位安全责任书"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "明确职责分工"
+      short_term:
+        - "签订责任书"
+      long_term:
+        - "建立考核机制"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  # ===== 8.1.5.3 管理人员 =====
+  - id: "8.1.5.3.4"
+    name: "关键岗位背景审查"
+    pillar: "personnel"
+    level: [3]
+    check_type: "document"
+    description: "应对关键岗位人员进行背景审查"
+    weight: 2.5
+    document:
+      required_docs:
+        - "背景审查制度"
+        - "审查记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立审查制度"
+      short_term:
+        - "实施背景审查"
+      long_term:
+        - "建立人员档案"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.3.5"
+    name: "安全培训计划"
+    pillar: "personnel"
+    level: [2, 3]
+    check_type: "document"
+    description: "应制定年度安全培训计划"
+    weight: 2.0
+    document:
+      required_docs:
+        - "年度培训计划"
+        - "培训记录"
+        - "培训考核"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定培训计划"
+      short_term:
+        - "开展安全培训"
+      long_term:
+        - "建立培训体系"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.3.6"
+    name: "培训考核记录"
+    pillar: "personnel"
+    level: [2, 3]
+    check_type: "document"
+    description: "应记录培训考核结果"
+    weight: 1.5
+    document:
+      required_docs:
+        - "培训签到表"
+        - "考核试卷"
+        - "考核成绩"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立考核机制"
+      short_term:
+        - "记录考核结果"
+      long_term:
+        - "建立人员能力档案"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.3.7"
+    name: "外部人员管理"
+    pillar: "personnel"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应对外部人员访问进行管理"
+    weight: 2.0
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "外部人员访问是否需要审批？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否签订保密协议？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "外部人员是否有访问时限？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立外部人员审批流程"
+      short_term:
+        - "签订保密协议"
+      long_term:
+        - "实施访客管理系统"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  # ===== 8.1.5.4 建设管理 =====
+  - id: "8.1.5.4.5"
+    name: "自行开发安全"
+    pillar: "construction"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立自主开发软件的安全管理"
+    weight: 2.5
+    document:
+      required_docs:
+        - "开发安全规范"
+        - "代码审计报告"
+        - "安全测试报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立开发规范"
+      short_term:
+        - "实施代码审计"
+      long_term:
+        - "建立 SDL"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.4.6"
+    name: "外包开发管理"
+    pillar: "construction"
+    level: [2, 3]
+    check_type: "document"
+    description: "应对外包软件开发进行安全管理"
+    weight: 2.5
+    document:
+      required_docs:
+        - "外包安全合同"
+        - "代码交付清单"
+        - "安全测试报告"
+        - "知识产权协议"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "签订安全合同"
+      short_term:
+        - "实施代码审计"
+      long_term:
+        - "建立外包管理体系"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.4.7"
+    name: "测试验收"
+    pillar: "construction"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立系统测试验收规范"
+    weight: 2.0
+    document:
+      required_docs:
+        - "测试方案"
+        - "测试报告"
+        - "验收报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立测试规范"
+      short_term:
+        - "实施安全测试"
+      long_term:
+        - "建立自动化测试"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.4.8"
+    name: "上线管理"
+    pillar: "construction"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立系统上线管理规范"
+    weight: 2.0
+    document:
+      required_docs:
+        - "上线方案"
+        - "风险评估报告"
+        - "上线审批"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立上线流程"
+      short_term:
+        - "实施风险评估"
+      long_term:
+        - "灰度发布"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  # ===== 8.1.5.5 运维管理细节 =====
+  - id: "8.1.5.5.6"
+    name: "网络管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立网络系统安全管理制度"
+    weight: 2.0
+    document:
+      required_docs:
+        - "网络管理制度"
+        - "网络拓扑图"
+        - "网络设备清单"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立网络管理制度"
+      short_term:
+        - "完善文档"
+      long_term:
+        - "自动化管理"
+    risk_level: "medium"
+    usage_frequency: "high"
+
+  - id: "8.1.5.5.7"
+    name: "恶意代码防范管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立恶意代码防范管理制度"
+    weight: 2.0
+    document:
+      required_docs:
+        - "恶意代码防范制度"
+        - "病毒库更新记录"
+        - "恶意代码事件记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立防范制度"
+      short_term:
+        - "部署防病毒系统"
+      long_term:
+        - "建立 EDR"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.8"
+    name: "密码管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立密码使用管理制度"
+    weight: 2.0
+    document:
+      required_docs:
+        - "密码管理制度"
+        - "密钥管理记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立密码制度"
+      short_term:
+        - "实施密钥管理"
+      long_term:
+        - "建立 KMS"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.9"
+    name: "变更管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立变更管理制度"
+    weight: 2.5
+    document:
+      required_docs:
+        - "变更管理制度"
+        - "变更申请单"
+        - "变更审批记录"
+        - "变更测试报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立变更流程"
+      short_term:
+        - "实施变更审批"
+      long_term:
+        - "自动化变更管理"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.5.5.10"
+    name: "备份与恢复管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立备份与恢复管理制度"
+    weight: 2.5
+    document:
+      required_docs:
+        - "备份恢复制度"
+        - "备份记录"
+        - "恢复演练记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立备份制度"
+      short_term:
+        - "实施定期备份"
+      long_term:
+        - "建立异地灾备"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.5.5.11"
+    name: "安全事件处置"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立安全事件处置制度"
+    weight: 2.5
+    document:
+      required_docs:
+        - "安全事件处置制度"
+        - "事件分级标准"
+        - "事件处置记录"
+        - "事件分析报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立处置流程"
+      short_term:
+        - "实施分级响应"
+      long_term:
+        - "建立 SOC"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.12"
+    name: "应急预案管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应制定应急预案并定期演练"
+    weight: 2.5
+    document:
+      required_docs:
+        - "应急预案"
+        - "演练计划"
+        - "演练记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "制定应急预案"
+      short_term:
+        - "定期演练"
+      long_term:
+        - "持续优化"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.13"
+    name: "外包运维管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应对外包运维服务进行安全管理"
+    weight: 2.0
+    document:
+      required_docs:
+        - "外包合同"
+        - "安全保密协议"
+        - "运维记录"
+        - "安全评估报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "签订安全合同"
+      short_term:
+        - "实施安全评估"
+      long_term:
+        - "建立外包管理体系"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.14"
+    name: "网络安全态势感知"
+    pillar: "operation"
+    level: [3]
+    check_type: "questionnaire"
+    description: "应建立网络安全态势感知能力"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否部署了态势感知平台？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实时监控网络安全状态？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否具备威胁预警能力？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立态势感知平台"
+      short_term:
+        - "完善监控规则"
+      long_term:
+        - "AI 智能分析"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.15"
+    name: "运维审计"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期开展运维审计"
+    weight: 2.0
+    document:
+      required_docs:
+        - "运维审计计划"
+        - "审计报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立审计机制"
+      short_term:
+        - "定期开展审计"
+      long_term:
+        - "持续改进"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.16"
+    name: "运维交接管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立运维交接管理规范"
+    weight: 1.5
+    document:
+      required_docs:
+        - "交接流程文档"
+        - "交接清单"
+        - "交接记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立交接流程"
+      short_term:
+        - "记录交接内容"
+      long_term:
+        - "建立知识库"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.17"
+    name: "设备维修维护"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应对设备维修维护进行安全管理"
+    weight: 2.0
+    document:
+      required_docs:
+        - "设备维护制度"
+        - "维护记录"
+        - "维修审批"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立维护制度"
+      short_term:
+        - "记录维护过程"
+      long_term:
+        - "建立预测性维护"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.18"
+    name: "网络存储数据管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应保护网络存储中的数据安全"
+    weight: 2.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "存储数据是否加密？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q2"
+          text: "是否实施访问控制？"
+          type: "yes_no"
+          evidence_required: true
+        - id: "q3"
+          text: "是否定期备份存储数据？"
+          type: "yes_no"
+          evidence_required: true
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "实施存储加密"
+      short_term:
+        - "建立访问控制"
+      long_term:
+        - "建立存储容灾"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.19"
+    name: "敏感信息保护"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应对敏感信息进行特殊保护"
+    weight: 2.5
+    document:
+      required_docs:
+        - "敏感信息清单"
+        - "分级保护方案"
+        - "访问记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立敏感信息清单"
+      short_term:
+        - "实施分级保护"
+      long_term:
+        - "建立 DLP 系统"
+    risk_level: "high"
+    usage_frequency: "high"
+
+  - id: "8.1.5.5.20"
+    name: "个人信息保护"
+    pillar: "operation"
+    level: [3]
+    check_type: "document"
+    description: "应建立个人信息保护制度"
+    weight: 2.5
+    document:
+      required_docs:
+        - "个人信息保护制度"
+        - "隐私政策"
+        - "用户授权记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立保护制度"
+      short_term:
+        - "实施隐私政策"
+      long_term:
+        - "建立合规体系"
+    risk_level: "high"
+    usage_frequency: "high"

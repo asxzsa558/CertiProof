@@ -1,0 +1,189 @@
+name: "等保阶段2 90%达成（第七批）"
+standard: "GB/T 22239-2019"
+version: "1.0"
+description: "达到 90% 覆盖率的最终补充"
+base: "dengbao_base"
+
+clauses:
+  # ===== 8.1.5 管理补充（让 8.1.5 达到 100 条）=====
+  - id: "8.1.5.1.17"
+    name: "制度有效性"
+    pillar: "policy"
+    level: [2, 3]
+    check_type: "questionnaire"
+    description: "应确保制度的有效性"
+    weight: 1.5
+    questionnaire:
+      questions:
+        - id: "q1"
+          text: "是否定期评估制度的有效性？"
+          type: "yes_no"
+          evidence_required: true
+      pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立评估机制"
+      short_term:
+        - "定期评估"
+      long_term:
+        - "持续改进"
+    risk_level: "low"
+    usage_frequency: "low"
+
+  - id: "8.1.5.2.14"
+    name: "安全治理"
+    pillar: "organization"
+    level: [3]
+    check_type: "document"
+    description: "应建立安全治理框架"
+    weight: 2.5
+    document:
+      required_docs:
+        - "安全治理框架"
+        - "治理委员会会议记录"
+        - "治理决策记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立治理框架"
+      short_term:
+        - "定期治理会议"
+      long_term:
+        - "持续优化"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.3.14"
+    name: "人员安全档案"
+    pillar: "personnel"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立人员安全档案"
+    weight: 1.5
+    document:
+      required_docs:
+        - "安全责任书"
+        - "保密协议"
+        - "培训记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立安全档案"
+      short_term:
+        - "完善档案内容"
+      long_term:
+        - "电子化档案"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.4.12"
+    name: "项目文档管理"
+    pillar: "construction"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立项目文档管理规范"
+    weight: 1.5
+    document:
+      required_docs:
+        - "项目文档清单"
+        - "文档管理规范"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立文档清单"
+      short_term:
+        - "完善管理"
+      long_term:
+        - "建立文档库"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.44"
+    name: "运维应急响应"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立运维应急响应机制"
+    weight: 2.5
+    document:
+      required_docs:
+        - "运维应急响应计划"
+        - "应急响应团队"
+        - "演练记录"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立响应机制"
+      short_term:
+        - "建立团队"
+      long_term:
+        - "持续优化"
+    risk_level: "high"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.45"
+    name: "运维质量评估"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期评估运维质量"
+    weight: 2.0
+    document:
+      required_docs:
+        - "运维质量评估报告"
+        - "SLA 达成率"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立评估机制"
+      short_term:
+        - "定期评估"
+      long_term:
+        - "持续改进"
+    risk_level: "medium"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.46"
+    name: "运维知识沉淀"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立运维知识沉淀机制"
+    weight: 1.5
+    document:
+      required_docs:
+        - "运维知识库"
+        - "故障处理手册"
+        - "运维经验总结"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立知识库"
+      short_term:
+        - "持续完善"
+      long_term:
+        - "知识管理体系"
+    risk_level: "low"
+    usage_frequency: "medium"
+
+  - id: "8.1.5.5.47"
+    name: "运维成本管理"
+    pillar: "operation"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立运维成本管理机制"
+    weight: 1.0
+    document:
+      required_docs:
+        - "运维成本预算"
+        - "成本分析报告"
+    pass_threshold: 1.0
+    remediation:
+      immediate:
+        - "建立成本预算"
+      short_term:
+        - "成本分析"
+      long_term:
+        - "持续优化"
+    risk_level: "low"
+    usage_frequency: "low"
