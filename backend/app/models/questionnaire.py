@@ -3,6 +3,7 @@
 """
 from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from app.core.database import Base
 
 
@@ -31,6 +32,9 @@ class QuestionnaireRecord(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     completed_at = Column(DateTime(timezone=True))
+    
+    # Relationships
+    evidences = relationship("Evidence", back_populates="questionnaire_record", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<QuestionnaireRecord(id={self.id}, clause_id={self.clause_id}, status={self.status})>"

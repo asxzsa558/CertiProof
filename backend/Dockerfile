@@ -22,6 +22,9 @@ RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
 # Copy application
 COPY . .
 
+# Create uploads directory
+RUN mkdir -p /app/uploads
+
 # Expose port
 EXPOSE 8000
 

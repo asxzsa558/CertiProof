@@ -14,6 +14,7 @@ from app.api.tasks import router as tasks_router
 from app.api.assessments import router as assessments_router
 from app.api.config import router as config_router
 from app.api.questionnaires import router as questionnaires_router
+from app.api.evidences import router as evidences_router
 
 api_router = APIRouter()
 
@@ -32,5 +33,6 @@ api_router.include_router(tasks_router)
 api_router.include_router(assessments_router)
 api_router.include_router(config_router)
 api_router.include_router(questionnaires_router)
+api_router.include_router(evidences_router)
 
 __all__ = ["api_router"]
