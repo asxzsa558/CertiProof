@@ -94,7 +94,7 @@
 
 /* Progress bar colors */
 .agent-progress .ant-progress-bg {
-  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%) !important;
+  background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-blue) 100%) !important;
 }
 
 .agent-progress .ant-progress-outer {
@@ -115,7 +115,7 @@
 
 .scan-status-running {
   background: rgba(99, 102, 241, 0.1);
-  color: #6366f1;
+  color: var(--accent-cyan);
   border: 1px solid rgba(99, 102, 241, 0.3);
 }
 

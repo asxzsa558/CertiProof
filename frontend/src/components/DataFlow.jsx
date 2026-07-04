@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react'
 
-export default function DataFlow() {
+export default function DataFlow({ enabled = true }) {
   const canvasRef = useRef(null)
   const animationRef = useRef(null)
 
   useEffect(() => {
+    if (!enabled) return
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -73,7 +74,7 @@ export default function DataFlow() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [])
+  }, [enabled])
 
   return (
     <canvas
@@ -87,6 +88,7 @@ export default function DataFlow() {
         zIndex: 1,
         pointerEvents: 'none',
         opacity: 0.4,
+        display: enabled ? 'block' : 'none',
       }}
     />
   )

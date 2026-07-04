@@ -199,3 +199,182 @@ async def get_available_assessment_types(
             for t in types
         ]
     }
+
+
+# ========== ARGUS Dashboard API ==========
+
+from app.models.assessment import Assessment, PhaseInstance, TaskInstance
+from app.models.finding import Finding
+
+
+@router.get("/argus/overview")
+async def get_argus_overview(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """ARGUS 风格概览数据"""
+    # 项目统计 - 获取用户所属组织的所有项目
+    from app.models.organization import OrganizationMember
+    org_ids_result = await db.execute(
+        select(OrganizationMember.organization_id)
+        .where(OrganizationMember.user_id == current_user.id)
+    )
+    org_ids = [row[0] for row in org_ids_result.all()]
+    
+    if org_ids:
+        projects_result = await db.execute(
+            select(Project).where(Project.organization_id.in_(org_ids))
+        )
+    else:
+        projects_result = await db.execute(
+            select(Project).where(Project.user_id == current_user.id)
+        )
+    projects = projects_result.scalars().all()
+    
+    total_projects = len(projects)
+    
+    # 活跃测评数
+    assessments_result = await db.execute(
+        select(Assessment).where(
+            Assessment.project_id.in_([p.id for p in projects]),
+            Assessment.status == 'in_progress'
+        )
+    )
+    active_assessments = len(assessments_result.scalars().all())
+    
+    # 关键发现数
+    findings_result = await db.execute(
+        select(func.count(Finding.id)).where(
+            Finding.project_id.in_([p.id for p in projects]),
+            Finding.severity.in_(['critical', 'high'])
+        )
+    )
+    critical_findings = findings_result.scalar() or 0
+    
+    # 等级分布
+    level_distribution = {}
+    for project in projects:
+        level = project.compliance_level or '未知'
+        level_distribution[level] = level_distribution.get(level, 0) + 1
+    
+    # 最近项目
+    recent_projects = sorted(projects, key=lambda p: p.updated_at or p.created_at, reverse=True)[:5]
+    
+    return {
+        "total_projects": total_projects,
+        "active_assessments": active_assessments,
+        "critical_findings": critical_findings,
+        "level_distribution": level_distribution,
+        "recent_projects": [
+            {
+                "id": p.id,
+                "name": p.name,
+                "compliance_level": p.compliance_level,
+                "compliance_score": p.compliance_score,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+            }
+            for p in recent_projects
+        ]
+    }
+
+
+@router.get("/argus/score-trend")
+async def get_score_trend(
+    days: int = Query(default=30, ge=7, le=90),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """合规分数趋势（基于项目当前分数，简化版）"""
+    # 获取用户所有项目 - 包括组织项目
+    from app.models.organization import OrganizationMember
+    org_ids_result = await db.execute(
+        select(OrganizationMember.organization_id)
+        .where(OrganizationMember.user_id == current_user.id)
+    )
+    org_ids = [row[0] for row in org_ids_result.all()]
+    
+    if org_ids:
+        projects_result = await db.execute(
+            select(Project).where(Project.organization_id.in_(org_ids))
+        )
+    else:
+        projects_result = await db.execute(
+            select(Project).where(Project.user_id == current_user.id)
+        )
+    projects = projects_result.scalars().all()
+    
+    # 简化：返回当前分数作为趋势（实际应该从历史记录表读取）
+    scores = []
+    for project in projects:
+        if project.compliance_score is not None:
+            scores.append({
+                "project_id": project.id,
+                "project_name": project.name,
+                "score": project.compliance_score,
+            })
+    
+    return {
+        "scores": scores,
+        "days": days,
+    }
+
+
+@router.get("/argus/risk-heatmap")
+async def get_risk_heatmap(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """风险发现热力图"""
+    # 获取用户项目 - 包括组织项目
+    from app.models.organization import OrganizationMember
+    org_ids_result = await db.execute(
+        select(OrganizationMember.organization_id)
+        .where(OrganizationMember.user_id == current_user.id)
+    )
+    org_ids = [row[0] for row in org_ids_result.all()]
+    
+    if org_ids:
+        projects_result = await db.execute(
+            select(Project).where(Project.organization_id.in_(org_ids))
+        )
+    else:
+        projects_result = await db.execute(
+            select(Project).where(Project.user_id == current_user.id)
+        )
+    projects = projects_result.scalars().all()
+    project_ids = [p.id for p in projects]
+    
+    if not project_ids:
+        return {"assets": []}
+    
+    # 按项目和严重性统计发现（简化版，不按资产）
+    findings_result = await db.execute(
+        select(
+            Finding.project_id,
+            Finding.severity,
+            func.count(Finding.id).label('count')
+        ).where(
+            Finding.project_id.in_(project_ids)
+        ).group_by(Finding.project_id, Finding.severity)
+    )
+    
+    findings = findings_result.all()
+    
+    # 组织数据
+    project_risks = {}
+    for project_id, severity, count in findings:
+        if project_id not in project_risks:
+            project_risks[project_id] = {
+                "project_id": project_id,
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "info": 0,
+            }
+        if severity in project_risks[project_id]:
+            project_risks[project_id][severity] = count
+    
+    return {
+        "projects": list(project_risks.values())
+    }

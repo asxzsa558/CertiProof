@@ -2,7 +2,7 @@
 
 .auth-page {
   min-height: 100vh;
-  background: #0a0a0b;
+  background: var(--bg-primary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -268,7 +268,7 @@
 .auth-form .ant-input-affix-wrapper:focus,
 .auth-form .ant-input-affix-wrapper-focused,
 .auth-form .ant-input:focus {
-  border-color: #6366f1;
+  border-color: var(--accent-cyan);
   background: rgba(255, 255, 255, 0.08);
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
 }
@@ -286,7 +286,7 @@
   border-radius: 10px;
   font-weight: 600;
   font-size: 1rem;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
   border: none;
   box-shadow: 
     0 4px 12px rgba(99, 102, 241, 0.3),
@@ -308,7 +308,7 @@
 }
 
 .auth-link {
-  color: #6366f1;
+  color: var(--accent-cyan);
   font-weight: 600;
   text-decoration: none;
   margin-left: 0.5rem;

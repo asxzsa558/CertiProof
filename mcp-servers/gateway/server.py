@@ -27,27 +27,110 @@ TOOL_ROUTES = {
     # 安全工具（统一服务）
     "nmap_scan": "http://security-tools:8010",
     "port_scan": "http://security-tools:8010",
+    "scan_ports": "http://security-tools:8010",  # 别名
     "testssl_scan": "http://security-tools:8010",
     "ssl_check": "http://security-tools:8010",
+    "scan_ssl": "http://security-tools:8010",  # 别名
     "nuclei_scan": "http://security-tools:8010",
     "vuln_scan": "http://security-tools:8010",
+    "scan_vulnerabilities": "http://security-tools:8010",  # 别名
     "hydra_bruteforce": "http://security-tools:8010",
     "password_test": "http://security-tools:8010",
+    "scan_weak_passwords": "http://security-tools:8010",  # 别名
     "ping_host": "http://security-tools:8010",
+    "ping_asset": "http://security-tools:8010",
+    
+    # SSH 白盒配置核查
+    "linux_baseline": "http://ssh-checker:8016",
+    "password_policy_check": "http://ssh-checker:8016",
+    "ssh_config_check": "http://ssh-checker:8016",
+    "audit_config_check": "http://ssh-checker:8016",
+    "service_port_check": "http://ssh-checker:8016",
+    "file_permission_check": "http://ssh-checker:8016",
+    "mac_check": "http://ssh-checker:8016",
+    
+    # 快速端口扫描
+    "masscan_scan": "http://fast-scanner:8011",
+    "fping_scan": "http://fast-scanner:8011",
+    
+    # Web 安全检测
+    "nikto_scan": "http://web-tools:8012",
+    "sqlmap_scan": "http://web-tools:8012",
+    "gobuster_scan": "http://web-tools:8012",
+    "ffuf_scan": "http://web-tools:8012",
+    
+    # 网络设备检测
+    "snmp_walk": "http://network-tools:8013",
+    "snmp_bruteforce": "http://network-tools:8013",
+    "snmp_get": "http://network-tools:8013",
+    
+    # Windows/AD 安全检测
+    "enum4linux_scan": "http://windows-tools:8014",
+    "crackmapexec_scan": "http://windows-tools:8014",
+    "smb_enum": "http://windows-tools:8014",
+    
+    # 数据库安全检测
+    "redis_check": "http://db-tools:8015",
+    "oracle_check": "http://db-tools:8015",
+    "mongodb_check": "http://db-tools:8015",
+    "memcached_check": "http://db-tools:8015",
+    "mysql_check": "http://db-tools:8015",
     
     # OCR 相关
     "ocr_analyze": "http://ocr-server:8005",
     "screenshot_analyze": "http://ocr-server:8005",
 }
 
+TOOL_ALIASES = {
+    "ping_asset": "ping_host",
+    "nmap_scan": "nmap_scan",
+    "port_scan": "nmap_scan",
+    "scan_ports": "nmap_scan",
+    "testssl_scan": "testssl_scan",
+    "ssl_check": "testssl_scan",
+    "scan_ssl": "testssl_scan",
+    "nuclei_scan": "nuclei_scan",
+    "vuln_scan": "nuclei_scan",
+    "scan_vulnerabilities": "nuclei_scan",
+    "hydra_bruteforce": "hydra_bruteforce",
+    "password_test": "hydra_bruteforce",
+    "scan_weak_passwords": "hydra_bruteforce",
+    "nikto": "nikto_scan",
+    "gobuster": "gobuster_scan",
+    "dirbust": "gobuster_scan",
+    "sqlmap": "sqlmap_scan",
+    "ffuf": "ffuf_scan",
+    "redis": "redis_check",
+    "mysql": "mysql_check",
+    "mongo": "mongodb_check",
+    "mongodb": "mongodb_check",
+    "oracle": "oracle_check",
+    "memcached": "memcached_check",
+    "snmp": "snmp_walk",
+    "snmpget": "snmp_get",
+    "windows": "enum4linux_scan",
+    "smb": "smb_enum",
+    "cme": "crackmapexec_scan",
+}
+
+
+def canonical_tool_name(tool_name: str) -> str:
+    return TOOL_ALIASES.get(tool_name, tool_name)
+
 # 工具到 Tool Server 的映射（用于健康检查）
 SERVER_ROUTES = {
     "security-tools": "http://security-tools:8010",
+    "ssh-checker": "http://ssh-checker:8016",
+    "fast-scanner": "http://fast-scanner:8011",
+    "web-tools": "http://web-tools:8012",
+    "network-tools": "http://network-tools:8013",
+    "windows-tools": "http://windows-tools:8014",
+    "db-tools": "http://db-tools:8015",
     "ocr-server": "http://ocr-server:8005",
 }
 
 # 支持异步扫描的工具
-ASYNC_TOOLS = ["nmap_scan", "port_scan"]
+ASYNC_TOOLS = ["nmap_scan", "port_scan", "scan_ports", "masscan_scan", "nuclei_scan", "hydra_bruteforce", "testssl_scan"]
 
 
 class ToolCallRequest(BaseModel):
@@ -121,10 +204,12 @@ async def list_tools():
     tools = []
     
     for tool_name, server_url in TOOL_ROUTES.items():
+        canonical_name = canonical_tool_name(tool_name)
         tools.append({
             "name": tool_name,
             "server": server_url,
-            "supports_async": tool_name in ASYNC_TOOLS,
+            "supports_async": canonical_name in ASYNC_TOOLS,
+            "canonical_name": canonical_name,
         })
     
     return {
@@ -138,7 +223,7 @@ async def call_tool(request: ToolCallRequest):
     """
     调用工具（同步模式）
     """
-    tool_name = request.tool
+    tool_name = canonical_tool_name(request.tool)
     params = request.params
     
     # 1. 路由
@@ -162,14 +247,37 @@ async def call_tool(request: ToolCallRequest):
             response.raise_for_status()
             result = response.json()
     except httpx.HTTPStatusError as e:
+        # 解析工具服务器返回的错误信息
+        error_detail = e.response.text
+        try:
+            error_json = e.response.json()
+            if isinstance(error_json, dict) and "detail" in error_json:
+                error_detail = error_json["detail"]
+        except:
+            pass
+        
+        # 根据错误类型返回友好的错误信息
+        if "timeout" in error_detail.lower():
+            friendly_error = f"工具执行超时，目标可能不可达或响应过慢"
+        elif "not installed" in error_detail.lower():
+            friendly_error = f"工具未安装，请联系管理员"
+        elif "missing required parameter" in error_detail.lower():
+            friendly_error = f"缺少必要参数，请检查输入"
+        elif "connection" in error_detail.lower() or "unreachable" in error_detail.lower():
+            friendly_error = f"无法连接到目标，请检查目标地址是否正确"
+        elif "permission" in error_detail.lower() or "auth" in error_detail.lower():
+            friendly_error = f"认证失败，请检查用户名和密码"
+        else:
+            friendly_error = f"工具执行失败: {error_detail}"
+        
         raise HTTPException(
             status_code=e.response.status_code,
-            detail=f"Tool server error: {e.response.text}"
+            detail=friendly_error
         )
     except httpx.RequestError as e:
         raise HTTPException(
             status_code=503,
-            detail=f"Tool server unavailable: {e}"
+            detail=f"工具服务不可用: {e}"
         )
     
     # 3. 返回
@@ -189,7 +297,7 @@ async def call_tool_async(request: ToolCallRequest):
     异步调用工具
     返回 task_id 用于查询进度
     """
-    tool_name = request.tool
+    tool_name = canonical_tool_name(request.tool)
     params = request.params
     
     # 检查是否支持异步
@@ -243,6 +351,7 @@ async def get_progress(tool_name: str, task_id: str):
     """
     查询异步任务进度
     """
+    tool_name = canonical_tool_name(tool_name)
     # 路由
     server_url = TOOL_ROUTES.get(tool_name)
     if not server_url:
@@ -276,6 +385,7 @@ async def get_result(tool_name: str, task_id: str):
     """
     获取异步任务结果
     """
+    tool_name = canonical_tool_name(tool_name)
     # 路由
     server_url = TOOL_ROUTES.get(tool_name)
     if not server_url:

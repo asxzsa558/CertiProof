@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     ASSESSMENT_AUTO_EXECUTE_TASKS: bool = True  # 是否自动执行扫描类任务
     ASSESSMENT_MAX_CONCURRENT: int = 5  # 多资产扫描最大并发数
 
+    # 文件上传
+    UPLOAD_DIR: str = "/app/uploads"  # 文件上传目录
+
     # 报告配置
     REPORT_DEFAULT_FORMAT: str = "pdf"  # 默认报告格式
     REPORT_INCLUDE_RAW_SCANS: bool = False  # 报告是否包含原始扫描数据
@@ -48,6 +51,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"
 
 
 settings = Settings()

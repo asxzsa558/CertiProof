@@ -7,7 +7,7 @@
 .org-root {
   position: relative;
   min-height: 100vh;
-  background: #0a0a0b;
+  background: var(--bg-primary);
   color: #fff;
   padding: 24px 40px 60px;
   overflow-x: hidden;
@@ -321,7 +321,7 @@
 .org-save-btn {
   background: linear-gradient(135deg, #00ff88, #00b4d8);
   border: none;
-  color: #0a0a0b;
+  color: var(--bg-primary);
   font-weight: 600;
 }
 
@@ -334,7 +334,7 @@
 .org-add-btn {
   background: linear-gradient(135deg, #00ff88, #00b4d8);
   border: none;
-  color: #0a0a0b;
+  color: var(--bg-primary);
   font-weight: 600;
 }
 
@@ -513,7 +513,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #0a0a0b;
+  background: var(--bg-primary);
   color: #fff;
   gap: 16px;
 }

@@ -15,11 +15,12 @@
     "@react-three/fiber": "^8.18.0",
     "antd": "^5.13.2",
     "axios": "^1.6.5",
+    "date-fns": "^4.4.0",
     "dayjs": "^1.11.10",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.21.3",
-    "recharts": "^3.9.0",
+    "recharts": "^3.9.1",
     "three": "^0.184.0",
     "zustand": "^4.5.0"
   },

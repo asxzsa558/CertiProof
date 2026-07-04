@@ -21,17 +21,9 @@ async def create_asset(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Verify project exists and belongs to user
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
+    # Verify project exists and user has access
+    from app.api.projects import get_project_for_user
+    project = await get_project_for_user(db, project_id, current_user.id)
     
     # Generate verification token
     verification_token = secrets.token_urlsafe(32)
@@ -57,17 +49,9 @@ async def list_assets(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Verify project exists and belongs to user
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
+    # Verify project exists and user has access
+    from app.api.projects import get_project_for_user
+    project = await get_project_for_user(db, project_id, current_user.id)
     
     result = await db.execute(
         select(Asset).where(Asset.project_id == project_id).order_by(Asset.created_at.desc())
@@ -83,17 +67,9 @@ async def get_asset(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Verify project exists and belongs to user
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
+    # Verify project exists and user has access
+    from app.api.projects import get_project_for_user
+    project = await get_project_for_user(db, project_id, current_user.id)
     
     result = await db.execute(
         select(Asset).where(Asset.id == asset_id, Asset.project_id == project_id)
@@ -117,17 +93,9 @@ async def verify_asset(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Verify project exists and belongs to user
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
+    # Verify project exists and user has access
+    from app.api.projects import get_project_for_user
+    project = await get_project_for_user(db, project_id, current_user.id)
     
     result = await db.execute(
         select(Asset).where(Asset.id == asset_id, Asset.project_id == project_id)
@@ -196,17 +164,9 @@ async def delete_asset(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Verify project exists and belongs to user
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found",
-        )
+    # Verify project exists and user has access
+    from app.api.projects import get_project_for_user
+    project = await get_project_for_user(db, project_id, current_user.id)
     
     result = await db.execute(
         select(Asset).where(Asset.id == asset_id, Asset.project_id == project_id)

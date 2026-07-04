@@ -1,6 +1,6 @@
 .model-settings-layout {
   min-height: 100vh;
-  background: #0a0a0b;
+  background: var(--bg-primary);
 }
 
 .model-settings-header {
@@ -56,7 +56,7 @@
 }
 
 .settings-tabs .ant-tabs-ink-bar {
-  background: #6366f1 !important;
+  background: var(--accent-cyan) !important;
 }
 
 .model-settings-content .ant-card {
@@ -103,7 +103,7 @@
 }
 
 .model-settings-content .ant-modal-content {
-  background: #1a1a1c !important;
+  background: var(--bg-tertiary) !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
 }
 
@@ -129,11 +129,11 @@
 
 .model-settings-content .ant-input:focus,
 .model-settings-content .ant-select-focused .ant-select-selector {
-  border-color: #6366f1 !important;
+  border-color: var(--accent-cyan) !important;
 }
 
 .model-settings-content .ant-btn-primary {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue)) !important;
   border: none !important;
 }
 

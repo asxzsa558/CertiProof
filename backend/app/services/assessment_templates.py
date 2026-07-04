@@ -51,8 +51,11 @@ LEVEL_2_TEMPLATE = {
             "depends_on": ["phase_3"],
             "description": "现场技术测评",
             "default_tasks": [
-                {"type": "config_check", "name": "安全配置核查"},
-                {"type": "vuln_scan", "name": "漏洞扫描"},
+                {"type": "config_check", "name": "安全配置核查", "description": "检查身份鉴别、访问控制、安全审计等（SSH 白盒核查）"},
+                {"type": "vuln_scan", "name": "漏洞扫描", "description": "扫描系统漏洞、Web 漏洞等"},
+                {"type": "password_scan", "name": "弱口令检测", "description": "检测 SSH/数据库等弱口令"},
+                {"type": "ssl_check", "name": "SSL/TLS 检测", "description": "检测 SSL/TLS 配置安全性"},
+                {"type": "db_check", "name": "数据库安全检测", "description": "检测 Redis/MySQL/MongoDB 等未授权访问"},
             ]
         },
         {
@@ -134,12 +137,13 @@ LEVEL_3_TEMPLATE = {
             "depends_on": ["phase_3"],
             "description": "现场技术测评，包括安全物理环境、安全通信网络、安全区域边界、安全计算环境、安全管理中心",
             "default_tasks": [
-                {"type": "config_check", "name": "安全物理环境检查", "description": "检查机房物理安全、防盗窃、防火等"},
-                {"type": "config_check", "name": "安全通信网络检查", "description": "检查网络架构、通信传输、可信验证等"},
-                {"type": "config_check", "name": "安全区域边界检查", "description": "检查边界防护、访问控制、入侵防范等"},
-                {"type": "config_check", "name": "安全计算环境检查", "description": "检查身份鉴别、访问控制、安全审计等"},
-                {"type": "vuln_scan", "name": "漏洞扫描", "description": "扫描系统漏洞、弱口令等"},
-                {"type": "pentest", "name": "渗透测试", "description": "进行渗透测试验证安全防线有效性"},
+                {"type": "config_check", "name": "安全计算环境检查", "description": "检查身份鉴别、访问控制、安全审计等（SSH白盒核查）"},
+                {"type": "vuln_scan", "name": "漏洞扫描", "description": "扫描系统漏洞、Web漏洞等"},
+                {"type": "password_scan", "name": "弱口令检测", "description": "检测SSH/数据库等弱口令"},
+                {"type": "ssl_check", "name": "SSL/TLS检测", "description": "检测SSL/TLS配置安全性"},
+                {"type": "db_check", "name": "数据库安全检测", "description": "检测Redis/MySQL/MongoDB等未授权访问"},
+                {"type": "network_check", "name": "网络设备检测", "description": "SNMP团体字检测、网络设备配置读取"},
+                {"type": "doc_review", "name": "渗透测试报告审查", "description": "审查渗透测试方案、报告、漏洞修复记录（等保8.1.4.27）"},
             ]
         },
         {
@@ -192,18 +196,53 @@ TASK_TYPES = {
     },
     "config_check": {
         "name": "配置核查",
-        "description": "检查安全配置是否符合要求",
+        "description": "检查安全配置是否符合要求（SSH白盒核查）",
         "icon": "setting",
     },
     "vuln_scan": {
         "name": "漏洞扫描",
-        "description": "扫描系统漏洞",
+        "description": "扫描系统漏洞、Web漏洞",
         "icon": "bug",
+    },
+    "web_scan": {
+        "name": "Web安全扫描",
+        "description": "Web漏洞/SQL注入/目录爆破",
+        "icon": "global",
     },
     "pentest": {
         "name": "渗透测试",
         "description": "进行渗透测试验证安全防线",
         "icon": "thunderbolt",
+    },
+    "ssl_check": {
+        "name": "SSL/TLS检测",
+        "description": "检测SSL/TLS配置安全性",
+        "icon": "lock",
+    },
+    "password_scan": {
+        "name": "弱口令检测",
+        "description": "检测SSH/数据库等弱口令",
+        "icon": "key",
+    },
+    "db_check": {
+        "name": "数据库安全检测",
+        "description": "检测数据库未授权访问/空口令",
+        "icon": "database",
+    },
+    "network_check": {
+        "name": "网络设备检测",
+        "description": "SNMP团体字检测/网络设备配置",
+        "icon": "cluster",
+    },
+    "windows_check": {
+        "name": "Windows/AD/SMB组合检测",
+        "description": "Windows/AD/SMB 用户/SID/共享检测",
+        "icon": "windows",
+    },
+    "full_compliance_scan": {
+        "name": "全量合规扫描",
+        "description": "端口+SSL+漏洞+弱口令全量扫描",
+        "icon": "safety-certificate",
     },
     "doc_review": {
         "name": "文档审查",

@@ -8,6 +8,9 @@ import ModelSettings from './pages/ModelSettings'
 import ResultsPage from './pages/ResultsPage'
 import ResultDetailPage from './pages/ResultDetailPage'
 import Dashboard from './pages/Dashboard'
+import ProjectsList from './pages/ProjectsList'
+import AssetsPage from './pages/AssetsPage'
+import ReportsPage from './pages/ReportsPage'
 import OrganizationSettings from './pages/OrganizationSettings'
 import './index.css'
 
@@ -31,12 +34,10 @@ function ProtectedRoute({ children }) {
     )
   }
 
-  // 没有 token，重定向到登录页
   if (!token) {
     return <Navigate to="/login" replace />
   }
 
-  // 有 token 但 organizations 为空，强制重新登录
   if (organizations.length === 0) {
     return <Navigate to="/login" replace />
   }
@@ -50,33 +51,33 @@ function App() {
       theme={{
         algorithm: theme.darkAlgorithm,
         token: {
-          colorPrimary: '#6366f1',
-          borderRadius: 8,
-          colorBgContainer: '#111113',
-          colorBgElevated: '#1a1a1c',
-          colorBorder: 'rgba(255, 255, 255, 0.08)',
-          colorText: 'rgba(255, 255, 255, 0.85)',
+          colorPrimary: '#00d4ff',
+          borderRadius: 4,
+          colorBgContainer: '#111827',
+          colorBgElevated: '#1e293b',
+          colorBorder: 'rgba(0, 212, 255, 0.15)',
+          colorText: '#f1f5f9',
         },
         components: {
           Button: {
-            borderRadius: 8,
-            controlHeight: 40,
-            controlHeightLG: 48,
-            fontWeight: 500,
+            borderRadius: 4,
+            controlHeight: 32,
+            controlHeightLG: 40,
+            fontWeight: 600,
           },
           Card: {
-            borderRadiusLG: 16,
+            borderRadiusLG: 8,
           },
           Input: {
-            controlHeight: 40,
-            borderRadius: 8,
+            controlHeight: 32,
+            borderRadius: 4,
           },
           Menu: {
-            itemBorderRadius: 8,
-            itemMarginInline: 8,
+            itemBorderRadius: 4,
+            itemMarginInline: 4,
           },
           Table: {
-            borderRadius: 12,
+            borderRadius: 4,
           },
         },
       }}
@@ -86,10 +87,42 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/dashboard"
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects"
+            element={
+              <ProtectedRoute>
+                <ProjectsList />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/assets"
+            element={
+              <ProtectedRoute>
+                <AssetsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reports"
+            element={
+              <ProtectedRoute>
+                <ReportsPage />
               </ProtectedRoute>
             }
           />
@@ -133,16 +166,7 @@ function App() {
               </ProtectedRoute>
             }
           />
-
-          <Route
-            index
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </ConfigProvider>

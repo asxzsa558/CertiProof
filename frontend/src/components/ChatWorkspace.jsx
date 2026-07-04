@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Input, Button, Avatar, Spin, Empty, Typography, Progress, Tag, Table, message, Modal, Checkbox, Dropdown, Menu, Popconfirm, Drawer, Steps } from 'antd'
+import { Input, Button, Avatar, Spin, Empty, Typography, Progress, Tag, Table, message, Modal, Checkbox, Dropdown, Menu, Popconfirm, Drawer, Steps, Form, Collapse } from 'antd'
 import {
   SendOutlined,
   UserOutlined,
@@ -25,28 +25,69 @@ import {
   DeleteOutlined,
   FolderOutlined,
   RocketOutlined,
+  DatabaseOutlined,
+  KeyOutlined,
+  ClusterOutlined,
+  CloudServerOutlined,
+  GlobalOutlined,
+  BugOutlined,
+  WindowsOutlined,
+  LockOutlined,
+  FolderOpenOutlined,
+  FileTextOutlined,
+  DownOutlined,
+  WifiOutlined,
+  SearchOutlined,
+  RadarChartOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import VeriSureLogo from './VeriSureLogo'
+import AssetCredentialModal from './AssetCredentialModal'
+import ToolResultCard from './ToolResultCard'
 import './ChatWorkspace.css'
 import './ScanAnimation.css'
 
 const { TextArea } = Input
 const { Text } = Typography
 
-const SUGGESTIONS = [
-  { icon: <PlusOutlined />, title: '创建项目', text: '创建项目 ', color: '#6366f1' },
-  { icon: <ThunderboltOutlined />, title: '端口扫描', text: '/scan', color: '#10b981' },
-  { icon: <FileSearchOutlined />, title: '查看结果', text: '查看扫描结果', color: '#ef4444' },
-  { icon: <RocketOutlined />, title: '等保测评', text: '', color: '#f59e0b', action: 'assessment' },
-  { icon: <ApiOutlined />, title: '连通测试', text: '/diagnose', color: '#8b5cf6' },
+// 工具目录：快捷按钮、斜杠菜单、多资产执行和显示名都从这里派生。
+// 组合工具和原子工具平铺展示；组合只是一种预设，不是父级。
+const TOOL_CATALOG = [
+  { command: '/scan', capability: 'scan_ports', name: '端口扫描', description: '高危/定制端口扫描', usage: '/scan [目标] [端口范围]', icon: <ThunderboltOutlined />, color: '#10b981', primary: true, requiresTarget: true },
+  { command: '/scan-full', capability: 'scan_ports', name: '全端口扫描', description: '全端口扫描', usage: '/scan-full [目标]', icon: <ThunderboltOutlined />, color: '#dc2626', more: true, requiresTarget: true, parameters: { port_range: '1-65535' } },
+  { command: '/masscan', capability: 'masscan_scan', name: '高速端口扫描', description: '高速端口扫描', usage: '/masscan [目标]', icon: <CloudServerOutlined />, color: '#059669', more: true, requiresTarget: true },
+  { command: '/fping', capability: 'fping_scan', name: '批量存活检测', description: '批量存活检测', usage: '/fping [网段]', icon: <WifiOutlined />, color: '#14b8a6', more: true, requiresTarget: true },
+  { command: '/ssl', capability: 'scan_ssl', name: 'SSL/TLS 检测', description: 'SSL/TLS 检测', usage: '/ssl [目标]', icon: <LockOutlined />, color: '#0ea5e9', more: true, requiresTarget: true },
+  { command: '/vuln', capability: 'scan_vulnerabilities', name: '漏洞扫描', description: '漏洞扫描', usage: '/vuln [目标]', icon: <BugOutlined />, color: '#ef4444', primary: true, requiresTarget: true },
+  { command: '/baseline', capability: 'baseline_check', name: '安全基线核查', description: '安全基线核查（自动识别操作系统）', usage: '/baseline [目标]', icon: <SafetyCertificateOutlined />, color: '#3b82f6', primary: true, requiresTarget: true, requiresSsh: true },
+  { command: '/web', capability: 'nikto_scan', name: 'Web 安全扫描', description: 'Nikto Web 安全扫描', usage: '/web [URL]', icon: <MonitorOutlined />, color: '#8b5cf6', primary: true, requiresTarget: true },
+  { command: '/nikto', capability: 'nikto_scan', name: 'Nikto Web 扫描', description: 'Nikto Web 扫描', usage: '/nikto [URL]', icon: <MonitorOutlined />, color: '#8b5cf6', requiresTarget: true },
+  { command: '/sqlmap', capability: 'sqlmap_scan', name: 'SQL 注入检测', description: 'SQL 注入检测', usage: '/sqlmap [URL]', icon: <SearchOutlined />, color: '#8b5cf6', requiresTarget: true },
+  { command: '/dirbust', capability: 'web_discovery_scan', name: 'Web 目录发现', description: '组合：Gobuster + FFUF', usage: '/dirbust [URL]', icon: <FolderOpenOutlined />, color: '#f59e0b', more: true, requiresTarget: true },
+  { command: '/gobuster', capability: 'gobuster_scan', name: 'Gobuster 目录扫描', description: 'Gobuster 目录扫描', usage: '/gobuster [URL]', icon: <FolderOpenOutlined />, color: '#f59e0b', requiresTarget: true },
+  { command: '/ffuf', capability: 'ffuf_scan', name: 'FFUF 模糊测试', description: 'FFUF Web 模糊测试', usage: '/ffuf [URL]', icon: <FolderOpenOutlined />, color: '#f59e0b', requiresTarget: true },
+  { command: '/db', capability: 'database_security_scan', name: '数据库安全检测', description: '组合：Redis/MySQL/MongoDB/Memcached/Oracle', usage: '/db [目标]', icon: <DatabaseOutlined />, color: '#06b6d4', primary: true, requiresTarget: true },
+  { command: '/redis', capability: 'redis_check', name: 'Redis 检测', description: 'Redis 未授权检测', usage: '/redis [目标]', icon: <DatabaseOutlined />, color: '#06b6d4', requiresTarget: true },
+  { command: '/mysql', capability: 'mysql_check', name: 'MySQL 检测', description: 'MySQL 空口令检测', usage: '/mysql [目标]', icon: <DatabaseOutlined />, color: '#06b6d4', requiresTarget: true },
+  { command: '/mongodb', capability: 'mongodb_check', name: 'MongoDB 检测', description: 'MongoDB 未授权检测', usage: '/mongodb [目标]', icon: <DatabaseOutlined />, color: '#06b6d4', requiresTarget: true },
+  { command: '/memcached', capability: 'memcached_check', name: 'Memcached 检测', description: 'Memcached 未授权检测', usage: '/memcached [目标]', icon: <DatabaseOutlined />, color: '#06b6d4', requiresTarget: true },
+  { command: '/oracle', capability: 'oracle_check', name: 'Oracle 检测', description: 'Oracle TNS 检测', usage: '/oracle [目标]', icon: <DatabaseOutlined />, color: '#06b6d4', requiresTarget: true },
+  { command: '/snmp', capability: 'network_device_scan', name: '网络设备检测', description: '组合：SNMP 信息 + 团体字检测', usage: '/snmp [目标]', icon: <ClusterOutlined />, color: '#d946ef', more: true, requiresTarget: true },
+  { command: '/snmpwalk', capability: 'snmp_walk', name: 'SNMP Walk', description: 'SNMP 信息读取', usage: '/snmpwalk [目标]', icon: <ClusterOutlined />, color: '#d946ef', requiresTarget: true },
+  { command: '/snmpget', capability: 'snmp_get', name: 'SNMP OID 检测', description: 'SNMP OID 读取', usage: '/snmpget [目标]', icon: <ClusterOutlined />, color: '#d946ef', requiresTarget: true },
+  { command: '/snmp-brute', capability: 'snmp_bruteforce', name: 'SNMP 团体字检测', description: 'SNMP 团体字检测', usage: '/snmp-brute [目标]', icon: <ClusterOutlined />, color: '#d946ef', requiresTarget: true },
+  { command: '/password', capability: 'scan_weak_passwords', name: '弱口令检测', description: '弱口令检测', usage: '/password [目标]', icon: <KeyOutlined />, color: '#f97316', primary: true, requiresTarget: true },
+  { command: '/windows', capability: 'windows_security_scan', name: 'Windows/AD/SMB 检测', description: '组合：用户/SID/SMB 共享枚举', usage: '/windows [目标]', icon: <WindowsOutlined />, color: '#0f766e', more: true, requiresTarget: true },
+  { command: '/enum4linux', capability: 'enum4linux_scan', name: 'Windows 用户/组枚举', description: 'enum4linux 用户/组枚举', usage: '/enum4linux [目标]', icon: <WindowsOutlined />, color: '#0f766e', requiresTarget: true },
+  { command: '/smb', capability: 'smb_enum', name: 'SMB 共享枚举', description: 'SMB 共享枚举', usage: '/smb [目标]', icon: <WindowsOutlined />, color: '#0f766e', requiresTarget: true },
+  { command: '/cme', capability: 'crackmapexec_scan', name: 'Windows SID 枚举', description: 'Windows SID/SMB 枚举', usage: '/cme [目标]', icon: <WindowsOutlined />, color: '#0f766e', requiresTarget: true },
+  { command: '/ping', capability: 'ping_host', name: 'Ping 检测', description: 'Ping 检测', usage: '/ping [目标]', icon: <ApiOutlined />, color: '#64748b', more: true, requiresTarget: true },
+  { command: '/all', capability: 'full_compliance_scan', name: '全量合规扫描', description: '组合：端口+SSL+漏洞+弱口令', usage: '/all [目标]', icon: <SafetyCertificateOutlined />, color: '#6366f1', more: true, requiresTarget: true },
+  { command: '/tech', capability: 'tech_assessment', name: '等保技术测评', description: '组合：等保技术检查', usage: '/tech [目标]', icon: <ThunderboltOutlined />, color: '#ef4444', more: true, requiresTarget: true, requiresSsh: true },
+  { command: '/ssh', capability: 'ssh_config_check', name: 'SSH 配置检查', description: 'SSH 配置检查', usage: '/ssh [目标]', icon: <SafetyCertificateOutlined />, color: '#3b82f6', requiresTarget: true, requiresSsh: true },
 ]
 
-const SLASH_COMMANDS = [
-  { command: '/scan', description: '端口扫描', usage: '/scan [目标]', defaultText: '/scan ' },
-  { command: '/ssl', description: 'SSL/TLS 检测', usage: '/ssl [目标]', defaultText: '/ssl ' },
-  { command: '/vuln', description: '漏洞扫描', usage: '/vuln [目标]', defaultText: '/vuln ' },
-  { command: '/ping', description: 'Ping 检测', usage: '/ping [目标]', defaultText: '/ping ' },
+const SYSTEM_COMMANDS = [
   { command: '/asset', description: '添加资产', usage: '/asset [IP/域名]', defaultText: '/asset ' },
   { command: '/assets', description: '列出项目资产', usage: '/assets', direct: true },
   { command: '/project', description: '列出项目', usage: '/project', defaultText: '列出所有项目' },
@@ -56,11 +97,104 @@ const SLASH_COMMANDS = [
   { command: '/help', description: '显示帮助', usage: '/help', direct: true },
 ]
 
+const TOOL_BY_COMMAND = Object.fromEntries(TOOL_CATALOG.map(tool => [tool.command, tool]))
+const COMMAND_TO_CAPABILITY = Object.fromEntries(TOOL_CATALOG.map(tool => [tool.command, tool.capability]))
+const CAPABILITY_NAMES = TOOL_CATALOG.reduce((acc, tool) => {
+  acc[tool.capability] = tool.name
+  return acc
+}, {
+  linux_baseline: '安全基线核查',
+  ping_asset: 'Ping 检测',
+  testssl_scan: 'SSL/TLS 检测',
+  nuclei_scan: '漏洞扫描',
+  hydra_bruteforce: '弱口令检测',
+})
+
+const PRIMARY_SUGGESTIONS = TOOL_CATALOG
+  .filter(tool => tool.primary)
+  .map(tool => ({ icon: tool.icon, title: tool.name, text: `${tool.command} `, color: tool.color }))
+
+const MORE_SUGGESTIONS = [
+  ...TOOL_CATALOG
+    .filter(tool => tool.more)
+    .map(tool => ({ icon: tool.icon, title: tool.name, text: `${tool.command} `, color: tool.color })),
+  { icon: <ApiOutlined />, title: '连通测试', text: '/diagnose', color: '#64748b' },
+  { icon: <FileTextOutlined />, title: '查看结果', text: '查看扫描结果', color: '#ec4899', isText: true },
+]
+
+const SUGGESTIONS = [
+  { icon: <PlusOutlined />, title: '创建项目', text: '创建项目 ', color: '#6366f1' },
+  ...PRIMARY_SUGGESTIONS,
+  { icon: <RocketOutlined />, title: '等保测评', text: '', color: '#f59e0b', action: 'assessment' },
+]
+
+const SLASH_COMMANDS = [
+  ...TOOL_CATALOG.map(tool => ({
+    command: tool.command,
+    description: tool.description,
+    usage: tool.usage,
+    defaultText: `${tool.command} `,
+  })),
+  ...SYSTEM_COMMANDS,
+]
+
+const FULL_PORT_ALIASES = new Set(['all', 'full', '1-65535', '全端口', '全部端口', '全部'])
+const HIGH_RISK_PORT_ALIASES = new Set(['high', 'high-risk', 'risk', '高危', '高危端口'])
+
+const normalizeScanPortRange = (value) => {
+  if (!value) return null
+  const text = value.trim()
+  const lower = text.toLowerCase()
+  if (FULL_PORT_ALIASES.has(lower)) return '1-65535'
+  if (HIGH_RISK_PORT_ALIASES.has(lower)) return 'high-risk'
+  if (/^\d+(-\d+)?(,\d+(-\d+)?)*$/.test(text)) return text
+  if (/^top-\d+$/i.test(text)) return lower
+  return null
+}
+
+const buildScanText = (target, portRange) => {
+  if (portRange === '1-65535') return `对 ${target} 进行全端口扫描，端口范围 1-65535`
+  if (portRange && portRange !== 'high-risk') return `对 ${target} 进行定制端口扫描，端口范围 ${portRange}`
+  return `对 ${target} 进行高危端口扫描`
+}
+
+const buildToolActionText = (command, target, options = {}) => {
+  if (command === '/scan') return buildScanText(options.scanTarget || target, options.portRange || 'high-risk')
+  if (command === '/scan-full') return buildScanText(options.scanTarget || target, '1-65535')
+  const tool = TOOL_BY_COMMAND[command]
+  if (!tool) return `${command} ${target}`.trim()
+  if (command === '/fping') return `对 ${target} 进行批量存活检测`
+  return `对 ${target} 进行${tool.name}`
+}
+
+const safeJson = (value) => {
+  if (value === undefined || value === null) return ''
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+const assetKey = (asset) => String(asset?.value || asset?.target || '').trim().toLowerCase()
+
+const dedupeAssets = (assets = []) => {
+  const seen = new Set()
+  return assets.filter(asset => {
+    const key = assetKey(asset)
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 function ChatWorkspace({ projectId, projectName, modelId }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [currentProjectId, setCurrentProjectId] = useState(projectId || null)
+  const [inputHistory, setInputHistory] = useState([])
+  const [historyIndex, setHistoryIndex] = useState(null)
+
   const [currentModelId, setCurrentModelId] = useState(modelId || null)
   const [lastRequest, setLastRequest] = useState({ message: '', timestamp: 0 })
   const [showCommandPalette, setShowCommandPalette] = useState(false)
@@ -70,6 +204,19 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   const [assetSelectorAssets, setAssetSelectorAssets] = useState([])
   const [assetSelectorSelected, setAssetSelectorSelected] = useState([])
   const [assetSelectorCommand, setAssetSelectorCommand] = useState('')
+  const [assetSelectorParameters, setAssetSelectorParameters] = useState({})
+  const [sshCredentialVisible, setSshCredentialVisible] = useState(false)
+  const [sshCredentialTarget, setSshCredentialTarget] = useState('')
+  const [sshCredentialCommand, setSshCredentialCommand] = useState('')
+  const [sshUsername, setSshUsername] = useState('root')
+  const [sshPassword, setSshPassword] = useState('')
+  const [sshKeyFile, setSshKeyFile] = useState('')
+  const [sshPort, setSshPort] = useState(22)
+  
+  // Per-Asset 凭据配置
+  const [credentialModalVisible, setCredentialModalVisible] = useState(false)
+  const [credentialAssets, setCredentialAssets] = useState([])
+  const [credentialCommand, setCredentialCommand] = useState('')
   const [compressionStatus, setCompressionStatus] = useState(null) // null | 'started' | 'completed'
   const [compressionInfo, setCompressionInfo] = useState(null) // { tokens_freed, message_count }
   const [archives, setArchives] = useState([])
@@ -84,7 +231,20 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   const messagesEndRef = useRef(null)
   const wsRef = useRef(null)
   const pollRef = useRef(null)
+  const completedTaskIdsRef = useRef(new Set())
   const inputRef = useRef(null)
+
+  const rememberInput = (text) => {
+    const value = (text || '').trim()
+    if (!value) return
+    setInputHistory(prev => (prev[prev.length - 1] === value ? prev : [...prev.slice(-49), value]))
+    setHistoryIndex(null)
+  }
+
+  const buildMultiAssetActionText = (capability, count, allSelected) => {
+    const name = CAPABILITY_NAMES[capability] || capability
+    return `${allSelected ? '对项目所有资产' : '对选定资产'} (${count} 个) 执行${name}`
+  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -97,7 +257,9 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   // Load history on mount (key prop ensures remount on project change)
   useEffect(() => {
     const loadHistory = async () => {
+      console.log('[ChatWorkspace] loadHistory called, projectId:', projectId)
       if (!projectId) {
+        console.log('[ChatWorkspace] No projectId, showing welcome message')
         setMessages([
           {
             role: 'assistant',
@@ -108,23 +270,55 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       }
       
       try {
+        console.log('[ChatWorkspace] Fetching history for project_id:', projectId)
         const response = await api.get('/chat/history', { params: { project_id: projectId } })
+        console.log('[ChatWorkspace] History response:', response.data.length, 'messages')
         const history = response.data
         
+        let nextMessages
         if (history && history.length > 0) {
-          setMessages(history.map(h => ({
+          nextMessages = history.map(h => ({
             role: h.role,
             content: h.content,
             id: h.id,
-          })))
+            // 从 context_snapshot 恢复任务结果
+            isResult: h.context_snapshot?.scan_results ? true : false,
+            scanResults: h.context_snapshot?.scan_results || {},
+            isMultiAsset: h.context_snapshot?.is_multi_asset || false,
+          }))
         } else {
-          setMessages([
+          nextMessages = [
             {
               role: 'assistant',
               content: '你好！我是 VeriSure 智能合规验证助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
             },
-          ])
+          ]
         }
+
+        let runningTasks = []
+        try {
+          const statusResponse = await api.get('/chat/status')
+          runningTasks = (statusResponse.data.running || []).filter(t => t.task_id)
+        } catch (statusError) {
+          console.error('Failed to load running tasks:', statusError)
+        }
+        if (runningTasks.length > 0) {
+          runningTasks.forEach(task => completedTaskIdsRef.current.delete(task.task_id))
+          nextMessages = [
+            ...nextMessages,
+            ...runningTasks.map(task => ({
+              role: 'assistant',
+              content: task.current_step || '任务恢复中...',
+              taskId: task.task_id,
+              taskStatus: 'running',
+              currentStep: task.current_step || '任务执行中...',
+              stepProgress: task.step_progress || { step_index: 0, total_steps: 1, steps: [] },
+            })),
+          ]
+        }
+
+        setMessages(nextMessages)
+        runningTasks.forEach(task => connectWebSocket(task.task_id))
       } catch (error) {
         console.error('Failed to load chat history:', error)
         setMessages([
@@ -154,6 +348,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   const handleSend = async (text = null) => {
     const messageText = text || input.trim()
     if (!messageText || loading) return
+    rememberInput(messageText)
 
     // 检测诊断命令
     if (messageText === '/diagnose') {
@@ -175,23 +370,48 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       return
     }
 
-    // 检测扫描命令（/scan、/ssl、/vuln）
-    const scanCommands = ['/scan', '/ssl', '/vuln']
+    // 检测扫描命令
+    const scanCommands = TOOL_CATALOG.map(tool => tool.command).sort((a, b) => b.length - a.length)
     const matchedCommand = scanCommands.find(cmd => messageText === cmd || messageText.startsWith(cmd + ' '))
     if (matchedCommand) {
+      const matchedTool = TOOL_BY_COMMAND[matchedCommand]
       const target = messageText.slice(matchedCommand.length).trim()
       if (target) {
-        // 有指定目标，直接发送
-        const commandTexts = {
-          '/scan': `扫描 ${target} 端口`,
-          '/ssl': `检测 ${target} SSL/TLS 配置`,
-          '/vuln': `扫描 ${target} 漏洞`,
+        // 有指定目标
+        if (matchedTool?.requiresSsh) {
+          // 需要 SSH 凭证的命令，弹出凭证输入框
+          setSshCredentialTarget(target)
+          setSshCredentialCommand(matchedCommand)
+          setSshCredentialVisible(true)
+        } else {
+          // 不需要 SSH 凭证，直接发送
+          const isScanCommand = matchedCommand === '/scan' || matchedCommand === '/scan-full'
+          const scanParts = isScanCommand ? target.split(/\s+/) : []
+          const scanTarget = scanParts[0]
+          const scanPortRange = matchedCommand === '/scan-full'
+            ? '1-65535'
+            : normalizeScanPortRange(scanParts[1])
+
+          if (matchedCommand === '/scan' && scanParts.length === 1) {
+            const projectAssetPortRange = normalizeScanPortRange(scanParts[0])
+            if (projectAssetPortRange) {
+              await openAssetSelector(matchedCommand, { port_range: projectAssetPortRange })
+              return
+            }
+          }
+
+          const translatedText = buildToolActionText(matchedCommand, target, {
+            scanTarget,
+            portRange: scanPortRange || 'high-risk',
+          })
+          await handleSendToAI(translatedText)
         }
-        const translatedText = commandTexts[matchedCommand] || messageText
-        await handleSendToAI(translatedText)
       } else {
         // 无目标，弹出资产选择对话框
-        await openAssetSelector(matchedCommand)
+        const selectorParameters = matchedCommand === '/scan'
+          ? { port_range: 'high-risk' }
+          : (matchedTool?.parameters || {})
+        await openAssetSelector(matchedCommand, selectorParameters)
       }
       return
     }
@@ -200,6 +420,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   }
 
   const handleDiagnose = async () => {
+    rememberInput('/diagnose')
     setMessages(prev => [...prev, { role: 'user', content: '/diagnose' }])
     setInput('')
     setLoading(true)
@@ -226,6 +447,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   }
 
   const handlePing = async (target) => {
+    rememberInput(`/ping ${target}`)
     setMessages(prev => [...prev, { role: 'user', content: `/ping ${target}` }])
     setInput('')
     setLoading(true)
@@ -233,7 +455,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     try {
       const response = await api.post('/chat/', {
         message: `ping ${target}`,
-        project_id: currentProjectId,
+        project_id: projectId,
       })
       
       const aiResponse = response.data.response
@@ -270,7 +492,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     try {
       const response = await api.post('/chat/', {
         message: messageText,
-        project_id: currentProjectId,
+        project_id: projectId,
         model_id: currentModelId,
         thread_id: currentThreadId,
       })
@@ -283,6 +505,9 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         role: 'assistant',
         content: aiResponse,
         taskId: taskId,  // 保存 task_id
+        taskStatus: taskId ? 'running' : undefined,
+        currentStep: taskId ? '正在准备执行...' : undefined,
+        stepProgress: taskId ? { step_index: 0, total_steps: 1, steps: [] } : undefined,
       }
       setMessages((prev) => [...prev, assistantMessage])
 
@@ -291,9 +516,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         connectWebSocket(taskId)
       }
 
-      if (response.data.context?.project_id) {
-        setCurrentProjectId(response.data.context.project_id)
-      }
+      // ponytail: server project_id override removed — prop is the sole source of truth
     } catch (error) {
       const errorMessage = {
         role: 'assistant',
@@ -306,8 +529,8 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     }
   }
 
-  const openAssetSelector = async (command) => {
-    if (!currentProjectId) {
+  const openAssetSelector = async (command, parameters = {}) => {
+    if (!projectId) {
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: '请先选择项目',
@@ -317,7 +540,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     }
     
     try {
-      const response = await api.get(`/projects/${currentProjectId}/assets/`)
+      const response = await api.get(`/projects/${projectId}/assets/`)
       const assets = response.data
       
       if (assets.length === 0) {
@@ -331,6 +554,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       setAssetSelectorAssets(assets)
       setAssetSelectorSelected(assets.map(a => a.id))
       setAssetSelectorCommand(command)
+      setAssetSelectorParameters(parameters)
       setAssetSelectorVisible(true)
     } catch (error) {
       setMessages(prev => [...prev, {
@@ -343,7 +567,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
 
   const handleAssetSelectorConfirm = async () => {
     setAssetSelectorVisible(false)
-    const selectedAssets = assetSelectorAssets.filter(a => assetSelectorSelected.includes(a.id))
+    const selectedAssets = dedupeAssets(assetSelectorAssets.filter(a => assetSelectorSelected.includes(a.id)))
     
     if (selectedAssets.length === 0) {
       setMessages(prev => [...prev, {
@@ -353,11 +577,22 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       return
     }
     
-    await handleMultiAssetScan(assetSelectorCommand, selectedAssets)
+    // 检查是否需要 SSH 凭证
+    if (TOOL_BY_COMMAND[assetSelectorCommand]?.requiresSsh) {
+      // 打开 Per-Asset 凭据配置弹窗
+      setCredentialAssets(selectedAssets)
+      setCredentialCommand(assetSelectorCommand)
+      setCredentialModalVisible(true)
+    } else {
+      await handleMultiAssetScan(assetSelectorCommand, selectedAssets, assetSelectorParameters)
+    }
   }
 
-  const handleMultiAssetScan = async (command, selectedAssets) => {
-    if (!currentProjectId) {
+  // Per-Asset 凭据配置确认
+  const handleCredentialConfirm = async (assetsWithCredentials) => {
+    setCredentialModalVisible(false)
+    
+    if (!projectId) {
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: '请先选择项目',
@@ -366,25 +601,84 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       return
     }
     
-    const assets = selectedAssets || []
+    const capability = COMMAND_TO_CAPABILITY[credentialCommand]
+    const uniqueAssets = dedupeAssets(assetsWithCredentials)
+    const sshCount = uniqueAssets.filter(a => a.ssh_credential).length
+    const skipCount = uniqueAssets.filter(a => !a.ssh_credential).length
+    
+    const sshInfo = sshCount > 0
+      ? `（${sshCount} 个资产提供 SSH 凭据${skipCount > 0 ? `，${skipCount} 个跳过基线检查` : ''}）`
+      : '（未提供 SSH 凭据，将跳过安全基线检查）'
+    
+    const targetDesc = buildMultiAssetActionText(
+      capability,
+      uniqueAssets.length,
+      uniqueAssets.length === dedupeAssets(assetSelectorAssets).length,
+    )
+    
+    try {
+      const userMessage = {
+        role: 'user',
+        content: `${targetDesc}。${sshInfo}`,
+        isMultiAsset: true,
+        totalAssets: uniqueAssets.length,
+      }
+      setMessages(prev => [...prev, userMessage])
+      setInput('')
+      setLoading(true)
+      
+      const scanResponse = await api.post('/chat/', {
+        message: JSON.stringify({
+          type: 'multi_asset_scan',
+          capability: capability,
+          assets: uniqueAssets,
+        }),
+        project_id: projectId,
+      })
+      
+      const taskId = scanResponse.data.task_id
+      const aiResponse = scanResponse.data.response
+      
+      const assistantMessage = {
+        role: 'assistant',
+        content: aiResponse || `开始${CAPABILITY_NAMES[capability] || capability}，共 ${uniqueAssets.length} 个资产`,
+        taskId: taskId,
+        taskStatus: taskId ? 'running' : undefined,
+        isMultiAsset: true,
+        totalAssets: uniqueAssets.length,
+        assetProgress: {},
+      }
+      setMessages(prev => [...prev, assistantMessage])
+      
+      if (taskId) {
+        connectWebSocket(taskId)
+      }
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `扫描失败：${error.response?.data?.detail || error.message}`,
+        isError: true,
+      }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleMultiAssetScan = async (command, selectedAssets, parameters = {}) => {
+    if (!projectId) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '请先选择项目',
+        isError: true,
+      }])
+      return
+    }
+    
+    const assets = dedupeAssets(selectedAssets || [])
     if (assets.length === 0) return
     
-    const capabilityMap = {
-      '/scan': 'scan_ports',
-      '/ssl': 'scan_ssl',
-      '/vuln': 'scan_vulnerabilities',
-    }
-    
-    const capability = capabilityMap[command]
-    const capabilityNames = {
-      'scan_ports': '端口扫描',
-      'scan_ssl': 'SSL/TLS 检测',
-      'scan_vulnerabilities': '漏洞扫描',
-    }
-    
-    const targetDesc = assets.length === assetSelectorAssets.length
-      ? `扫描项目所有资产 (${assets.length} 个)`
-      : `扫描选定资产 (${assets.length} 个)`
+    const capability = COMMAND_TO_CAPABILITY[command]
+    const targetDesc = buildMultiAssetActionText(capability, assets.length, assets.length === dedupeAssets(assetSelectorAssets).length)
     
     try {
       const userMessage = {
@@ -401,9 +695,10 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         message: JSON.stringify({
           type: 'multi_asset_scan',
           capability: capability,
+          parameters: parameters,
           assets: assets.map(a => ({ id: a.id, value: a.value, type: a.asset_type })),
         }),
-        project_id: currentProjectId,
+        project_id: projectId,
       })
       
       const taskId = scanResponse.data.task_id
@@ -411,8 +706,9 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       
       const assistantMessage = {
         role: 'assistant',
-        content: aiResponse || `开始${capabilityNames[capability]}，共 ${assets.length} 个资产`,
+        content: aiResponse || `开始${CAPABILITY_NAMES[capability] || capability}，共 ${assets.length} 个资产`,
         taskId: taskId,
+        taskStatus: taskId ? 'running' : undefined,
         isMultiAsset: true,
         totalAssets: assets.length,
         assetProgress: {},
@@ -435,6 +731,126 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     }
   }
 
+  const handleSshCredentialConfirm = async () => {
+    setSshCredentialVisible(false)
+    
+    if (!sshUsername) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '请输入 SSH 用户名',
+        isError: true,
+      }])
+      return
+    }
+    
+    if (!sshPassword && !sshKeyFile) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '请输入 SSH 密码或密钥文件路径',
+        isError: true,
+      }])
+      return
+    }
+    
+    // 构建 SSH 凭证信息
+    const sshCredentialInfo = `SSH用户名: ${sshUsername}, ${sshPassword ? '密码: ******' : `密钥文件: ${sshKeyFile}`}, 端口: ${sshPort}`
+    
+    // 根据目标类型构建消息
+    let targetMessage = ''
+    if (sshCredentialTarget === 'selected_assets') {
+      // 从资产选择器选择的多资产
+      const selectedAssets = dedupeAssets(assetSelectorAssets.filter(a => assetSelectorSelected.includes(a.id)))
+      const assetValues = selectedAssets.map(a => a.value).join('、')
+      targetMessage = `对 ${assetValues} 执行等保技术测评（10项检查）。${sshCredentialInfo}`
+      await handleMultiAssetScanWithSsh(sshCredentialCommand, selectedAssets, sshCredentialInfo)
+    } else {
+      // 单个目标
+      const commandTexts = {
+        '/baseline': `对 ${sshCredentialTarget} 进行安全基线核查（自动识别操作系统）。${sshCredentialInfo}`,
+        '/tech': `对 ${sshCredentialTarget} 进行等保技术测评（10项检查）。${sshCredentialInfo}`,
+        '/ssh': `对 ${sshCredentialTarget} 进行SSH配置检查。${sshCredentialInfo}`,
+      }
+      targetMessage = commandTexts[sshCredentialCommand] || `对 ${sshCredentialTarget} 执行 ${sshCredentialCommand}`
+      await handleSendToAI(targetMessage)
+    }
+    
+    // 重置 SSH 凭证表单
+    setSshUsername('root')
+    setSshPassword('')
+    setSshKeyFile('')
+    setSshPort(22)
+  }
+
+  const handleMultiAssetScanWithSsh = async (command, selectedAssets, sshCredentialInfo) => {
+    if (!projectId) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '请先选择项目',
+        isError: true,
+      }])
+      return
+    }
+    
+    const assets = dedupeAssets(selectedAssets || [])
+    if (assets.length === 0) return
+    
+    const capability = COMMAND_TO_CAPABILITY[command]
+    const targetDesc = buildMultiAssetActionText(capability, assets.length, assets.length === dedupeAssets(assetSelectorAssets).length)
+    
+    try {
+      const userMessage = {
+        role: 'user',
+        content: `${targetDesc}。${sshCredentialInfo}`,
+        isMultiAsset: true,
+        totalAssets: assets.length,
+      }
+      setMessages(prev => [...prev, userMessage])
+      setInput('')
+      setLoading(true)
+      
+      const scanResponse = await api.post('/chat/', {
+        message: JSON.stringify({
+          type: 'multi_asset_scan',
+          capability: capability,
+          assets: assets.map(a => ({ id: a.id, value: a.value, type: a.asset_type })),
+          ssh_credential: {
+            username: sshUsername,
+            password: sshPassword,
+            key_file: sshKeyFile,
+            port: sshPort,
+          },
+        }),
+        project_id: projectId,
+      })
+      
+      const taskId = scanResponse.data.task_id
+      const aiResponse = scanResponse.data.response
+      
+      const assistantMessage = {
+        role: 'assistant',
+        content: aiResponse || `开始${CAPABILITY_NAMES[capability] || capability}，共 ${assets.length} 个资产`,
+        taskId: taskId,
+        taskStatus: taskId ? 'running' : undefined,
+        isMultiAsset: true,
+        totalAssets: assets.length,
+        assetProgress: {},
+      }
+      setMessages(prev => [...prev, assistantMessage])
+      
+      if (taskId) {
+        connectWebSocket(taskId)
+      }
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `扫描失败：${error.response?.data?.detail || error.message}`,
+        isError: true,
+      }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const connectWebSocket = (taskId) => {
     if (wsRef.current) {
       wsRef.current.close()
@@ -450,6 +866,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     try {
       const ws = new WebSocket(wsUrl)
       wsRef.current = ws
+      startPollingFallback(taskId)
 
       ws.onopen = () => {
         wsConnected = true
@@ -513,6 +930,19 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
               ))
             }
           } else if (msg.type === 'completed') {
+            const hasCompletedPayload = !!(
+              msg.data?.result_description ||
+              (msg.data?.scan_results && Object.keys(msg.data.scan_results).length > 0)
+            )
+            if (!hasCompletedPayload) {
+              setMessages(prev => prev.map(m =>
+                m.taskId === taskId ? { ...m, taskCompleted: true, taskStatus: 'completed' } : m
+              ))
+              startPollingFallback(taskId)
+              return
+            }
+            if (completedTaskIdsRef.current.has(taskId)) return
+            completedTaskIdsRef.current.add(taskId)
             ws.close()
             wsRef.current = null
 
@@ -594,6 +1024,10 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   }
 
   const startPollingFallback = (taskId) => {
+    if (pollRef.current) {
+      clearTimeout(pollRef.current)
+      pollRef.current = null
+    }
     pollTaskResult(taskId)
   }
 
@@ -617,6 +1051,8 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         }
 
         if (data.status === 'completed' || data.status === 'failed') {
+          if (completedTaskIdsRef.current.has(taskId)) return
+          completedTaskIdsRef.current.add(taskId)
           setMessages(prev => prev.map(msg =>
             msg.taskId === taskId ? {
               ...msg,
@@ -668,6 +1104,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
 
   const handleInputChange = (e) => {
     const value = e.target.value
+    setHistoryIndex(null)
     setInput(value)
     
     if (value.startsWith('/')) {
@@ -681,8 +1118,8 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
 
   const handleClearHistory = async () => {
     try {
-      if (currentProjectId) {
-        await api.post(`/chat/clear/${currentProjectId}`)
+      if (projectId) {
+        await api.post(`/chat/clear/${projectId}`)
       } else {
         await api.post('/chat/clear')
       }
@@ -700,7 +1137,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   }
 
   const handleListAssets = async () => {
-    if (!currentProjectId) {
+    if (!projectId) {
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: '请先选择项目。',
@@ -708,7 +1145,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       return
     }
     try {
-      const response = await api.get(`/projects/${currentProjectId}/assets/`)
+      const response = await api.get(`/projects/${projectId}/assets/`)
       const assets = response.data
       if (assets.length === 0) {
         setMessages(prev => [...prev, {
@@ -734,9 +1171,9 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   }
 
   const fetchAssessment = async () => {
-    if (!currentProjectId) return null
+    if (!projectId) return null
     try {
-      const response = await api.get(`/assessments/projects/${currentProjectId}`)
+      const response = await api.get(`/assessments/projects/${projectId}`)
       if (response.data && response.data.length > 0) {
         const latestAssessment = response.data[0]
         const phasesResponse = await api.get(`/assessments/${latestAssessment.id}/phases`)
@@ -750,7 +1187,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   }
 
   const handleAssessmentAction = async () => {
-    if (!currentProjectId) {
+    if (!projectId) {
       message.warning('请先选择项目')
       return
     }
@@ -764,7 +1201,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         setAssessmentPhases(result.phases)
         setAssessmentDrawerVisible(true)
       } else {
-        const projectRes = await api.get(`/projects/${currentProjectId}`)
+        const projectRes = await api.get(`/projects/${projectId}`)
         const project = projectRes.data
         const complianceLevel = project.compliance_level
         const targetLevel = complianceLevel === '二级' ? 2 : 3
@@ -778,7 +1215,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
           return
         }
         
-        const createRes = await api.post(`/assessments/projects/${currentProjectId}`, {
+        const createRes = await api.post(`/assessments/projects/${projectId}`, {
           template_id: template.id,
           name: `${projectName || project.name} - 等保${complianceLevel}测评`,
         })
@@ -802,12 +1239,27 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   const handleShowHelp = () => {
     const helpText = `可用命令：
 
-/scan [目标] - 端口扫描（默认本机）
+/scan [目标] - 高危端口扫描
+/scan [目标] [30-3000] - 定制端口扫描
+/scan-full [目标] - 全端口扫描
+/masscan [目标] - 高速端口扫描
 /ssl [目标] - SSL/TLS 检测
 /vuln [目标] - 漏洞扫描
+/baseline [目标] - 安全基线核查（自动识别操作系统）
+/web [URL] - Web安全扫描
+/dirbust [URL] - Web目录发现（目录爆破+模糊测试）
+/db [目标] - 数据库安全检测（Redis/MySQL/MongoDB/Memcached/Oracle）
+/snmp [目标] - 网络设备检测（SNMP信息+团体字检测）
+/windows [目标] - Windows/AD/SMB 组合检测（用户/SID/SMB共享枚举）
+/password [目标] - 弱口令检测
+/all [目标] - 全量合规扫描
+/tech [目标] - 等保技术测评
+/ping [目标] - Ping 检测
 /asset [值] - 添加资产
 /assets - 列出当前项目资产
 /project - 列出所有项目
+/assessment - 创建/查看等保测评
+/diagnose - MCP 连通性测试
 /clear - 清理对话历史
 /help - 显示此帮助`
     setMessages(prev => [...prev, {
@@ -853,8 +1305,26 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
         setShowCommandPalette(false)
         setInput('')
       }
-    } else if (e.key === 'Enter' && !e.shiftKey) {
+    } else if (e.key === 'ArrowUp') {
+      if (inputHistory.length > 0) {
+        e.preventDefault()
+        const nextIndex = historyIndex === null ? inputHistory.length - 1 : Math.max(historyIndex - 1, 0)
+        setHistoryIndex(nextIndex)
+        setInput(inputHistory[nextIndex])
+      }
+    } else if (e.key === 'ArrowDown' && historyIndex !== null) {
       e.preventDefault()
+      const nextIndex = historyIndex + 1
+      if (nextIndex >= inputHistory.length) {
+        setHistoryIndex(null)
+        setInput('')
+      } else {
+        setHistoryIndex(nextIndex)
+        setInput(inputHistory[nextIndex])
+      }
+    } else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent?.isComposing) {
+      e.preventDefault()
+      e.stopPropagation()
       handleSend()
     }
   }
@@ -900,59 +1370,386 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   const renderResultMessage = (msg) => {
     const scanResults = msg.scanResults || {}
     const openPorts = scanResults.open_ports || []
+    const filteredPorts = scanResults.filtered_ports || []
     const vulnerabilities = scanResults.vulnerabilities || []
     const sslIssues = scanResults.ssl_issues || []
+    const weakPasswords = scanResults.weak_passwords || []
+    const weakPasswordStats = scanResults.weak_password_stats || {}
+    const weakPasswordIncompleteTargets = Object.entries(weakPasswordStats)
+      .filter(([, stats]) => stats.scan_completed === false)
+    const webVulnerabilities = scanResults.web_vulnerabilities || []
+    const webDiscoveries = scanResults.web_discoveries || []
+    const databaseIssues = scanResults.database_issues || []
+    const databaseResults = scanResults.database_results || {}
+    const snmpResults = scanResults.snmp_results || {}
+    const windowsResults = scanResults.windows_results || {}
+    const compositeResults = scanResults.composite_results || []
+    const baselineResults = scanResults.baseline_results || {}
+    const discoveredAssets = scanResults.discovered_assets || {}
 
-    return (
-      <div className="scan-animation-fade-in">
-        <div className="message-bubble assistant" style={{ whiteSpace: 'pre-wrap' }}>
-          {msg.content}
-        </div>
-        
-        {/* 统计摘要 */}
-        {(openPorts.length > 0 || vulnerabilities.length > 0 || sslIssues.length > 0) && (
-          <div className="result-summary">
-            {openPorts.length > 0 && (
-              <div className="summary-item">
-                <div className="summary-icon" style={{ background: 'rgba(59, 130, 246, 0.2)' }}>
-                  <MonitorOutlined style={{ color: '#3b82f6' }} />
-                </div>
-                <div className="summary-content">
-                  <div className="summary-title">开放端口</div>
-                  <div className="summary-value">{openPorts.length} 个</div>
-                </div>
-              </div>
-            )}
-            {vulnerabilities.length > 0 && (
-              <div className="summary-item">
-                <div className="summary-icon" style={{ background: 'rgba(239, 68, 68, 0.2)' }}>
-                  <CloseCircleFilled style={{ color: '#ef4444' }} />
-                </div>
-                <div className="summary-content">
-                  <div className="summary-title">漏洞</div>
-                  <div className="summary-value">{vulnerabilities.length} 个</div>
-                </div>
-              </div>
-            )}
-            {sslIssues.length > 0 && (
-              <div className="summary-item">
-                <div className="summary-icon" style={{ background: 'rgba(245, 158, 11, 0.2)' }}>
-                  <SafetyCertificateOutlined style={{ color: '#f59e0b' }} />
-                </div>
-                <div className="summary-content">
-                  <div className="summary-title">SSL 问题</div>
-                  <div className="summary-value">{sslIssues.length} 个</div>
-                </div>
-              </div>
-            )}
+    // 从 asset_results 提取工具类型和状态
+    const assetResults = scanResults.asset_results || {}
+    const firstAsset = Object.values(assetResults)[0]
+    const tool = firstAsset?.capability || 'scan_ports'
+    const status = firstAsset?.status === 'failed' ? 'failed' :
+                   firstAsset?.display_status || 'success'
+    const error = firstAsset?.error
+    const copyText = [
+      msg.content,
+      firstAsset ? `资产/IP: ${Object.keys(assetResults)[0] || firstAsset.result?.target || '-'}` : '',
+      `检测工具: ${CAPABILITY_NAMES[tool] || tool}`,
+      error ? `错误信息: ${error}` : '',
+      scanResults ? `结构化结果:\n${safeJson(scanResults)}` : '',
+    ].filter(Boolean).join('\n\n')
+
+    // 构建摘要内容
+    const summary = (
+      <div className="result-summary">
+        {openPorts.length > 0 && (
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(59, 130, 246, 0.2)' }}>
+              <MonitorOutlined style={{ color: '#3b82f6' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">明确开放端口</div>
+              <div className="summary-value">{openPorts.length} 个</div>
+            </div>
           </div>
         )}
-        
+        {filteredPorts.length > 0 && (
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(245, 158, 11, 0.2)' }}>
+              <ExclamationCircleFilled style={{ color: '#f59e0b' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">被过滤端口</div>
+              <div className="summary-value">{filteredPorts.length} 个</div>
+            </div>
+          </div>
+        )}
+        {vulnerabilities.length > 0 && (
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(239, 68, 68, 0.2)' }}>
+              <CloseCircleFilled style={{ color: '#ef4444' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">漏洞</div>
+              <div className="summary-value">{vulnerabilities.length} 个</div>
+            </div>
+          </div>
+        )}
+        {weakPasswords.length > 0 && (
+          <div className="summary-item critical">
+            <div className="summary-icon" style={{ background: 'rgba(239, 68, 68, 0.3)' }}>
+              <KeyOutlined style={{ color: '#ef4444' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">弱口令</div>
+              <div className="summary-value" style={{ color: '#ef4444' }}>{weakPasswords.length} 个</div>
+            </div>
+          </div>
+        )}
+        {sslIssues.length > 0 && (
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(245, 158, 11, 0.2)' }}>
+              <SafetyCertificateOutlined style={{ color: '#f59e0b' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">SSL 问题</div>
+              <div className="summary-value">{sslIssues.length} 个</div>
+            </div>
+          </div>
+        )}
+        {webVulnerabilities.length > 0 && (
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(168, 85, 247, 0.2)' }}>
+              <GlobalOutlined style={{ color: '#a855f7' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">Web 漏洞</div>
+              <div className="summary-value">{webVulnerabilities.length} 个</div>
+            </div>
+          </div>
+        )}
+        {webDiscoveries.length > 0 && (
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(14, 165, 233, 0.2)' }}>
+              <FolderOpenOutlined style={{ color: '#0ea5e9' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">Web 发现</div>
+              <div className="summary-value">{webDiscoveries.length} 个</div>
+            </div>
+          </div>
+        )}
+        {databaseIssues.length > 0 && (
+          <div className="summary-item critical">
+            <div className="summary-icon" style={{ background: 'rgba(239, 68, 68, 0.2)' }}>
+              <DatabaseOutlined style={{ color: '#ef4444' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">数据库风险</div>
+              <div className="summary-value">{databaseIssues.length} 项</div>
+            </div>
+          </div>
+        )}
+        {Object.keys(snmpResults).length > 0 && (
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(217, 70, 239, 0.2)' }}>
+              <ClusterOutlined style={{ color: '#d946ef' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">SNMP</div>
+              <div className="summary-value">{Object.keys(snmpResults).length} 个目标</div>
+            </div>
+          </div>
+        )}
+        {Object.keys(windowsResults).length > 0 && (
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(100, 116, 139, 0.2)' }}>
+              <CloudServerOutlined style={{ color: '#64748b' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">Windows/SMB</div>
+              <div className="summary-value">{Object.keys(windowsResults).length} 个目标</div>
+            </div>
+          </div>
+        )}
+        {compositeResults.length > 0 && (
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(99, 102, 241, 0.2)' }}>
+              <RadarChartOutlined style={{ color: '#6366f1' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">组合扫描</div>
+              <div className="summary-value">{compositeResults.length} 组</div>
+            </div>
+          </div>
+        )}
+        {Object.keys(discoveredAssets).length > 0 && (
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(16, 185, 129, 0.2)' }}>
+              <RadarChartOutlined style={{ color: '#10b981' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">已发现资产</div>
+              <div className="summary-value">{Object.keys(discoveredAssets).length} 个</div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+
+    // 构建详情内容
+    const details = (
+      <>
+        {/* 错误信息 */}
+        {error && (
+          <div className="result-details-section error-section">
+            <div className="section-title danger">
+              <ExclamationCircleFilled style={{ marginRight: 8 }} />
+              错误信息
+            </div>
+            <div className="error-message">{error}</div>
+          </div>
+        )}
+
+        {/* 弱口令详情 - 高亮显示 */}
+        {weakPasswords.length > 0 && (
+          <div className="result-details-section weak-password-section">
+            <div className="section-title danger">
+              ⚠ 发现 {weakPasswords.length} 个弱口令！
+            </div>
+            {Object.entries(weakPasswordStats).map(([target, stats]) => {
+              const targetPasswords = weakPasswords.filter(p => p.target === target)
+              return (
+                <div key={target} className="weak-password-target">
+                  <div className="target-header">
+                    <span className="target-name">{target}</span>
+                    <span className="target-stats">
+                      测试 {stats.tested_users} 用户 × {stats.tested_passwords} 密码 = {stats.total_combinations} 组合
+                      {targetPasswords.length > 0 && (
+                        <Tag color="red" style={{ marginLeft: 8 }}>
+                          ⚠ {targetPasswords.length} 个弱口令
+                        </Tag>
+                      )}
+                    </span>
+                  </div>
+                  {targetPasswords.length > 0 && (
+                    <div className="password-list">
+                      {targetPasswords.map((fp, idx) => (
+                        <div key={idx} className="password-item danger">
+                          <Tag color="red">{fp.username || '?'}</Tag>
+                          <span className="password-text">{fp.password || '?'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {targetPasswords.length === 0 && (
+                    <div className={`password-list ${stats.scan_completed === false ? 'warning' : 'success'}`}>
+                      <Tag color={stats.scan_completed === false ? 'orange' : 'green'}>{stats.scan_completed === false ? '未完成' : '✓ 安全'}</Tag>
+                      <span>{stats.scan_completed === false ? (stats.tool_error || '无法判定是否存在弱口令') : '未发现弱口令'}</span>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* 弱口令全部安全的提示 */}
+        {weakPasswords.length === 0 && Object.keys(weakPasswordStats).length > 0 && (
+          <div className={`result-details-section ${weakPasswordIncompleteTargets.length ? 'warning-section' : 'success-section'}`}>
+            <div className={`section-title ${weakPasswordIncompleteTargets.length ? 'warning' : 'success'}`}>
+              {weakPasswordIncompleteTargets.length ? '⚠ 弱口令检测未完成，无法判定' : '✓ 弱口令检测完成，未发现弱口令'}
+            </div>
+            {Object.entries(weakPasswordStats).map(([target, stats]) => (
+              <div key={target} className="baseline-target-item">
+                <span>{target}</span>
+                <span className="text-muted">
+                  {stats.scan_completed === false
+                    ? (stats.tool_error || '目标服务不可达或检测未完成')
+                    : `测试 ${stats.tested_users} 用户 × ${stats.tested_passwords} 密码 = ${stats.total_combinations} 组合`}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Web 漏洞详情 */}
+        {webVulnerabilities.length > 0 && (
+          <div className="result-details-section">
+            <div className="section-title">Web 漏洞列表</div>
+            {webVulnerabilities.map((vuln, idx) => (
+              <div key={idx} className="vulnerability-item">
+                <Tag color="red">{vuln.severity || '未知'}</Tag>
+                <span className="vuln-target">[{vuln.target}]</span>
+                <span>{vuln.name || vuln.id || 'Web 漏洞'}</span>
+                {vuln.tool && <Tag color="purple" style={{ marginLeft: 4 }}>{vuln.tool}</Tag>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {webDiscoveries.length > 0 && (
+          <div className="result-details-section">
+            <div className="section-title">Web 路径/端点发现</div>
+            {webDiscoveries.slice(0, 50).map((item, idx) => (
+              <div key={idx} className="vulnerability-item">
+                <Tag color="blue">{item.status || item.status_code || '发现'}</Tag>
+                <span className="vuln-target">[{item.target}]</span>
+                <span>{item.url || item.path || item.input || '未知端点'}</span>
+                {item.tool && <Tag color="purple" style={{ marginLeft: 4 }}>{item.tool}</Tag>}
+              </div>
+            ))}
+            {webDiscoveries.length > 50 && <div className="text-muted">还有 {webDiscoveries.length - 50} 条未展开</div>}
+          </div>
+        )}
+
+        {databaseIssues.length > 0 && (
+          <div className="result-details-section">
+            <div className="section-title danger">数据库风险项</div>
+            {databaseIssues.map((issue, idx) => (
+              <div key={idx} className="vulnerability-item">
+                <Tag color="red">{issue.tool}</Tag>
+                <span className="vuln-target">[{issue.target}]</span>
+                <span>
+                  {issue.unauthorized ? '存在未授权访问' : issue.empty_password ? '存在空口令风险' : issue.version_info ? `暴露版本信息：${issue.version_info}` : '需关注'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {Object.keys(databaseResults).length > 0 && databaseIssues.length === 0 && (
+          <div className="result-details-section success-section">
+            <div className="section-title success">数据库检测完成，未发现明显风险</div>
+            {Object.entries(databaseResults).map(([target, tools]) => (
+              <div key={target} className="baseline-target-item">
+                <span>{target}</span>
+                <span className="text-muted">{Object.keys(tools).join(', ')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {Object.keys(snmpResults).length > 0 && (
+          <div className="result-details-section">
+            <div className="section-title">SNMP 检测结果</div>
+            {Object.entries(snmpResults).map(([target, tools]) => (
+              <div key={target} className="baseline-target-item">
+                <span>{target}</span>
+                <span className="text-muted">{Object.keys(tools).join(', ')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {Object.keys(windowsResults).length > 0 && (
+          <div className="result-details-section">
+            <div className="section-title">Windows/SMB 检测结果</div>
+            {Object.entries(windowsResults).map(([target, tools]) => (
+              <div key={target} className="baseline-target-item">
+                <span>{target}</span>
+                <span className="text-muted">{Object.keys(tools).join(', ')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {compositeResults.length > 0 && (
+          <div className="result-details-section">
+            <div className="section-title">组合扫描子任务</div>
+            {(() => {
+              const describeSubResult = (sub) => {
+                const data = sub.data || {}
+                if (data.scan_completed === false || data.success === false) {
+                  return `未完成/无响应${data.tool_error ? `：${data.tool_error}` : ''}`
+                }
+                if (['redis_check', 'mongodb_check', 'memcached_check'].includes(sub.capability)) {
+                  return data.unauthorized ? '存在未授权访问' : data.reachable === false ? `不可达/无响应，端口 ${data.port || '-'}` : `未发现未授权访问，端口 ${data.port || '-'}`
+                }
+                if (sub.capability === 'mysql_check') {
+                  return data.empty_password ? '存在空口令' : data.reachable === false ? `不可达/无响应，端口 ${data.port || '-'}` : `未发现空口令，端口 ${data.port || '-'}`
+                }
+                if (sub.capability === 'oracle_check') {
+                  const hasVersion = data.version_info && Object.keys(data.version_info).length > 0
+                  return hasVersion ? `存在版本信息，端口 ${data.port || '-'}` : data.reachable === false ? `不可达/无响应，端口 ${data.port || '-'}` : `未发现版本信息泄露，端口 ${data.port || '-'}`
+                }
+                if (sub.capability === 'nikto_scan') return `Web 问题 ${data.total_findings ?? data.findings?.length ?? 0} 个`
+                if (sub.capability === 'scan_ports') return `明确开放 ${data.open_ports?.length || 0} 个，被过滤/未确认 ${data.filtered_count || data.filtered_ports?.length || 0} 个`
+                if (sub.capability === 'scan_ssl') return `SSL 问题 ${data.issues?.length || 0} 个`
+                if (sub.capability === 'scan_vulnerabilities') return `漏洞 ${data.total_findings ?? data.findings?.length ?? 0} 个`
+                if (sub.capability === 'scan_weak_passwords') return `弱口令 ${data.found?.length || 0} 个`
+                if (sub.capability === 'snmp_walk') return `SNMP 返回 ${data.total_results || 0} 条`
+                return sub.error || '已完成'
+              }
+              return compositeResults.map((group, groupIdx) => (
+                <div key={groupIdx} className="weak-password-target">
+                  <div className="target-header">
+                    <span className="target-name">{group.target}</span>
+                    <span className="target-stats">
+                      成功 {group.summary?.success || 0}，失败 {group.summary?.failed || 0}，跳过 {group.summary?.skipped || 0}
+                    </span>
+                  </div>
+                  {(group.sub_results || []).map((sub, idx) => (
+                    <div key={idx} className="baseline-target-item">
+                      <span>{sub.label || sub.capability}</span>
+                      <Tag color={sub.status === 'success' ? 'green' : sub.status === 'skipped' ? 'gold' : 'red'}>{sub.status}</Tag>
+                      <span className="text-muted">{describeSubResult(sub)}</span>
+                    </div>
+                  ))}
+                </div>
+              ))
+            })()}
+          </div>
+        )}
+
         {/* 端口详情表格 */}
         {openPorts.length > 0 && (
           <div className="result-details-table">
             <div className="table-header">
-              <span>端口详情</span>
+              <span>明确开放端口详情</span>
             </div>
             <Table
               dataSource={openPorts.map((port, idx) => ({ ...port, key: idx }))}
@@ -963,7 +1760,26 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
             />
           </div>
         )}
-        
+
+        {filteredPorts.length > 0 && (
+          <div className="result-details-table">
+            <div className="table-header">
+              <span>被过滤端口详情（未确认开放）</span>
+            </div>
+            <div className="info-box warning" style={{ marginBottom: 12 }}>
+              <InfoCircleFilled style={{ color: '#f59e0b', marginRight: 8 }} />
+              <span>这些端口状态是 filtered/no-response，不能作为 SSH 登录、弱口令或基线检查的开放依据。</span>
+            </div>
+            <Table
+              dataSource={filteredPorts.map((port, idx) => ({ ...port, key: idx }))}
+              columns={portColumns}
+              pagination={filteredPorts.length > 10 ? { defaultPageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] } : false}
+              size="small"
+              className="port-table"
+            />
+          </div>
+        )}
+
         {/* 漏洞详情 */}
         {vulnerabilities.length > 0 && (
           <div className="result-details-section">
@@ -976,7 +1792,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
             ))}
           </div>
         )}
-        
+
         {/* SSL 问题 */}
         {sslIssues.length > 0 && (
           <div className="result-details-section">
@@ -989,6 +1805,22 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
             ))}
           </div>
         )}
+      </>
+    )
+
+    return (
+      <div className="scan-animation-fade-in">
+        <div className="message-bubble assistant" style={{ whiteSpace: 'pre-wrap' }}>
+          {msg.content}
+        </div>
+
+        <ToolResultCard
+          tool={tool}
+          status={status}
+          summary={summary}
+          details={details}
+          copyText={copyText}
+        />
       </div>
     )
   }
@@ -1149,7 +1981,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
 
   const loadArchives = async () => {
     try {
-      const params = currentProjectId ? { project_id: currentProjectId } : {}
+      const params = projectId ? { project_id: projectId } : {}
       const response = await api.get('/chat/archives', { params })
       setArchives(response.data.archives || [])
     } catch (error) {
@@ -1416,6 +2248,688 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
     const successCount = Object.values(assetResults).filter(r => r.display_status === 'success').length
     const warningCount = Object.values(assetResults).filter(r => r.display_status === 'warning').length
     const failedCount = Object.values(assetResults).filter(r => r.display_status === 'failed').length
+    const capabilitySet = Array.from(new Set(Object.values(assetResults).map(r => r.capability).filter(Boolean)))
+    const mainCapability = capabilitySet.length === 1 ? capabilitySet[0] : 'full_compliance_scan'
+    const mainTool = mainCapability
+    const overallStatus = failedCount > 0 ? 'failed' : warningCount > 0 ? 'warning' : 'success'
+    const statusTextMap = { success: '成功', warning: '警告', failed: '失败', skipped: '跳过' }
+
+    const assetStatusConfig = {
+      success: { color: 'success', text: '成功', icon: <CheckCircleFilled /> },
+      warning: { color: 'warning', text: '警告', icon: <ExclamationCircleFilled /> },
+      failed: { color: 'error', text: '失败', icon: <CloseCircleFilled /> },
+    }
+
+    const metricText = (assetData) => {
+      const result = assetData.result || {}
+      const capability = assetData.capability
+      if (capability === 'scan_ports' || capability === 'masscan_scan') {
+        return `明确开放 ${result.open_ports?.length || 0}，被过滤/未确认 ${result.filtered_count || result.filtered_ports?.length || 0}`
+      }
+      if (capability === 'scan_ssl') {
+        return result.scan_completed === false || result.reachable === false
+          ? 'SSL/TLS 未完成'
+          : `SSL 问题 ${result.issues?.length || 0}，漏洞 ${result.vulnerabilities?.length || 0}`
+      }
+      if (capability === 'scan_vulnerabilities') return `漏洞 ${result.total_findings ?? result.findings?.length ?? 0}`
+      if (capability === 'scan_weak_passwords') return `弱口令 ${result.found?.length || 0}`
+      if (capability === 'database_security_scan') {
+        const summary = result.summary || {}
+        return `子项成功 ${summary.success || 0}/${summary.total || result.sub_results?.length || 0}`
+      }
+      if (result.sub_results) {
+        const summary = result.summary || {}
+        return `子项成功 ${summary.success || 0}，失败 ${summary.failed || 0}，跳过 ${summary.skipped || 0}`
+      }
+      if (capability === 'baseline_check' || capability === 'linux_baseline') {
+        return result.skipped ? (result.connection_error ? '无法连接' : '已跳过') : `未通过 ${result.summary?.non_compliant || 0} 项`
+      }
+      if (capability === 'nikto_scan') return `Web 问题 ${result.total_findings ?? result.findings?.length ?? 0}`
+      return assetData.error || '已完成'
+    }
+
+    const buildMultiAssetCopyText = () => {
+      const lines = []
+      if (msg.content) lines.push(msg.content)
+      lines.push(`总资产数: ${totalAssets}`)
+      lines.push(`成功: ${successCount}`)
+      if (warningCount) lines.push(`警告/未完成: ${warningCount}`)
+      if (failedCount) lines.push(`失败: ${failedCount}`)
+      lines.push(`检测工具: ${capabilitySet.map(c => CAPABILITY_NAMES[c] || c).join('、') || '安全检测'}`)
+      lines.push('')
+
+      Object.entries(assetResults).forEach(([target, assetData], index) => {
+        const displayStatus = assetData.display_status || (assetData.status === 'success' ? 'success' : 'failed')
+        const capability = assetData.capability
+        lines.push(`资产 ${index + 1}: ${target}`)
+        lines.push(`状态: ${statusTextMap[displayStatus] || displayStatus}`)
+        lines.push(`工具: ${CAPABILITY_NAMES[capability] || capability}`)
+        lines.push(`摘要: ${metricText(assetData)}`)
+        if (assetData.error) lines.push(`错误: ${assetData.error}`)
+        if (assetData.error_detail) lines.push(`错误详情: ${safeJson(assetData.error_detail)}`)
+        if (assetData.result) lines.push(`结果:\n${safeJson(assetData.result)}`)
+        lines.push('')
+      })
+
+      return lines.join('\n').trim()
+    }
+
+    // Helper: Build summary for a single asset
+    const buildAssetSummary = (assetData, capability) => {
+      const result = assetData.result || {}
+      const openPorts = assetData.result?.open_ports || []
+      const filteredPorts = assetData.result?.filtered_ports || []
+      const vulnerabilities = assetData.result?.vulnerabilities || []
+      const findings = assetData.result?.findings || []
+      const issues = assetData.result?.issues || []
+      const weakPasswords = assetData.result?.weak_passwords || []
+      const rawWeakPasswords = assetData.result?.found || []
+      const weakPasswordIncomplete = capability === 'scan_weak_passwords' && (
+        assetData.result?.scan_completed === false ||
+        assetData.result?.reachable === false ||
+        assetData.display_status === 'warning'
+      )
+      const weakPasswordStats = assetData.result?.weak_password_stats || {}
+      const webVulnerabilities = assetData.result?.web_vulnerabilities || []
+      const webDiscoveries = assetData.result?.web_discoveries || []
+      const sslIssues = assetData.result?.ssl_issues || []
+      const compositeResults = assetData.result?.composite_results || (assetData.result?.sub_results ? [{
+        target: assetData.result?.target,
+        summary: assetData.result?.summary,
+        sub_results: assetData.result?.sub_results,
+      }] : [])
+      const discoveredAssets = assetData.result?.discovered_assets || {}
+      
+      const items = []
+      if (openPorts.length > 0) items.push({ label: '明确开放端口', value: `${openPorts.length} 个`, color: '#3b82f6', icon: <MonitorOutlined /> })
+      if (filteredPorts.length > 0) items.push({ label: '被过滤端口', value: `${filteredPorts.length} 个`, color: '#f59e0b', icon: <ExclamationCircleFilled /> })
+      if (vulnerabilities.length > 0) items.push({ label: '漏洞', value: `${vulnerabilities.length} 个`, color: '#ef4444', icon: <CloseCircleFilled /> })
+      if (findings.length > 0) items.push({ label: capability === 'nikto_scan' ? 'Web 问题' : '发现项', value: `${findings.length} 个`, color: '#ef4444', icon: <BugOutlined /> })
+      if (weakPasswords.length > 0) items.push({ label: '弱口令', value: `${weakPasswords.length} 个`, color: '#ef4444', icon: <KeyOutlined /> })
+      if (rawWeakPasswords.length > 0) items.push({ label: '弱口令', value: `${rawWeakPasswords.length} 个`, color: '#ef4444', icon: <KeyOutlined /> })
+      if (sslIssues.length > 0) items.push({ label: 'SSL 问题', value: `${sslIssues.length} 个`, color: '#f59e0b', icon: <SafetyCertificateOutlined /> })
+      if (issues.length > 0) items.push({ label: '问题', value: `${issues.length} 个`, color: '#f59e0b', icon: <SafetyCertificateOutlined /> })
+      if (webVulnerabilities.length > 0) items.push({ label: 'Web 漏洞', value: `${webVulnerabilities.length} 个`, color: '#a855f7', icon: <GlobalOutlined /> })
+      if (webDiscoveries.length > 0) items.push({ label: 'Web 发现', value: `${webDiscoveries.length} 个`, color: '#0ea5e9', icon: <FolderOpenOutlined /> })
+      if (compositeResults.length > 0) {
+        const summary = compositeResults[0]?.summary || {}
+        items.push({ label: '子项结果', value: `${summary.success || 0}/${summary.total || compositeResults[0]?.sub_results?.length || 0}`, color: '#6366f1', icon: <RadarChartOutlined /> })
+      }
+      if (Object.keys(discoveredAssets).length > 0) items.push({ label: '已发现资产', value: `${Object.keys(discoveredAssets).length} 个`, color: '#10b981', icon: <RadarChartOutlined /> })
+      if (capability === 'nikto_scan' && findings.length === 0) items.push({ label: 'Web 问题', value: '0 个', color: '#10b981', icon: <GlobalOutlined /> })
+      if (capability === 'sqlmap_scan' && !result.vulnerable) items.push({ label: 'SQL 注入', value: '未发现', color: '#10b981', icon: <SearchOutlined /> })
+      if (['redis_check', 'mongodb_check', 'memcached_check'].includes(capability)) {
+        items.push({ label: '未授权访问', value: result.unauthorized ? '存在' : '未发现', color: result.unauthorized ? '#ef4444' : '#10b981', icon: <DatabaseOutlined /> })
+      }
+      if (capability === 'mysql_check') {
+        items.push({ label: '空口令', value: result.empty_password ? '存在' : '未发现', color: result.empty_password ? '#ef4444' : '#10b981', icon: <DatabaseOutlined /> })
+      }
+      if (capability === 'oracle_check') {
+        const hasVersion = result.version_info && Object.keys(result.version_info).length > 0
+        items.push({ label: '版本信息泄露', value: hasVersion ? '存在' : '未发现', color: hasVersion ? '#f59e0b' : '#10b981', icon: <DatabaseOutlined /> })
+      }
+      if (capability === 'scan_weak_passwords' && rawWeakPasswords.length === 0) {
+        items.push({
+          label: '弱口令',
+          value: weakPasswordIncomplete ? '无法判定' : '未发现',
+          color: weakPasswordIncomplete ? '#f59e0b' : '#10b981',
+          icon: <KeyOutlined />,
+        })
+      }
+      if (capability === 'scan_vulnerabilities' && findings.length === 0) items.push({ label: '漏洞', value: '0 个', color: '#10b981', icon: <BugOutlined /> })
+      if (capability === 'scan_ssl') {
+        const sslDone = result.scan_completed !== false && result.reachable !== false
+        items.push({ label: 'SSL 状态', value: sslDone ? '已完成' : '未完成', color: sslDone ? '#10b981' : '#f59e0b', icon: <SafetyCertificateOutlined /> })
+        if (result.tls_version) items.push({ label: 'TLS 版本', value: result.tls_version, color: '#3b82f6', icon: <LockOutlined /> })
+        if (result.certificate) items.push({ label: '证书', value: '已获取', color: '#10b981', icon: <SafetyCertificateOutlined /> })
+      }
+      if (capability === 'fping_scan') items.push({ label: '存活主机', value: `${result.alive_count || 0}/${result.total_scanned || 0}`, color: '#10b981', icon: <WifiOutlined /> })
+      if (capability === 'snmp_walk') items.push({ label: 'SNMP 返回', value: `${result.total_results || 0} 条`, color: result.success ? '#10b981' : '#f59e0b', icon: <ClusterOutlined /> })
+      if (['baseline_check', 'linux_baseline'].includes(capability)) {
+        const summary = result.summary || {}
+        items.push({ label: '操作系统', value: result.os_type || '未知', color: '#3b82f6', icon: <MonitorOutlined /> })
+        if (result.skipped) {
+          items.push({ label: '核查状态', value: result.connection_error ? '无法连接' : '已跳过', color: '#f59e0b', icon: <ExclamationCircleFilled /> })
+        } else {
+          items.push({ label: '未通过', value: `${summary.non_compliant || 0} 项`, color: summary.non_compliant ? '#ef4444' : '#10b981', icon: <SafetyCertificateOutlined /> })
+        }
+      }
+      
+      if (items.length === 0) {
+        return (
+          <div className="result-summary">
+            <div className="summary-item">
+              <div className="summary-icon" style={{ background: 'rgba(16, 185, 129, 0.2)' }}>
+                <CheckCircleFilled style={{ color: '#10b981' }} />
+              </div>
+              <div className="summary-content">
+                <div className="summary-title">执行状态</div>
+                <div className="summary-value">完成</div>
+              </div>
+            </div>
+          </div>
+        )
+      }
+      
+      return (
+        <div className="result-summary">
+          {items.map((item, idx) => (
+            <div key={idx} className="summary-item">
+              <div className="summary-icon" style={{ background: `rgba(${item.color.slice(1)}, 0.2)` }}>
+                <span style={{ color: item.color }}>{item.icon}</span>
+              </div>
+              <div className="summary-content">
+                <div className="summary-title">{item.label}</div>
+                <div className="summary-value" style={{ color: item.color }}>{item.value}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    // Helper: Build details for a single asset
+    const buildAssetDetails = (assetData, capability) => {
+      const result = assetData.result || {}
+      const openPorts = assetData.result?.open_ports || []
+      const filteredPorts = assetData.result?.filtered_ports || []
+      const vulnerabilities = assetData.result?.vulnerabilities || []
+      const findings = assetData.result?.findings || []
+      const issues = assetData.result?.issues || []
+      const weakPasswords = assetData.result?.weak_passwords || []
+      const rawWeakPasswords = assetData.result?.found || []
+      const weakPasswordStats = assetData.result?.weak_password_stats || {}
+      const weakPasswordIncomplete = capability === 'scan_weak_passwords' && (
+        assetData.result?.scan_completed === false ||
+        assetData.result?.reachable === false ||
+        assetData.display_status === 'warning'
+      )
+      const webVulnerabilities = assetData.result?.web_vulnerabilities || []
+      const webDiscoveries = assetData.result?.web_discoveries || []
+      const compositeResults = assetData.result?.composite_results || (assetData.result?.sub_results ? [{
+        target: assetData.result?.target,
+        summary: assetData.result?.summary,
+        sub_results: assetData.result?.sub_results,
+      }] : [])
+      const errorMsg = assetData.error
+      const errorDetail = assetData.error_detail || result.error_detail
+      
+      const sections = []
+      
+      // Error section
+      if (errorMsg) {
+        sections.push(
+          <div key="error" className="result-details-section error-section">
+            <div className="section-title danger">
+              <ExclamationCircleFilled style={{ marginRight: 8 }} />
+              错误信息
+            </div>
+            {errorDetail ? (
+              <>
+                <div className="baseline-target-item">
+                  <span>错误类型</span>
+                  <Tag color="red">{errorDetail.error_type || 'tool_execution_failed'}</Tag>
+                </div>
+                <div className="baseline-target-item">
+                  <span>具体原因</span>
+                  <span className="text-muted">{errorDetail.error_reason || errorMsg}</span>
+                </div>
+                <div className="baseline-target-item">
+                  <span>处理建议</span>
+                  <span className="text-muted">{errorDetail.remediation || '检查目标、网络和工具诊断后重试'}</span>
+                </div>
+                <div className="error-message">{errorDetail.raw_error || errorMsg}</div>
+              </>
+            ) : (
+              <div className="error-message">{errorMsg}</div>
+            )}
+          </div>
+        )
+      }
+      
+      // Weak passwords
+      if (weakPasswords.length > 0) {
+        sections.push(
+          <div key="weak-passwords" className="result-details-section weak-password-section">
+            <div className="section-title danger">
+              ⚠ 发现 {weakPasswords.length} 个弱口令！
+            </div>
+            {Object.entries(weakPasswordStats).map(([target, stats]) => {
+              const targetPasswords = weakPasswords.filter(p => p.target === target)
+              return (
+                <div key={target} className="weak-password-target">
+                  <div className="target-header">
+                    <span className="target-name">{target}</span>
+                    <span className="target-stats">
+                      测试 {stats.tested_users} 用户 × {stats.tested_passwords} 密码 = {stats.total_combinations} 组合
+                      {targetPasswords.length > 0 && (
+                        <Tag color="red" style={{ marginLeft: 8 }}>
+                          ⚠ {targetPasswords.length} 个弱口令
+                        </Tag>
+                      )}
+                    </span>
+                  </div>
+                  {targetPasswords.length > 0 && (
+                    <div className="password-list">
+                      {targetPasswords.map((fp, idx) => (
+                        <div key={idx} className="password-item danger">
+                          <Tag color="red">{fp.username || '?'}</Tag>
+                          <span className="password-text">{fp.password || '?'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {targetPasswords.length === 0 && (
+                    <div className={`password-list ${stats.scan_completed === false ? 'warning' : 'success'}`}>
+                      <Tag color={stats.scan_completed === false ? 'orange' : 'green'}>{stats.scan_completed === false ? '未完成' : '✓ 安全'}</Tag>
+                      <span>{stats.scan_completed === false ? (stats.tool_error || '无法判定是否存在弱口令') : '未发现弱口令'}</span>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      }
+
+      if (capability === 'scan_weak_passwords') {
+        const weakPasswordError = result.tool_error || assetData.error || '目标服务不可达或检测未完成'
+        sections.push(
+          <div key="raw-weak-passwords" className={`result-details-section ${rawWeakPasswords.length ? 'weak-password-section' : weakPasswordIncomplete ? 'warning-section' : 'success-section'}`}>
+            <div className={`section-title ${rawWeakPasswords.length ? 'danger' : weakPasswordIncomplete ? 'warning' : 'success'}`}>
+              弱口令检测：{rawWeakPasswords.length ? `发现 ${rawWeakPasswords.length} 个弱口令` : weakPasswordIncomplete ? '未完成，无法判定' : '未发现弱口令'}
+            </div>
+            {weakPasswordIncomplete && (
+              <div className="baseline-target-item">
+                <span>原因</span>
+                <span className="text-muted">{weakPasswordError}</span>
+              </div>
+            )}
+            <div className="baseline-target-item">
+              <span>服务</span>
+              <span className="text-muted">{result.service || 'ssh'}:{result.port || 22}</span>
+            </div>
+            <div className="baseline-target-item">
+              <span>组合数</span>
+              <span className="text-muted">{result.tested_users || 0} 用户 x {result.tested_passwords || 0} 密码 = {result.total_combinations || 0}</span>
+            </div>
+            {rawWeakPasswords.map((fp, idx) => (
+              <div key={idx} className="password-item danger">
+                <Tag color="red">{fp.username || '?'}</Tag>
+                <span className="password-text">{fp.password || '?'}</span>
+              </div>
+            ))}
+          </div>
+        )
+      }
+      
+      // Web vulnerabilities
+      if (webVulnerabilities.length > 0) {
+        sections.push(
+          <div key="web-vulns" className="result-details-section">
+            <div className="section-title">Web 漏洞列表</div>
+            {webVulnerabilities.map((vuln, idx) => (
+              <div key={idx} className="vulnerability-item">
+                <Tag color="red">{vuln.severity || '未知'}</Tag>
+                <span className="vuln-target">[{vuln.target}]</span>
+                <span>{vuln.name || vuln.id || 'Web 漏洞'}</span>
+                {vuln.tool && <Tag color="purple" style={{ marginLeft: 4 }}>{vuln.tool}</Tag>}
+              </div>
+            ))}
+          </div>
+        )
+      }
+
+      if (capability === 'nikto_scan') {
+        sections.push(
+          <div key="nikto-summary" className={`result-details-section ${findings.length ? '' : 'success-section'}`}>
+            <div className={`section-title ${findings.length ? '' : 'success'}`}>
+              Nikto Web 扫描：{findings.length ? `发现 ${findings.length} 个问题` : '未发现 Web 问题'}
+            </div>
+            <div className="baseline-target-item">
+              <span>扫描目标</span>
+              <span className="text-muted">{result.target || '-'}</span>
+            </div>
+            {findings.map((finding, idx) => (
+              <div key={idx} className="vulnerability-item">
+                <Tag color="orange">{finding.severity || finding.osvdb || '发现'}</Tag>
+                <span>{finding.name || finding.description || finding.message || finding.id || 'Web 问题'}</span>
+              </div>
+            ))}
+          </div>
+        )
+      }
+
+      if (capability === 'sqlmap_scan') {
+        const injectionPoints = result.injection_points || []
+        sections.push(
+          <div key="sqlmap-summary" className={`result-details-section ${result.vulnerable ? 'weak-password-section' : 'success-section'}`}>
+            <div className={`section-title ${result.vulnerable ? 'danger' : 'success'}`}>
+              SQL 注入检测：{result.vulnerable ? `发现 ${injectionPoints.length || 1} 个注入点` : '未发现注入点'}
+            </div>
+            <div className="baseline-target-item">
+              <span>扫描 URL</span>
+              <span className="text-muted">{result.url || result.target || '-'}</span>
+            </div>
+          </div>
+        )
+      }
+
+      if (capability === 'scan_vulnerabilities') {
+        const durationMs = result.metadata?.duration_ms
+        const vulnDone = result.scan_completed !== false
+        sections.push(
+          <div key="nuclei-summary" className={`result-details-section ${!vulnDone || findings.length ? 'weak-password-section' : 'success-section'}`}>
+            <div className={`section-title ${!vulnDone || findings.length ? 'danger' : 'success'}`}>
+              漏洞扫描：{!vulnDone ? '未完成' : findings.length ? `发现 ${findings.length} 个漏洞/发现项` : '未发现漏洞'}
+            </div>
+            <div className="baseline-target-item">
+              <span>扫描目标</span>
+              <span className="text-muted">{result.target || '-'}</span>
+            </div>
+            <div className="baseline-target-item">
+              <span>扫描引擎</span>
+              <span className="text-muted">nuclei</span>
+            </div>
+            <div className="baseline-target-item">
+              <span>模板/级别</span>
+              <span className="text-muted">{result.templates || '默认模板'} / {result.severity_filter || '全部级别'}</span>
+            </div>
+            {durationMs !== undefined && (
+              <div className="baseline-target-item">
+                <span>耗时</span>
+                <span className="text-muted">{Math.round(durationMs / 1000)} 秒</span>
+              </div>
+            )}
+            {result.tool_error && (
+              <div className="baseline-target-item">
+                <span>工具提示</span>
+                <span className="text-muted">{result.tool_error}</span>
+              </div>
+            )}
+            {findings.map((finding, idx) => (
+              <div key={idx} className="vulnerability-item">
+                <Tag color={finding.severity === 'critical' || finding.severity === 'high' ? 'red' : finding.severity === 'medium' ? 'orange' : 'blue'}>
+                  {finding.severity || 'info'}
+                </Tag>
+                <span className="vuln-target">[{finding.host || finding.matched_at || result.target}]</span>
+                <span>{finding.name || finding.template_id || '漏洞发现项'}</span>
+                {finding.template_id && <Tag color="purple" style={{ marginLeft: 4 }}>{finding.template_id}</Tag>}
+              </div>
+            ))}
+          </div>
+        )
+      }
+
+      if (['redis_check', 'mysql_check', 'mongodb_check', 'memcached_check', 'oracle_check'].includes(capability)) {
+        const dbLabels = {
+          redis_check: 'Redis 未授权访问',
+          mysql_check: 'MySQL 空口令',
+          mongodb_check: 'MongoDB 未授权访问',
+          memcached_check: 'Memcached 未授权访问',
+          oracle_check: 'Oracle TNS 版本信息',
+        }
+        const risky = result.unauthorized || result.empty_password || (result.version_info && Object.keys(result.version_info).length > 0)
+        sections.push(
+          <div key="database-summary" className={`result-details-section ${risky ? 'weak-password-section' : 'success-section'}`}>
+            <div className={`section-title ${risky ? 'danger' : 'success'}`}>
+              {dbLabels[capability]}：{risky ? '发现需关注项' : '未发现明显风险'}
+            </div>
+            <div className="baseline-target-item">
+              <span>目标端口</span>
+              <span className="text-muted">{result.target || '-'}:{result.port || '-'}</span>
+            </div>
+            {'reachable' in result && (
+              <div className="baseline-target-item">
+                <span>连接状态</span>
+                <Tag color={result.reachable === false ? 'gold' : 'green'}>{result.reachable === false ? '不可达/无响应' : '可连接'}</Tag>
+              </div>
+            )}
+            {result.tool_error && (
+              <div className="baseline-target-item">
+                <span>工具提示</span>
+                <span className="text-muted">{result.tool_error}</span>
+              </div>
+            )}
+          </div>
+        )
+      }
+
+      if (capability === 'scan_ssl') {
+        const cert = result.certificate || {}
+        const sslDone = result.scan_completed !== false && result.reachable !== false
+        sections.push(
+          <div key="ssl-summary" className={`result-details-section ${sslDone ? (issues.length || vulnerabilities.length ? 'warning-section' : 'success-section') : 'warning-section'}`}>
+            <div className={`section-title ${sslDone && !issues.length && !vulnerabilities.length ? 'success' : 'warning'}`}>
+              SSL/TLS 检测：{sslDone ? `问题 ${issues.length || 0} 个，漏洞 ${vulnerabilities.length || 0} 个` : '未完成'}
+            </div>
+            <div className="baseline-target-item">
+              <span>检测目标</span>
+              <span className="text-muted">{result.target || '-'}:{result.port || 443}</span>
+            </div>
+            <div className="baseline-target-item">
+              <span>连接状态</span>
+              <Tag color={sslDone ? 'green' : 'gold'}>{sslDone ? '已完成 TLS 检测' : '未获取 TLS 信息'}</Tag>
+            </div>
+            <div className="baseline-target-item">
+              <span>TLS 版本</span>
+              <span className="text-muted">{result.tls_version || '未获取'}</span>
+            </div>
+            <div className="baseline-target-item">
+              <span>证书主体</span>
+              <span className="text-muted">{cert.subject || '未获取'}</span>
+            </div>
+            <div className="baseline-target-item">
+              <span>证书签发者</span>
+              <span className="text-muted">{cert.issuer || '未获取'}</span>
+            </div>
+            {result.tool_error && (
+              <div className="baseline-target-item">
+                <span>工具提示</span>
+                <span className="text-muted">{result.tool_error}</span>
+              </div>
+            )}
+            {issues.map((issue, idx) => (
+              <div key={idx} className="ssl-issue-item">
+                <Tag color="orange">警告</Tag>
+                <span>{issue}</span>
+              </div>
+            ))}
+          </div>
+        )
+      }
+
+      if (capability === 'fping_scan') {
+        sections.push(
+          <div key="fping-summary" className="result-details-section">
+            <div className="section-title">批量存活检测</div>
+            <div className="baseline-target-item">
+              <span>扫描数量</span>
+              <span className="text-muted">{result.total_scanned || 0}</span>
+            </div>
+            <div className="baseline-target-item">
+              <span>存活主机</span>
+              <span className="text-muted">{(result.alive_hosts || []).join(', ') || '无'}</span>
+            </div>
+          </div>
+        )
+      }
+
+      if (capability === 'snmp_walk') {
+        sections.push(
+          <div key="snmp-summary" className="result-details-section">
+            <div className="section-title">SNMP 检测结果</div>
+            <div className="baseline-target-item">
+              <span>返回结果</span>
+              <span className="text-muted">{result.total_results || 0} 条</span>
+            </div>
+            {result.tool_error && (
+              <div className="baseline-target-item">
+                <span>工具提示</span>
+                <span className="text-muted">{result.tool_error}</span>
+              </div>
+            )}
+          </div>
+        )
+      }
+
+      if (['baseline_check', 'linux_baseline'].includes(capability)) {
+        const summary = result.summary || {}
+        const baselineReason = result.error_detail?.error_reason || result.skip_reason || result.tool_error
+        const baselineRemediation = result.error_detail?.remediation
+        sections.push(
+          <div key="baseline-summary" className={`result-details-section ${result.skipped ? 'warning-section' : 'success-section'}`}>
+            <div className={`section-title ${result.skipped ? 'warning' : 'success'}`}>
+              安全基线核查：{result.skipped ? (result.connection_error ? '无法连接目标' : '已跳过') : `未通过 ${summary.non_compliant || 0} 项`}
+            </div>
+            <div className="baseline-target-item">
+              <span>目标</span>
+              <span className="text-muted">{result.target || '-'}</span>
+            </div>
+            <div className="baseline-target-item">
+              <span>操作系统</span>
+              <span className="text-muted">{result.os_type || '未知'}</span>
+            </div>
+            {baselineReason && (
+              <div className="baseline-target-item">
+                <span>原因</span>
+                <span className="text-muted">{baselineReason}</span>
+              </div>
+            )}
+            {baselineRemediation && (
+              <div className="baseline-target-item">
+                <span>建议</span>
+                <span className="text-muted">{baselineRemediation}</span>
+              </div>
+            )}
+          </div>
+        )
+      }
+
+      if (webDiscoveries.length > 0) {
+        sections.push(
+          <div key="web-discoveries" className="result-details-section">
+            <div className="section-title">Web 路径/端点发现</div>
+            {webDiscoveries.slice(0, 30).map((item, idx) => (
+              <div key={idx} className="vulnerability-item">
+                <Tag color="blue">{item.status || item.status_code || '发现'}</Tag>
+                <span>{item.url || item.path || item.input || '未知端点'}</span>
+              </div>
+            ))}
+          </div>
+        )
+      }
+
+      if (compositeResults.length > 0) {
+        const describeSubResult = (sub) => {
+          const data = sub.data || {}
+          if (data.scan_completed === false || data.success === false) {
+            return `未完成/无响应${data.tool_error ? `：${data.tool_error}` : ''}`
+          }
+          if (['redis_check', 'mongodb_check', 'memcached_check'].includes(sub.capability)) {
+            return data.unauthorized ? '存在未授权访问' : data.reachable === false ? '不可达/无响应，未发现未授权访问' : '未发现未授权访问'
+          }
+          if (sub.capability === 'mysql_check') {
+            return data.empty_password ? '存在空口令' : data.reachable === false ? '不可达/无响应，未发现空口令' : '未发现空口令'
+          }
+          if (sub.capability === 'oracle_check') {
+            const hasVersion = data.version_info && Object.keys(data.version_info).length > 0
+            return hasVersion ? '存在版本信息泄露' : data.reachable === false ? '不可达/无响应，未发现版本信息泄露' : '未发现版本信息泄露'
+          }
+          if (sub.capability === 'nikto_scan') return `Web 问题 ${data.total_findings ?? data.findings?.length ?? 0} 个`
+          if (sub.capability === 'scan_ports') return `明确开放 ${data.open_ports?.length || 0} 个，被过滤/未确认 ${data.filtered_count || data.filtered_ports?.length || 0} 个`
+          if (sub.capability === 'scan_ssl') return `SSL 问题 ${data.issues?.length || 0} 个`
+          if (sub.capability === 'scan_vulnerabilities') return `漏洞 ${data.total_findings ?? data.findings?.length ?? 0} 个`
+          if (sub.capability === 'scan_weak_passwords') return `弱口令 ${data.found?.length || 0} 个`
+          if (sub.capability === 'snmp_walk') return `SNMP 返回 ${data.total_results || 0} 条`
+          return sub.error || '已完成'
+        }
+        sections.push(
+          <div key="composite-results" className="result-details-section">
+            <div className="section-title">组合扫描子任务</div>
+            {compositeResults.map((group, groupIdx) => (
+              <div key={groupIdx} className="weak-password-target">
+                <div className="target-header">
+                  <span className="target-name">{group.target}</span>
+                  <span className="target-stats">
+                    成功 {group.summary?.success || 0}，失败 {group.summary?.failed || 0}，跳过 {group.summary?.skipped || 0}
+                  </span>
+                </div>
+                {(group.sub_results || []).map((sub, idx) => (
+                  <div key={idx} className="baseline-target-item">
+                    <span>{sub.label || sub.capability}</span>
+                    <Tag color={sub.status === 'success' ? 'green' : sub.status === 'skipped' ? 'gold' : 'red'}>{sub.status}</Tag>
+                    <span className="text-muted">{describeSubResult(sub)}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )
+      }
+      
+      // Port table
+      if (openPorts.length > 0) {
+        sections.push(
+          <div key="ports" className="result-details-table">
+            <div className="table-header"><span>明确开放端口详情</span></div>
+            <Table
+              dataSource={openPorts.map((port, idx) => ({ ...port, key: idx }))}
+              columns={portColumns}
+              pagination={openPorts.length > 10 ? { defaultPageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] } : false}
+              size="small"
+              className="port-table-compact"
+            />
+          </div>
+        )
+      }
+
+      if (filteredPorts.length > 0) {
+        sections.push(
+          <div key="filtered-ports" className="result-details-table">
+            <div className="table-header"><span>被过滤端口详情（未确认开放）</span></div>
+            <div className="info-box warning" style={{ marginBottom: 12 }}>
+              <InfoCircleFilled style={{ color: '#f59e0b', marginRight: 8 }} />
+              <span>filtered/no-response 表示被过滤或无响应，不能当作开放端口。</span>
+            </div>
+            <Table
+              dataSource={filteredPorts.map((port, idx) => ({ ...port, key: idx }))}
+              columns={portColumns}
+              pagination={filteredPorts.length > 10 ? { defaultPageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] } : false}
+              size="small"
+              className="port-table-compact"
+            />
+          </div>
+        )
+      }
+      
+      // Vulnerabilities
+      if (vulnerabilities.length > 0) {
+        sections.push(
+          <div key="vulns" className="result-details-section">
+            <div className="section-title">漏洞列表</div>
+            {vulnerabilities.map((vuln, idx) => (
+              <div key={idx} className="vulnerability-item">
+                <Tag color={vuln.severity === 'critical' ? 'red' : vuln.severity === 'high' ? 'red' : 'orange'}>{vuln.severity || '未知'}</Tag>
+                <span>{vuln.name || vuln.id || '漏洞'}</span>
+              </div>
+            ))}
+          </div>
+        )
+      }
+      
+      return <>{sections}</>
+    }
+
+    // Map capability to ToolResultCard tool name
+    const capabilityToTool = {
+      ...Object.fromEntries(TOOL_CATALOG.map(tool => [tool.capability, tool.capability])),
+      ping_asset: 'ping_host',
+      linux_baseline: 'baseline_check',
+      testssl_scan: 'scan_ssl',
+      nuclei_scan: 'scan_vulnerabilities',
+      hydra_bruteforce: 'scan_weak_passwords',
+    }
 
     return (
       <div className="scan-animation-fade-in">
@@ -1463,110 +2977,62 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
           )}
         </div>
         
-        {/* 资产详情卡片 */}
-        <div className="asset-results-cards">
-          {Object.entries(assetResults).map(([target, assetData], index) => {
-            const displayStatus = assetData.display_status || (assetData.status === 'success' ? 'success' : 'failed')
-            
-            // 提取端口数据
-            const openPorts = assetData.result?.open_ports || []
-            
-            // 提取错误信息
-            const errorMsg = assetData.error
-            
-            // 根据状态设置图标和颜色
-            const statusConfig = {
-              success: {
-                icon: <CheckCircleFilled style={{ color: '#10b981' }} />,
-                tagColor: 'success',
-                tagText: '成功',
-                cardClass: 'success'
-              },
-              warning: {
-                icon: <ExclamationCircleFilled style={{ color: '#f59e0b' }} />,
-                tagColor: 'warning',
-                tagText: '警告',
-                cardClass: 'warning'
-              },
-              failed: {
-                icon: <CloseCircleFilled style={{ color: '#ef4444' }} />,
-                tagColor: 'error',
-                tagText: '失败',
-                cardClass: 'failed'
-              }
-            }
-            
-            const config = statusConfig[displayStatus]
-            
-            return (
-              <div key={index} className={`asset-result-card ${config.cardClass}`}>
-                {/* 卡片头部 */}
-                <div className="asset-result-header">
-                  <div className="asset-result-title">
-                    {config.icon}
-                    <span className="asset-target">{target}</span>
-                  </div>
-                  <Tag color={config.tagColor}>
-                    {config.tagText}
-                  </Tag>
-                </div>
-                
-                {/* 成功状态：显示端口详情 */}
-                {displayStatus === 'success' && (
-                  <div className="asset-result-content">
-                    <div className="asset-result-stats">
-                      <span className="stat-label">开放端口:</span>
-                      <span className="stat-value">{openPorts.length} 个</span>
-                    </div>
-                    
-                    {openPorts.length > 0 && (
-                      <div className="port-table-container">
-                        <Table
-                          dataSource={openPorts.map((port, idx) => ({ ...port, key: idx }))}
-                          columns={portColumns}
-                          pagination={openPorts.length > 5 ? { defaultPageSize: 5, showSizeChanger: true, pageSizeOptions: ['5', '10', '20'] } : false}
-                          size="small"
-                          className="port-table-compact"
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-                
-                {/* 警告状态：无开放端口 */}
-                {displayStatus === 'warning' && (
-                  <div className="asset-result-content">
-                    <div className="asset-result-stats">
-                      <span className="stat-label">开放端口:</span>
-                      <span className="stat-value">0 个</span>
-                    </div>
-                    
-                    <div className="info-box warning">
-                      <InfoCircleFilled style={{ color: '#f59e0b', marginRight: 8 }} />
-                      <div className="info-content">
-                        <div className="info-title">未发现开放端口</div>
-                        <div className="info-desc">可能原因：主机不可达、防火墙过滤、或服务未启动</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                {/* 失败状态：显示错误信息 */}
-                {displayStatus === 'failed' && (
-                  <div className="asset-result-content">
-                    <div className="info-box error">
-                      <CloseCircleFilled style={{ color: '#ef4444', marginRight: 8 }} />
-                      <div className="info-content">
-                        <div className="info-title">扫描失败</div>
-                        <div className="info-desc">{errorMsg || '扫描过程中发生错误'}</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+        <ToolResultCard
+          tool={mainTool}
+          status={overallStatus}
+          summary={
+            <div className="asset-unified-summary">
+              <div className="baseline-target-item">
+                <span>检测工具</span>
+                <span className="text-muted">{capabilitySet.map(c => CAPABILITY_NAMES[c] || c).join('、') || '安全检测'}</span>
               </div>
-            )
-          })}
-        </div>
+              <div className="baseline-target-item">
+                <span>资产范围</span>
+                <span className="text-muted">{Object.keys(assetResults).join('、')}</span>
+              </div>
+            </div>
+          }
+          details={
+            <Collapse
+              className="asset-result-collapse"
+              bordered={false}
+              defaultActiveKey={totalAssets <= 2 ? Object.keys(assetResults) : []}
+              items={Object.entries(assetResults).map(([target, assetData]) => {
+                const displayStatus = assetData.display_status || (assetData.status === 'success' ? 'success' : 'failed')
+                const capability = assetData.capability
+                const currentStatus = assetStatusConfig[displayStatus] || assetStatusConfig.success
+                return {
+                  key: target,
+                  label: (
+                    <div className="asset-collapse-label">
+                      <span className="asset-collapse-target">{target}</span>
+                      <Tag color={currentStatus.color} icon={currentStatus.icon}>{currentStatus.text}</Tag>
+                      <Tag color="blue">{CAPABILITY_NAMES[capability] || capability}</Tag>
+                      <span className="asset-collapse-metric">{metricText(assetData)}</span>
+                    </div>
+                  ),
+                  children: (
+                    <div className="asset-collapse-body">
+                      <div className="asset-result-identity">
+                        <div className="baseline-target-item">
+                          <span>资产/IP</span>
+                          <span className="text-muted">{target}</span>
+                        </div>
+                        <div className="baseline-target-item">
+                          <span>检测工具</span>
+                          <span className="text-muted">{CAPABILITY_NAMES[capability] || capability}</span>
+                        </div>
+                      </div>
+                      {buildAssetSummary(assetData, capability)}
+                      {buildAssetDetails(assetData, capability)}
+                    </div>
+                  ),
+                }
+              })}
+            />
+          }
+          copyText={buildMultiAssetCopyText()}
+        />
       </div>
     )
   }
@@ -1942,6 +3408,29 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
                 <span className="suggestion-text">{s.title}</span>
               </button>
             ))}
+            {/* 更多检测下拉 */}
+            <Dropdown
+              menu={{ items: MORE_SUGGESTIONS.map((s, i) => ({
+                key: `more-${i}`,
+                label: (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: s.color, fontSize: 14 }}>{s.icon}</span>
+                    <span>{s.title}</span>
+                  </span>
+                ),
+                onClick: () => s.isText ? handleSend(s.text) : handleSend(s.text),
+              })) }}
+              placement="bottomRight"
+              trigger={['click']}
+            >
+              <button
+                className="suggestion-btn more-btn"
+                style={{ '--accent': '#94a3b8' }}
+              >
+                <span className="suggestion-icon"><DownOutlined /></span>
+                <span className="suggestion-text">更多检测</span>
+              </button>
+            </Dropdown>
           </div>
         </div>
         
@@ -2131,6 +3620,73 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
           </div>
         )}
       </Drawer>
+
+      {/* SSH 凭证输入 Modal（单目标场景保留） */}
+      <Modal
+        title="SSH 认证信息"
+        open={sshCredentialVisible}
+        onOk={handleSshCredentialConfirm}
+        onCancel={() => setSshCredentialVisible(false)}
+        okText="开始核查"
+        cancelText="取消"
+        width={500}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text type="secondary">
+            目标：{sshCredentialTarget === 'selected_assets' ? '已选资产' : sshCredentialTarget}
+          </Text>
+        </div>
+        <Form layout="vertical">
+          <Form.Item label="SSH 用户名" required>
+            <Input
+              value={sshUsername}
+              onChange={(e) => setSshUsername(e.target.value)}
+              placeholder="root"
+            />
+          </Form.Item>
+          <Form.Item label="SSH 密码">
+            <Input.Password
+              value={sshPassword}
+              onChange={(e) => setSshPassword(e.target.value)}
+              placeholder="输入 SSH 密码"
+            />
+          </Form.Item>
+          <Form.Item label="或 SSH 密钥文件路径">
+            <Input
+              value={sshKeyFile}
+              onChange={(e) => setSshKeyFile(e.target.value)}
+              placeholder="/path/to/private_key"
+            />
+          </Form.Item>
+          <Form.Item label="SSH 端口">
+            <Input
+              type="number"
+              value={sshPort}
+              onChange={(e) => setSshPort(parseInt(e.target.value) || 22)}
+              placeholder="22"
+            />
+          </Form.Item>
+        </Form>
+        <div style={{ marginTop: 8 }}>
+          <Text type="warning" style={{ fontSize: 12 }}>
+            提示：密码和密钥文件二选一即可
+          </Text>
+        </div>
+      </Modal>
+
+      {/* Per-Asset 凭据配置 Modal（多资产场景） */}
+      <AssetCredentialModal
+        visible={credentialModalVisible}
+        assets={credentialAssets}
+        onConfirm={handleCredentialConfirm}
+        onCancel={() => setCredentialModalVisible(false)}
+        title={
+          credentialCommand === '/tech'
+            ? '配置 SSH 凭据（等保技术测评）'
+            : '配置 SSH 凭据（安全基线核查）'
+        }
+        description="仅用于安全基线检查，其他 9 项检查无需 SSH 凭据"
+      />
     </div>
   )
 }

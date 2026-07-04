@@ -161,6 +161,7 @@ class Orchestrator:
         
         plan = plan_result.get("plan", [])
         response = plan_result.get("response", "")
+        plan = self._expand_project_asset_targets(plan, context)
         
         logger.info(f"AI plan: {plan}")
         
@@ -261,8 +262,15 @@ class Orchestrator:
                 logger.info(f"Task {task_id} started")
                 
                 # 创建扫描任务记录（如果是扫描类）
-                scan_capabilities = ["scan_ports", "scan_ssl", "scan_vulnerabilities", 
-                                   "scan_weak_passwords", "full_compliance_scan"]
+                scan_capabilities = [
+                    "scan_ports", "masscan_scan", "fping_scan", "scan_ssl",
+                    "scan_vulnerabilities", "scan_weak_passwords",
+                    "nikto_scan", "sqlmap_scan", "gobuster_scan", "ffuf_scan", "web_discovery_scan",
+                    "database_security_scan", "redis_check", "mysql_check", "mongodb_check", "oracle_check", "memcached_check",
+                    "snmp_walk", "snmp_get", "network_device_scan", "enum4linux_scan", "smb_enum", "windows_security_scan",
+                    "baseline_check", "linux_baseline", "ssh_config_check",
+                    "full_compliance_scan", "tech_assessment",
+                ]
                 has_scan = any(step.get("capability") in scan_capabilities for step in plan)
                 
                 if has_scan and project_id:
@@ -280,6 +288,9 @@ class Orchestrator:
                 
                 # 初始化任务进度
                 self.task_progress[task_id] = {
+                    "task_id": task_id,
+                    "user_id": user_id,
+                    "project_id": project_id,
                     "current_step": "准备执行...",
                     "step_index": 0,
                     "total_steps": len(plan),
@@ -301,10 +312,20 @@ class Orchestrator:
                 
                 # 检测是否为多资产扫描
                 is_multi_asset = self._is_multi_asset_scan(plan)
-                
-                # 执行计划（传入停止检查回调）
+
                 if is_multi_asset:
-                    # 多资产并发执行
+                    # 根据资产数量动态调整并发数
+                    asset_count = len(plan)
+                    if asset_count <= 3:
+                        dynamic_concurrent = 5
+                    elif asset_count <= 8:
+                        dynamic_concurrent = 8
+                    elif asset_count <= 15:
+                        dynamic_concurrent = 10
+                    else:
+                        dynamic_concurrent = 12
+                    logger.info(f"Multi-asset scan: {asset_count} assets, max_concurrent={dynamic_concurrent}")
+
                     execution_result = await self.execution_engine.execute_plan_concurrent(
                         plan=plan,
                         user_id=user_id,
@@ -313,13 +334,13 @@ class Orchestrator:
                         context_manager=async_context_manager,
                         task_id=task_id,
                         progress_callback=self._update_task_progress_multi_asset,
-                        max_concurrent=5,
+                        max_concurrent=dynamic_concurrent,
                         max_retries=3,
                         check_stop=check_stop,
                         wait_if_paused=wait_if_paused,
                     )
                 else:
-                    # 单资产串行执行
+                    # 单资产串行执行 - 保留原有逻辑
                     execution_result = await self.execution_engine.execute_plan(
                         plan=plan,
                         user_id=user_id,
@@ -331,10 +352,17 @@ class Orchestrator:
                         check_stop=check_stop,
                         wait_if_paused=wait_if_paused,
                     )
-                
+
+                # L1 Agent 统一汇总结果，写入 DB（design-v2.md 核心原则）
+                # Skill 阶段已经执行完毕，Agent 现在汇总所有结果
+                await self._agent_persist_results(
+                    execution_result=execution_result,
+                    context_manager=async_context_manager,
+                )
+
                 # 提取扫描结果
                 scan_results = self._extract_scan_results_from_execution(execution_result)
-                
+
                 # 用 AI 生成结果描述
                 result_description = await self._generate_result_description(
                     execution_result=execution_result,
@@ -343,7 +371,7 @@ class Orchestrator:
                     db=async_db,
                     user_id=user_id,
                 )
-                
+
                 # 更新扫描任务状态
                 if scan_task_id:
                     result = await async_db.execute(
@@ -354,37 +382,40 @@ class Orchestrator:
                         scan_task.status = ScanTaskStatus.COMPLETED
                         scan_task.completed_at = datetime.utcnow()
                         await async_db.commit()
-                
+
                 # 计算合规分数并更新 Project
                 if project_id and scan_results.get("open_ports"):
                     await self._calculate_and_update_score(async_db, project_id)
-                
+
                 # 记录项目记忆
                 if project_id:
                     await self._record_project_memory(
                         async_context_manager, plan, execution_result, scan_results
                     )
-                
+
                 # 记录用户记忆
                 await self._record_user_memory(
                     async_context_manager, user_input, execution_result
                 )
-                
+
                 # 记录完成的任务
                 self.completed_tasks.append({
                     "task_id": task_id,
+                    "user_id": user_id,
+                    "project_id": project_id,
                     "agent_name": "AI 执行任务",
                     "result": execution_result,
                     "evidence_count": execution_result.get("success_count", 0),
                     "scan_results": scan_results,
+                    "is_multi_asset": is_multi_asset,
                     "result_description": result_description,
                     "completed_at": datetime.utcnow().isoformat(),
                 })
-                
+
                 # 清理进度记录
                 if task_id in self.task_progress:
                     del self.task_progress[task_id]
-                
+
                 try:
                     from app.api.websocket import broadcast_agent_completed
                     await broadcast_agent_completed(task_id, {
@@ -394,11 +425,19 @@ class Orchestrator:
                     })
                 except Exception:
                     pass
-                
+
                 # 记录助手结果到对话历史
-                await async_context_manager.add_conversation("assistant", result_description)
+                await async_context_manager.add_conversation(
+                    "assistant",
+                    result_description,
+                    context_snapshot={
+                        "scan_results": scan_results,
+                        "is_multi_asset": is_multi_asset,
+                        "task_id": task_id,
+                    }
+                )
                 await async_db.commit()
-                
+
                 logger.info(f"Task {task_id} completed: {result_description[:100]}")
                 
             except (Exception, asyncio.CancelledError) as e:
@@ -410,6 +449,8 @@ class Orchestrator:
                 # 记录失败
                 self.completed_tasks.append({
                     "task_id": task_id,
+                    "user_id": user_id,
+                    "project_id": project_id,
                     "agent_name": "AI 执行任务",
                     "result": {"error": str(e)},
                     "evidence_count": 0,
@@ -438,6 +479,38 @@ class Orchestrator:
                         scan_task.status = ScanTaskStatus.FAILED
                         scan_task.error_message = str(e)
                         await async_db.commit()
+
+    def _expand_project_asset_targets(self, plan: List[Dict], context: Dict) -> List[Dict]:
+        """Expand the LLM's project-asset placeholder into concrete asset targets."""
+        assets = context.get("project_assets") or []
+        asset_values = [a.get("value") for a in assets if a.get("value")]
+        if not asset_values:
+            return plan
+
+        expanded = []
+        placeholders = {"项目资产", "全部项目资产", "所有项目资产", "项目中的资产"}
+        network_placeholders = {"项目资产网段", "项目网段", "资产网段"}
+
+        for step in plan:
+            parameters = dict(step.get("parameters") or {})
+            if parameters.get("target") in placeholders:
+                for value in asset_values:
+                    next_step = dict(step)
+                    next_params = dict(parameters)
+                    next_params["target"] = value
+                    next_step["parameters"] = next_params
+                    expanded.append(next_step)
+            elif parameters.get("network") in network_placeholders:
+                next_step = dict(step)
+                next_params = dict(parameters)
+                next_params.pop("network", None)
+                next_params["targets"] = asset_values
+                next_step["parameters"] = next_params
+                expanded.append(next_step)
+            else:
+                expanded.append(step)
+
+        return expanded
     
     def _update_task_progress(self, task_id: str, step_index: int, total_steps: int, capability_name: str, status: str):
         """更新任务执行进度"""
@@ -455,6 +528,32 @@ class Orchestrator:
             "scan_vulnerabilities": "漏洞扫描",
             "scan_weak_passwords": "弱口令检测",
             "full_compliance_scan": "全量合规扫描",
+            "tech_assessment": "等保技术测评",
+            "masscan_scan": "高速端口扫描",
+            "fping_scan": "批量存活检测",
+            "nikto_scan": "Web 安全扫描",
+            "sqlmap_scan": "SQL 注入检测",
+            "gobuster_scan": "目录爆破",
+            "ffuf_scan": "Web 模糊测试",
+            "web_discovery_scan": "Web 目录发现",
+            "redis_check": "Redis 检测",
+            "mysql_check": "MySQL 检测",
+            "mongodb_check": "MongoDB 检测",
+            "oracle_check": "Oracle 检测",
+            "memcached_check": "Memcached 检测",
+            "database_security_scan": "数据库安全检测",
+            "snmp_walk": "SNMP 检测",
+            "network_device_scan": "网络设备检测",
+            "snmp_bruteforce": "SNMP 团体字检测",
+            "snmp_get": "SNMP OID 读取",
+            "enum4linux_scan": "Windows 用户/组枚举",
+            "windows_security_scan": "Windows/AD/SMB 检测",
+            "crackmapexec_scan": "Windows SID 枚举",
+            "smb_enum": "SMB 共享枚举",
+            "baseline_check": "安全基线核查",
+            "linux_baseline": "安全基线核查",
+            "ssh_config_check": "SSH 配置检查",
+            "ping_asset": "Ping 检测",
             "view_open_ports": "查看开放端口",
             "view_scan_results": "查看扫描结果",
             "view_vulnerabilities": "查看漏洞",
@@ -520,8 +619,21 @@ class Orchestrator:
         if len(plan) <= 1:
             return False
         
-        scan_capabilities = ["scan_ports", "scan_ssl", "scan_vulnerabilities", 
-                           "scan_weak_passwords", "full_compliance_scan"]
+        scan_capabilities = [
+            "scan_ports", "scan_ssl", "scan_vulnerabilities",
+            "scan_weak_passwords", "full_compliance_scan", "tech_assessment",
+            "redis_check", "oracle_check", "mongodb_check", "database_security_scan",
+            "memcached_check", "mysql_check",
+            "snmp_walk", "snmp_bruteforce", "snmp_get", "network_device_scan",
+            "enum4linux_scan", "crackmapexec_scan", "smb_enum", "windows_security_scan",
+            "nikto_scan", "sqlmap_scan", "gobuster_scan", "ffuf_scan", "web_discovery_scan",
+            "masscan_scan", "fping_scan", "baseline_check", "linux_baseline",
+            "password_policy_check", "ssh_config_check",
+            "audit_config_check", "service_port_check",
+            "file_permission_check", "mac_check",
+            "ping_host",
+            "ping_asset",
+        ]
         
         # 检查是否所有步骤都是扫描能力
         all_scan = all(step.get("capability") in scan_capabilities for step in plan)
@@ -549,6 +661,10 @@ class Orchestrator:
         if task_id not in self.task_progress:
             self.task_progress[task_id] = {
                 "type": "multi_asset",
+                "current_step": "任务执行中...",
+                "step_index": 0,
+                "total_steps": total_assets,
+                "steps": [],
                 "asset_index": 0,
                 "total_assets": total_assets,
                 "assets": [],
@@ -577,6 +693,50 @@ class Orchestrator:
         else:
             assets_list.append(asset_progress)
         
+        capability_display_names = {
+            "scan_ports": "端口扫描",
+            "masscan_scan": "高速端口扫描",
+            "fping_scan": "批量存活检测",
+            "scan_ssl": "SSL/TLS 检测",
+            "scan_vulnerabilities": "漏洞扫描",
+            "scan_weak_passwords": "弱口令检测",
+            "nikto_scan": "Web 安全扫描",
+            "sqlmap_scan": "SQL 注入检测",
+            "gobuster_scan": "目录爆破",
+            "ffuf_scan": "Web 模糊测试",
+            "web_discovery_scan": "Web 目录发现",
+            "database_security_scan": "数据库安全检测",
+            "baseline_check": "安全基线核查",
+            "snmp_walk": "SNMP 检测",
+            "network_device_scan": "网络设备检测",
+            "enum4linux_scan": "Windows 用户/组枚举",
+            "windows_security_scan": "Windows/AD/SMB 检测",
+            "smb_enum": "SMB 共享枚举",
+            "full_compliance_scan": "全量合规扫描",
+            "tech_assessment": "等保技术测评",
+        }
+        display_name = capability_display_names.get(capability_name, capability_name or "安全检测")
+        status_prefix = {
+            "running": "正在执行",
+            "completed": "已完成",
+            "success": "已完成",
+            "failed": "失败",
+            "error": "失败",
+            "skipped": "已跳过",
+        }.get(status, "正在执行")
+        self.task_progress[task_id]["current_step"] = (
+            f"{status_prefix}: {display_name} ({asset_index + 1}/{total_assets}) - {asset_name}"
+        )
+        self.task_progress[task_id]["step_index"] = min(asset_index, max(total_assets - 1, 0))
+        self.task_progress[task_id]["total_steps"] = total_assets
+        self.task_progress[task_id]["steps"] = [
+            {
+                "capability": item.get("capability"),
+                "display_name": f"{item.get('name')} - {capability_display_names.get(item.get('capability'), item.get('capability') or '安全检测')}",
+                "status": item.get("status"),
+            }
+            for item in sorted(assets_list, key=lambda item: item.get("index", 0))
+        ]
         self.task_progress[task_id]["asset_index"] = asset_index
         
         # WebSocket 推送
@@ -605,7 +765,8 @@ class Orchestrator:
         """根据执行结果记录项目记忆"""
         try:
             scan_capabilities = ["scan_ports", "scan_ssl", "scan_vulnerabilities",
-                                 "scan_weak_passwords", "full_compliance_scan"]
+                                 "scan_weak_passwords", "full_compliance_scan", "database_security_scan",
+                                 "baseline_check", "tech_assessment"]
             executed_scans = [s for s in plan if s.get("capability") in scan_capabilities]
             
             if executed_scans:
@@ -649,10 +810,10 @@ class Orchestrator:
         """从用户交互中提取偏好，记录到用户记忆"""
         try:
             scan_capabilities = ["scan_ports", "scan_ssl", "scan_vulnerabilities",
-                                 "scan_weak_passwords", "full_compliance_scan"]
-            executed_scans = [s for s in execution_result.get("results", []) 
+                                 "scan_weak_passwords", "full_compliance_scan", "database_security_scan"]
+            executed_scans = [s for s in execution_result.get("results", [])
                              if s.get("capability") in scan_capabilities and s.get("status") == "success"]
-            
+
             if executed_scans:
                 targets = [s.get("target", "") for s in executed_scans if s.get("target")]
                 if targets:
@@ -660,7 +821,7 @@ class Orchestrator:
                         memory_type="scan_targets",
                         content=f"常用扫描目标: {', '.join(set(targets))}",
                     )
-            
+
             if "创建项目" in user_input or "create_project" in str(execution_result):
                 await context_manager.add_user_memory(
                     memory_type="preferences",
@@ -668,6 +829,66 @@ class Orchestrator:
                 )
         except Exception as e:
             logger.warning(f"Failed to record user memory: {e}")
+
+    async def _agent_persist_results(
+        self,
+        execution_result: Dict,
+        context_manager: ContextManager,
+    ):
+        """
+        L1 Agent 统一汇总结果，写入 DB（design-v2.md 核心原则）
+
+        根据 design-v2.md：
+        - Skill 关闭写权限
+        - Skill 不直接修改全局看板
+        - 结果统一由 Agent 汇总后更新
+
+        流程：
+        1. 遍历所有 Skill 返回的结果
+        2. 提取 action_history 数据
+        3. 提取 cache_result 数据
+        4. 统一写入 DB（使用一个 session 串行写入）
+        """
+        try:
+            results = execution_result.get("results", [])
+            if not results:
+                return
+
+            for result in results:
+                if not isinstance(result, dict):
+                    continue
+
+                capability = result.get("capability", "")
+                target = result.get("target", "")
+                status = result.get("status", "unknown")
+                result_data = result.get("result", {})
+                error = result.get("error")
+
+                if not capability:
+                    continue
+
+                # 写入 action_history
+                try:
+                    await context_manager.add_action(
+                        action_type=capability,
+                        parameters={"target": target},
+                        result={"status": status, "result": result_data, "error": error},
+                        status=status
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record action for {capability}: {e}")
+
+                # 写入 cache_result（仅成功的）
+                if status == "success" and result_data:
+                    try:
+                        cache_key = f"{capability}:target={target}"
+                        await context_manager.cache_result(cache_key, result_data)
+                    except Exception as e:
+                        logger.warning(f"Failed to cache result for {capability}: {e}")
+
+            logger.info(f"Agent persisted {len(results)} task results to DB")
+        except Exception as e:
+            logger.error(f"Failed to persist agent results: {e}", exc_info=True)
     
     async def _generate_result_description(
         self,
@@ -679,6 +900,9 @@ class Orchestrator:
     ) -> str:
         """用 AI 根据执行结果生成自然语言描述"""
         try:
+            if self._has_security_tool_result(execution_result):
+                return self._generate_fallback_description(execution_result)
+
             # 获取对话历史
             conversation_history = await context_manager._get_conversation_history(limit=5)
             
@@ -698,7 +922,10 @@ class Orchestrator:
 执行结果：
 {results_summary}
 
-请用简洁的中文描述执行结果，包含具体的数据（如端口列表、漏洞数量等）。直接输出描述内容，不要加引号或其他格式。"""
+请用简洁的中文描述执行结果，包含具体的数据（如端口列表、漏洞数量等）。
+如果端口扫描未发现开放端口，只能说“本次扫描范围未发现开放端口”，不要推断为“无安全风险”。
+如果存在 filtered 端口，说明可能被防火墙过滤，也不要推断为端口不存在。
+直接输出描述内容，不要加引号或其他格式。"""
             
             # 调用 LLM 生成描述
             messages = [
@@ -729,6 +956,171 @@ class Orchestrator:
         except Exception as e:
             logger.error(f"Failed to generate result description: {e}", exc_info=True)
             return self._generate_fallback_description(execution_result)
+
+    def _has_security_tool_result(self, execution_result: Dict) -> bool:
+        security_capabilities = {
+            "scan_ports", "masscan_scan", "fping_scan", "ping_host", "ping_asset",
+            "scan_ssl", "testssl_scan", "scan_vulnerabilities", "nuclei_scan",
+            "scan_weak_passwords", "hydra_bruteforce",
+            "nikto_scan", "sqlmap_scan", "gobuster_scan", "ffuf_scan", "web_discovery_scan",
+            "redis_check", "mysql_check", "mongodb_check", "memcached_check", "oracle_check",
+            "database_security_scan", "snmp_walk", "snmp_bruteforce", "snmp_get", "network_device_scan",
+            "enum4linux_scan", "crackmapexec_scan", "smb_enum", "windows_security_scan",
+            "baseline_check", "linux_baseline", "password_policy_check", "ssh_config_check",
+            "audit_config_check", "service_port_check", "file_permission_check", "mac_check",
+            "full_compliance_scan", "tech_assessment",
+        }
+        return any(
+            result.get("capability") in security_capabilities
+            for result in self._iter_execution_results(execution_result)
+        )
+
+    def _result_payload(self, result: Dict) -> Dict:
+        data = result.get("result") or {}
+        if not data and isinstance(result.get("data"), dict):
+            data = result.get("data") or {}
+        if isinstance(data, dict) and "data" in data and any(k in data for k in ("tool", "status", "metadata")):
+            payload = data.get("data") or {}
+            if isinstance(payload, dict) and data.get("metadata"):
+                payload = {**payload, "metadata": data.get("metadata", {})}
+            return payload
+        return data if isinstance(data, dict) else {}
+
+    def _iter_execution_results(self, execution_result: Dict):
+        for result in execution_result.get("results", []):
+            yield result
+            data = self._result_payload(result)
+            for sub in data.get("sub_results", []) if isinstance(data, dict) else []:
+                if not isinstance(sub, dict):
+                    continue
+                yield {
+                    "capability": sub.get("capability"),
+                    "target": sub.get("target") or result.get("target"),
+                    "status": sub.get("status"),
+                    "result": sub.get("data") or {},
+                    "error": sub.get("error"),
+                    "error_detail": sub.get("error_detail"),
+                    "label": sub.get("label"),
+                }
+
+    def _describe_result_line(self, capability: str, target: str, status: str, data: Dict, error: str = None) -> str:
+        target_str = f"({target})" if target else ""
+        label = self._capability_label(capability)
+        error_detail = data.get("error_detail") if isinstance(data, dict) else None
+        if error_detail:
+            reason = error_detail.get("error_reason") or error_detail.get("raw_error") or error
+            remediation = error_detail.get("remediation")
+            detail = reason or error or "未知错误"
+            if remediation:
+                detail = f"{detail} 建议：{remediation}"
+        else:
+            detail = error or "未知错误"
+        if status == "skipped":
+            return f"{label}{target_str}: 跳过 - {detail or '条件不满足'}"
+        if status not in ["success", "completed", "warning"]:
+            return f"{label}{target_str}: 失败 - {detail}"
+
+        if capability in ("scan_ports", "masscan_scan"):
+            open_ports = data.get("open_ports", [])
+            filtered_count = data.get("filtered_count") or len(data.get("filtered_ports", []))
+            if open_ports:
+                port_list = ", ".join([f"{p.get('port')}/{p.get('protocol', 'tcp')}({p.get('service', 'unknown')})" for p in open_ports[:20]])
+                suffix = f"，另有 {len(open_ports) - 20} 个" if len(open_ports) > 20 else ""
+                filtered_suffix = f"；另有 {filtered_count} 个端口被过滤/未确认开放" if filtered_count else ""
+                return f"端口扫描{target_str}: 发现 {len(open_ports)} 个明确开放端口：{port_list}{suffix}{filtered_suffix}"
+            suffix = f"，{filtered_count} 个端口被过滤/未确认开放" if filtered_count else ""
+            return f"端口扫描{target_str}: 本次扫描范围未发现明确开放端口{suffix}"
+
+        if capability == "fping_scan":
+            alive = data.get("alive_hosts") or data.get("alive") or []
+            return f"批量存活检测{target_str}: 存活 {len(alive)} 个"
+        if capability == "scan_ssl":
+            if data.get("scan_completed") is False or data.get("reachable") is False:
+                port = data.get("port", 443)
+                reason = data.get("tool_error") or "未获取到 TLS 协议或证书信息"
+                return f"SSL/TLS 检测{target_str}: 端口 {port} 未完成检测 - {reason}"
+            issue_count = len(data.get("issues", []))
+            vuln_count = len(data.get("vulnerabilities", []))
+            tls_text = f"，TLS: {data.get('tls_version')}" if data.get("tls_version") else ""
+            cert_text = "，已获取证书" if data.get("certificate") else "，未获取证书"
+            return f"SSL/TLS 检测{target_str}: 问题 {issue_count} 个，漏洞 {vuln_count} 个{tls_text}{cert_text}"
+        if capability == "scan_vulnerabilities":
+            if data.get("scan_completed") is False:
+                return f"漏洞扫描{target_str}: 未完成 - {data.get('tool_error') or '扫描引擎未完成执行'}"
+            return f"漏洞扫描{target_str}: 发现 {len(data.get('findings', []))} 个"
+        if capability == "scan_weak_passwords":
+            if data.get("scan_completed") is False:
+                return f"弱口令检测{target_str}: 未完成 - {data.get('tool_error') or 'Hydra 未完成执行'}"
+            return f"弱口令检测{target_str}: 发现 {len(data.get('found', []))} 个"
+        if capability in ("nikto_scan", "sqlmap_scan"):
+            count = len(data.get("findings", [])) + len(data.get("injection_points", []))
+            return f"Web 检测{target_str}: 发现 {count} 个问题"
+        if capability in ("gobuster_scan", "ffuf_scan"):
+            if data.get("scan_completed") is False:
+                return f"Web 发现{target_str}: 未完成 - {data.get('tool_error') or '目录/模糊测试工具执行失败'}"
+            return f"Web 发现{target_str}: 发现 {len(data.get('discovered', []))} 个路径/端点"
+        if capability.endswith("_check") and capability in ("redis_check", "mysql_check", "mongodb_check", "memcached_check", "oracle_check"):
+            labels = {
+                "redis_check": "Redis 未授权访问检测",
+                "mysql_check": "MySQL 空口令检测",
+                "mongodb_check": "MongoDB 未授权访问检测",
+                "memcached_check": "Memcached 未授权访问检测",
+                "oracle_check": "Oracle TNS 检测",
+            }
+            risky = data.get("unauthorized") or data.get("empty_password") or data.get("version_info")
+            port = data.get("port")
+            port_str = f"，端口 {port}" if port else ""
+            if data.get("reachable") is False:
+                return f"{labels[capability]}{target_str}: 不可达/无响应{port_str}，无法判定是否存在数据库风险"
+            return f"{labels[capability]}{target_str}: {'发现需关注项' if risky else '未发现明显风险'}{port_str}"
+        if capability in ("snmp_walk", "snmp_bruteforce", "snmp_get"):
+            if data.get("success") is False:
+                return f"SNMP 检测{target_str}: 未完成/无响应 - {data.get('tool_error') or data.get('metadata', {}).get('error') or 'SNMP 无响应'}"
+            count = data.get("total_results") or data.get("total_found") or (1 if data.get("value") else 0)
+            return f"SNMP 检测{target_str}: 返回 {count} 条结果"
+        if capability in ("enum4linux_scan", "crackmapexec_scan", "smb_enum"):
+            if data.get("scan_completed") is False:
+                return f"Windows/SMB 检测{target_str}: 未完成 - {data.get('tool_error') or 'Windows 工具未完成执行'}"
+            return f"Windows/SMB 检测{target_str}: 已完成"
+        if capability in ("baseline_check", "linux_baseline", "password_policy_check", "ssh_config_check", "audit_config_check", "service_port_check", "file_permission_check", "mac_check"):
+            summary = data.get("summary") or {}
+            failed = summary.get("non_compliant") or summary.get("failed") or summary.get("fail_count")
+            os_type = data.get("os_type")
+            os_text = f"{os_type} " if os_type and os_type != "unknown" else ""
+            if data.get("skipped"):
+                skip_detail = detail if error_detail else data.get("skip_reason") or data.get("tool_error") or "不适用"
+                return f"安全基线核查{target_str}: {os_text}已跳过 - {skip_detail}"
+            return f"安全基线核查{target_str}: {os_text}未通过 {failed or 0} 项"
+        if capability in ("full_compliance_scan", "tech_assessment", "database_security_scan", "web_discovery_scan", "network_device_scan", "windows_security_scan"):
+            labels = {
+                "full_compliance_scan": "全量合规扫描",
+                "tech_assessment": "等保技术测评",
+                "database_security_scan": "数据库安全检测",
+                "web_discovery_scan": "Web 目录发现",
+                "network_device_scan": "网络设备检测",
+                "windows_security_scan": "Windows/AD/SMB 检测",
+            }
+            summary = data.get("summary", {})
+            warning = summary.get("warning", 0)
+            warning_text = f"，告警/未完成 {warning}" if warning else ""
+            return f"{labels[capability]}{target_str}: 子任务成功 {summary.get('success', 0)}{warning_text}，失败 {summary.get('failed', 0)}，跳过 {summary.get('skipped', 0)}"
+        return f"{capability}{target_str}: 执行完成"
+
+    def _capability_label(self, capability: str) -> str:
+        labels = {
+            "baseline_check": "安全基线核查",
+            "linux_baseline": "安全基线核查",
+            "mongodb_check": "MongoDB 未授权访问检测",
+            "redis_check": "Redis 未授权访问检测",
+            "mysql_check": "MySQL 空口令检测",
+            "memcached_check": "Memcached 未授权访问检测",
+            "oracle_check": "Oracle TNS 检测",
+            "database_security_scan": "数据库安全检测",
+            "web_discovery_scan": "Web 目录发现",
+            "network_device_scan": "网络设备检测",
+            "windows_security_scan": "Windows/AD/SMB 检测",
+        }
+        return labels.get(capability, capability)
     
     def _summarize_execution_result(self, execution_result: Dict) -> str:
         """摘要执行结果用于 AI 描述"""
@@ -737,73 +1129,12 @@ class Orchestrator:
             return "无具体结果"
         
         parts = []
-        for result in results:
+        for result in self._iter_execution_results(execution_result):
             status = result.get("status")
             capability = result.get("capability")
             target = result.get("target", "")
-            data = result.get("result", {})
-            
-            if status != "success":
-                error = result.get("error", "未知错误")
-                target_str = f"({target})" if target else ""
-                parts.append(f"{capability}{target_str}: 失败 - {error}")
-                continue
-            
-            if capability == "scan_ports":
-                open_ports = data.get("open_ports", [])
-                host_status = data.get("host_status", "unknown")
-                target_str = f"({target})" if target else ""
-                if open_ports:
-                    port_list = ", ".join([f"{p['port']}/{p.get('protocol', 'tcp')} ({p.get('service', 'unknown')})" for p in open_ports])
-                    parts.append(f"端口扫描{target_str}: 主机可达，发现 {len(open_ports)} 个开放端口：{port_list}")
-                elif host_status == "up":
-                    parts.append(f"端口扫描{target_str}: 主机可达，未发现开放端口")
-                else:
-                    parts.append(f"端口扫描{target_str}: 主机状态未知，未发现开放端口")
-            
-            elif capability == "scan_ssl":
-                issues = data.get("issues", [])
-                tls_version = data.get("tls_version")
-                parts.append(f"SSL 检测：TLS 版本={tls_version}, 问题数={len(issues)}")
-            
-            elif capability == "scan_vulnerabilities":
-                findings = data.get("findings", [])
-                parts.append(f"漏洞扫描：发现 {len(findings)} 个漏洞")
-            
-            elif capability == "scan_weak_passwords":
-                found = data.get("found", [])
-                parts.append(f"弱口令检测：发现 {len(found)} 个弱口令")
-            
-            elif capability == "view_open_ports":
-                open_ports = data.get("open_ports", [])
-                if open_ports:
-                    port_list = ", ".join([f"{p['port']}/{p.get('protocol', 'tcp')} ({p.get('service', 'unknown')})" for p in open_ports])
-                    parts.append(f"开放端口：共 {len(open_ports)} 个，{port_list}")
-                else:
-                    parts.append("开放端口：无")
-            
-            elif capability == "view_scan_results":
-                recent_scans = data.get("recent_scans", [])
-                parts.append(f"扫描结果：共 {len(recent_scans)} 条记录")
-            
-            elif capability == "list_projects":
-                projects = data.get("projects", [])
-                project_list = ", ".join([f"{p['name']}(ID:{p['id']})" for p in projects[:5]])
-                parts.append(f"项目列表：{project_list}")
-            
-            elif capability == "create_project":
-                parts.append(f"项目创建成功：{data.get('name', '未知')}")
-            
-            elif capability == "chat":
-                msg = data.get("message", "")
-                if msg:
-                    parts.append(msg)
-            
-            elif capability == "help":
-                parts.append("显示帮助信息")
-            
-            else:
-                parts.append(f"{capability}: 执行完成")
+            data = self._result_payload(result)
+            parts.append(self._describe_result_line(capability, target, status, data, result.get("error")))
         
         return "\n".join(parts) if parts else "无具体结果"
     
@@ -811,55 +1142,167 @@ class Orchestrator:
         """降级方案：硬编码的结果描述"""
         results = execution_result.get("results", [])
         success_count = execution_result.get("success_count", 0)
-        
+        failed_count = execution_result.get("failed_count", 0)
+        total_count = len(results)
+
         parts = []
+        for result in self._iter_execution_results(execution_result):
+            status = result.get("status")
+            capability = result.get("capability")
+            target = result.get("target", "")
+            data = self._result_payload(result)
+            parts.append(self._describe_result_line(capability, target, status, data, result.get("error")))
+
+        if parts:
+            summary = f"\n\n【汇总】共 {total_count} 个任务，成功 {success_count}，失败 {failed_count}"
+            return "\n".join(parts) + summary
+
         for result in results:
             status = result.get("status")
             capability = result.get("capability")
             target = result.get("target", "")
-            data = result.get("result", {})
-            
-            if status != "success":
-                error = result.get("error", "未知错误")
+            data = self._result_payload(result)
+
+            # 支持 "success" 和 "completed" 两种成功状态
+            if status not in ["success", "completed"]:
+                error = result.get("error") or "未知错误"
                 target_str = f"({target})" if target else ""
-                parts.append(f"扫描失败：{capability}{target_str} - {error}")
+                parts.append(f"✗ 扫描失败：{capability}{target_str} - {error}")
                 continue
-            
+
             if capability == "scan_ports":
                 open_ports = data.get("open_ports", [])
                 host_status = data.get("host_status", "unknown")
                 target_str = f"({target})" if target else ""
                 if open_ports:
-                    parts.append(f"端口扫描{target_str}: 主机可达，发现 {len(open_ports)} 个开放端口：")
+                    parts.append(f"✓ 端口扫描{target_str}: 发现 {len(open_ports)} 个明确开放端口")
                     for port in open_ports[:5]:
                         parts.append(f"  - {port['port']}/{port.get('protocol', 'tcp')}: {port.get('service', 'unknown')}")
                     if len(open_ports) > 5:
                         parts.append(f"  ... 还有 {len(open_ports) - 5} 个")
                 elif host_status == "up":
-                    parts.append(f"端口扫描{target_str}: 主机可达，未发现开放端口")
+                    filtered_count = data.get("filtered_count", 0)
+                    suffix = f"，{filtered_count} 个端口被过滤/未确认开放" if filtered_count else ""
+                    parts.append(f"⚠ 端口扫描{target_str}: 主机可达，本次扫描范围未发现明确开放端口{suffix}")
                 else:
-                    parts.append(f"端口扫描{target_str}: 主机状态未知")
-            
+                    parts.append(f"⚠ 端口扫描{target_str}: 主机不可达或无响应")
+
+            elif capability == "masscan_scan":
+                open_ports = data.get("open_ports", [])
+                total = data.get("total_open", 0)
+                duration = data.get("metadata", {}).get("duration_ms", 0)
+                target_str = f"({target})" if target else ""
+                if total > 0:
+                    parts.append(f"✓ 高速扫描{target_str}: 发现 {total} 个开放端口（{duration}ms）")
+                else:
+                    parts.append(f"⚠ 高速扫描{target_str}: 未发现开放端口（{duration}ms）")
+
             elif capability == "view_open_ports":
                 open_ports = data.get("open_ports", [])
                 if open_ports:
-                    parts.append(f"开放端口：")
+                    parts.append("开放端口列表：")
                     for port in open_ports[:5]:
                         parts.append(f"  - {port['port']}/{port.get('protocol', 'tcp')}: {port.get('service', 'unknown')}")
-            
+
+            elif capability == "scan_weak_passwords":
+                found = data.get("found", [])
+                tested_users = data.get("tested_users", 0)
+                tested_passwords = data.get("tested_passwords", 0)
+                total_combos = data.get("total_combinations", 0)
+                service = data.get("service", "")
+                port = data.get("port", "")
+                target_str = f"({target})" if target else ""
+
+                parts.append(f"弱口令检测{target_str}: 测试了 {tested_users} 个用户 × {tested_passwords} 个密码 = {total_combos} 种组合")
+                if data.get("scan_completed") is False:
+                    parts.append(f"  ⚠ 检测未完成，无法判定是否存在弱口令：{data.get('tool_error') or '目标服务不可达或工具未完成执行'}")
+                elif found:
+                    parts.append(f"  ⚠ 发现 {len(found)} 个弱口令！")
+                    for fp in found[:5]:
+                        parts.append(f"    - 用户: {fp.get('username', '?')} 密码: {fp.get('password', '?')}")
+                    if len(found) > 5:
+                        parts.append(f"    ... 还有 {len(found) - 5} 个")
+                else:
+                    parts.append("  ✓ 未发现弱口令")
+
+            elif capability == "scan_vulnerabilities":
+                findings = data.get("findings", [])
+                target_str = f"({target})" if target else ""
+                if findings:
+                    parts.append(f"⚠ 漏洞扫描{target_str}: 发现 {len(findings)} 个漏洞")
+                    for f in findings[:5]:
+                        sev = f.get("severity", "未知")
+                        name = f.get("name", f.get("id", "未知"))
+                        parts.append(f"  - [{sev}] {name}")
+                else:
+                    parts.append(f"✓ 漏洞扫描{target_str}: 未发现漏洞")
+
+            elif capability in ("nikto_scan", "sqlmap_scan"):
+                findings = data.get("findings", [])
+                target_str = f"({target})" if target else ""
+                if findings:
+                    parts.append(f"⚠ {capability}{target_str}: 发现 {len(findings)} 个问题")
+                else:
+                    parts.append(f"✓ {capability}{target_str}: 未发现问题")
+
+            elif capability in ("baseline_check", "linux_baseline"):
+                target_str = f"({target})" if target else ""
+                parts.append(f"✓ 安全基线核查{target_str}: 已完成")
+                # 显示一些关键检查结果
+                if "checks" in data:
+                    checks = data.get("checks", {})
+                    failed_checks = [k for k, v in checks.items() if not v.get("compliant", True)]
+                    if failed_checks:
+                        parts.append(f"  ⚠ {len(failed_checks)} 项检查未通过")
+                    else:
+                        parts.append(f"  ✓ 所有检查项均通过")
+
+            elif capability == "redis_check":
+                unauthorized = data.get("unauthorized", False)
+                target_str = f"({target})" if target else ""
+                if unauthorized:
+                    parts.append(f"⚠ Redis{target_str}: 存在未授权访问风险！")
+                else:
+                    parts.append(f"✓ Redis{target_str}: 未发现未授权访问")
+
             elif capability == "list_projects":
                 projects = data.get("projects", [])
                 if projects:
                     parts.append("项目列表：")
                     for p in projects[:5]:
                         parts.append(f"  - {p['name']} (ID: {p['id']})")
-            
+
+            elif capability == "create_project":
+                project = data.get("project", {})
+                if project:
+                    parts.append(f"✓ 项目创建成功：{project.get('name', '')} (ID: {project.get('id', '')})")
+
+            elif capability == "full_compliance_scan":
+                open_ports = data.get("open_ports", [])
+                findings = data.get("findings", [])
+                target_str = f"({target})" if target else ""
+                parts.append(f"✓ 等保全量合规扫描{target_str}: 完成")
+                if open_ports:
+                    parts.append(f"  - 开放端口: {len(open_ports)} 个")
+                if findings:
+                    parts.append(f"  - 漏洞: {len(findings)} 个")
+
             elif capability == "chat":
                 msg = data.get("message", "")
                 if msg:
                     return msg
-        
-        return "\n".join(parts) if parts else f"任务执行完成（成功 {success_count} 个）"
+
+        # 汇总
+        if not parts:
+            if total_count == 0:
+                return f"任务执行完成（无任务）"
+            elif success_count == total_count:
+                return f"任务执行完成（成功 {success_count}/{total_count}）"
+            else:
+                return f"任务执行完成（成功 {success_count}，失败 {failed_count}，共 {total_count}）"
+
+        summary = f"\n\n【汇总】共 {total_count} 个任务，成功 {success_count}，失败 {failed_count}"
+        return "\n".join(parts) + summary
     
     def _format_history(self, history: List[Dict]) -> str:
         """格式化对话历史"""
@@ -873,7 +1316,7 @@ class Orchestrator:
     
     def _extract_scan_results_from_execution(self, execution_result: dict) -> dict:
         """从执行结果中提取扫描结果
-        
+
         判断逻辑（基于实际扫描结果，不依赖 nmap 的主机检测）：
         - 有开放端口 → success（主机确实可达）
         - 无开放端口但扫描完成 → warning（可能不可达，或无服务）
@@ -881,56 +1324,230 @@ class Orchestrator:
         """
         results = {
             "open_ports": [],
+            "filtered_ports": [],
             "vulnerabilities": [],
             "ssl_issues": [],
+            "weak_passwords": [],           # 弱口令详情
+            "weak_password_stats": {},      # 弱口令统计（每个资产）
+            "web_vulnerabilities": [],      # Web 漏洞（nikto/sqlmap）
+            "web_discoveries": [],          # 目录/端点发现（gobuster/ffuf）
+            "database_results": {},         # 数据库检测结果
+            "database_issues": [],          # 数据库风险项
+            "snmp_results": {},             # SNMP 检测结果
+            "windows_results": {},          # Windows/SMB 检测结果
+            "composite_results": [],        # 组合工具子任务矩阵
+            "baseline_results": {},         # 安全基线核查结果
+            "discovered_assets": {},         # 资产发现结果
             "compliance_score": None,
             "asset_results": {},  # 按资产分组的结果
         }
-        
-        for result in execution_result.get("results", []):
+
+        for result in self._iter_execution_results(execution_result):
             target = result.get("target", "unknown")
             status = result.get("status")
-            data = result.get("result", {})
+            capability = result.get("capability", "")
+            data = self._result_payload(result)
             error = result.get("error")
-            
-            # 初始化资产结果
-            if target not in results["asset_results"]:
+            error_detail = result.get("error_detail")
+            if not error_detail and isinstance(data, dict):
+                error_detail = data.get("error_detail")
+            is_sub_result = bool(result.get("label"))
+
+            # 初始化资产结果；组合子任务只进入详情，不单独生成资产卡
+            if not is_sub_result and target not in results["asset_results"]:
                 results["asset_results"][target] = {
                     "status": status,
+                    "capability": capability,
                     "result": {},
                     "error": error,
+                    "error_detail": error_detail,
                 }
-            
-            if status == "success":
+
+            # 支持 success/completed/warning；warning 表示工具执行但结果不可判定或未完整完成
+            if status in ["success", "completed", "warning"]:
                 # 更新资产状态
-                results["asset_results"][target]["status"] = "success"
-                results["asset_results"][target]["result"] = data
-                
-                # 判断显示状态：基于实际扫描结果，不依赖 host_status
-                open_ports = data.get("open_ports", [])
-                
-                if len(open_ports) > 0:
-                    # 有开放端口 → 主机确实可达
-                    results["asset_results"][target]["display_status"] = "success"
-                else:
-                    # 无开放端口 → 可能不可达，或防火墙过滤，或无服务
+                if not is_sub_result:
+                    results["asset_results"][target]["status"] = "success"
+                    results["asset_results"][target]["result"] = data
+
+                # 判断显示状态 - 根据工具类型区分
+                if is_sub_result:
+                    pass
+                elif capability in ("baseline_check", "linux_baseline", "password_policy_check", "ssh_config_check", "audit_config_check", "service_port_check", "file_permission_check", "mac_check") and data.get("skipped"):
+                    detail = data.get("error_detail") or error_detail or {}
                     results["asset_results"][target]["display_status"] = "warning"
-                
-                # 合并到全局结果（保持向后兼容）
+                    results["asset_results"][target]["error"] = detail.get("error_reason") or data.get("skip_reason") or data.get("tool_error")
+                    results["asset_results"][target]["error_detail"] = detail or None
+                elif capability in ("scan_ports", "nmap_scan", "masscan_scan"):
+                    # 端口扫描工具：有开放端口才算 success，无则 warning
+                    open_ports = data.get("open_ports", [])
+                    if len(open_ports) > 0:
+                        results["asset_results"][target]["display_status"] = "success"
+                    else:
+                        results["asset_results"][target]["display_status"] = "warning"
+                elif capability == "scan_ssl":
+                    if data.get("scan_completed") is False or data.get("reachable") is False:
+                        results["asset_results"][target]["display_status"] = "warning"
+                        results["asset_results"][target]["error"] = data.get("tool_error") or "SSL/TLS 检测未完成"
+                    elif data.get("issues") or data.get("vulnerabilities"):
+                        results["asset_results"][target]["display_status"] = "warning"
+                    else:
+                        results["asset_results"][target]["display_status"] = "success"
+                elif capability == "scan_vulnerabilities":
+                    if data.get("scan_completed") is False:
+                        results["asset_results"][target]["display_status"] = "warning"
+                        results["asset_results"][target]["error"] = data.get("tool_error") or "漏洞扫描未完成"
+                    else:
+                        results["asset_results"][target]["display_status"] = "warning" if data.get("findings") else "success"
+                elif capability in ("gobuster_scan", "ffuf_scan"):
+                    if data.get("scan_completed") is False:
+                        results["asset_results"][target]["display_status"] = "warning"
+                        results["asset_results"][target]["error"] = data.get("tool_error") or "Web 发现工具未完成"
+                    else:
+                        results["asset_results"][target]["display_status"] = "warning" if data.get("discovered") else "success"
+                elif capability == "scan_weak_passwords":
+                    if data.get("scan_completed") is False:
+                        results["asset_results"][target]["display_status"] = "warning"
+                        results["asset_results"][target]["error"] = data.get("tool_error") or "弱口令检测未完成"
+                    else:
+                        results["asset_results"][target]["display_status"] = "warning" if data.get("found") else "success"
+                elif capability in ("snmp_walk", "snmp_bruteforce", "snmp_get"):
+                    if data.get("success") is False:
+                        results["asset_results"][target]["display_status"] = "warning"
+                        results["asset_results"][target]["error"] = data.get("tool_error") or "SNMP 无响应或认证失败"
+                    else:
+                        results["asset_results"][target]["display_status"] = "success"
+                elif capability in ("enum4linux_scan", "crackmapexec_scan", "smb_enum"):
+                    if data.get("scan_completed") is False:
+                        results["asset_results"][target]["display_status"] = "warning"
+                        results["asset_results"][target]["error"] = data.get("tool_error") or "Windows/SMB 检测未完成"
+                    else:
+                        results["asset_results"][target]["display_status"] = "success"
+                elif capability in ("full_compliance_scan", "tech_assessment", "database_security_scan", "web_discovery_scan", "network_device_scan", "windows_security_scan"):
+                    summary = data.get("summary") or {}
+                    if summary.get("failed") or summary.get("warning"):
+                        results["asset_results"][target]["display_status"] = "warning"
+                    else:
+                        results["asset_results"][target]["display_status"] = "success"
+                else:
+                    # 其他工具（Web扫描、漏洞检测、基线核查等）：执行成功即为 success
+                    results["asset_results"][target]["display_status"] = "success"
+
+                # 合并到全局结果
                 if "open_ports" in data:
                     results["open_ports"].extend(data["open_ports"])
+                if "filtered_ports" in data:
+                    results["filtered_ports"].extend(data["filtered_ports"])
                 if "findings" in data:
+                    for finding in data["findings"]:
+                        if isinstance(finding, dict):
+                            finding.setdefault("target", target)
                     results["vulnerabilities"].extend(data["findings"])
                 if "issues" in data:
                     results["ssl_issues"].extend(data["issues"])
                 if "compliance_score" in data:
                     results["compliance_score"] = data["compliance_score"]
+
+                if capability in ("full_compliance_scan", "tech_assessment", "database_security_scan", "web_discovery_scan", "network_device_scan", "windows_security_scan") and data.get("sub_results"):
+                    results["composite_results"].append({
+                        "target": target,
+                        "capability": capability,
+                        "summary": data.get("summary", {}),
+                        "sub_results": data.get("sub_results", []),
+                    })
+
+                # 弱口令结果处理
+                if capability == "scan_weak_passwords":
+                    found = data.get("found", [])
+                    if found:
+                        # 添加目标信息到每条弱口令记录
+                        for fp in found:
+                            fp["target"] = target
+                        results["weak_passwords"].extend(found)
+                    # 记录每个资产的统计
+                    results["weak_password_stats"][target] = {
+                        "found_count": len(found),
+                        "tested_users": data.get("tested_users", 0),
+                        "tested_passwords": data.get("tested_passwords", 0),
+                        "total_combinations": data.get("total_combinations", 0),
+                        "service": data.get("service", ""),
+                        "port": data.get("port", 0),
+                        "scan_completed": data.get("scan_completed"),
+                        "tool_error": data.get("tool_error"),
+                    }
+
+                # Web 漏洞结果处理
+                if capability in ("nikto_scan", "sqlmap_scan", "gobuster_scan", "ffuf_scan"):
+                    if data.get("findings"):
+                        for f in data["findings"]:
+                            f["target"] = target
+                            f["tool"] = capability
+                        results["web_vulnerabilities"].extend(data["findings"])
+                    elif data.get("vulnerabilities"):
+                        for f in data["vulnerabilities"]:
+                            f["target"] = target
+                            f["tool"] = capability
+                        results["web_vulnerabilities"].extend(data["vulnerabilities"])
+                    if data.get("injection_points"):
+                        for f in data["injection_points"]:
+                            item = f if isinstance(f, dict) else {"detail": f}
+                            item["target"] = target
+                            item["tool"] = capability
+                            item.setdefault("severity", "high")
+                            item.setdefault("name", "SQL 注入点")
+                            results["web_vulnerabilities"].append(item)
+                    if data.get("discovered"):
+                        for f in data["discovered"]:
+                            item = f if isinstance(f, dict) else {"path": f}
+                            item["target"] = target
+                            item["tool"] = capability
+                            results["web_discoveries"].append(item)
+
+                if capability in ("redis_check", "mysql_check", "mongodb_check", "memcached_check", "oracle_check"):
+                    results["database_results"].setdefault(target, {})[capability] = data
+                    if data.get("unauthorized") or data.get("empty_password") or data.get("version_info"):
+                        results["database_issues"].append({
+                            "target": target,
+                            "tool": capability,
+                            "unauthorized": data.get("unauthorized"),
+                            "empty_password": data.get("empty_password"),
+                            "version_info": data.get("version_info"),
+                            "port": data.get("port"),
+                        })
+
+                if capability in ("snmp_walk", "snmp_bruteforce", "snmp_get"):
+                    results["snmp_results"].setdefault(target, {})[capability] = data
+
+                if capability in ("enum4linux_scan", "crackmapexec_scan", "smb_enum"):
+                    results["windows_results"].setdefault(target, {})[capability] = data
+
+                # 安全基线核查结果
+                if capability in ("baseline_check", "linux_baseline", "password_policy_check", "ssh_config_check", "audit_config_check", "service_port_check", "file_permission_check", "mac_check"):
+                    results["baseline_results"].setdefault(target, {})[capability] = data
+
+                # 资产发现结果
+                if capability in ("masscan_scan", "scan_ports"):
+                    if "open_ports" in data and data["open_ports"]:
+                        results["discovered_assets"][target] = {
+                            "open_ports": data["open_ports"],
+                            "total_open": len(data["open_ports"]),
+                        }
             else:
-                # 失败的情况（扫描超时、网络错误等）
-                results["asset_results"][target]["status"] = "failed"
-                results["asset_results"][target]["display_status"] = "failed"
-                results["asset_results"][target]["error"] = error
-        
+                # 失败的情况
+                if is_sub_result:
+                    pass
+                elif status == "skipped":
+                    detail = error_detail or {}
+                    results["asset_results"][target]["display_status"] = "warning"
+                    results["asset_results"][target]["error"] = detail.get("error_reason") or error
+                    results["asset_results"][target]["error_detail"] = error_detail
+                else:
+                    detail = error_detail or {}
+                    results["asset_results"][target]["status"] = "failed"
+                    results["asset_results"][target]["display_status"] = "failed"
+                    results["asset_results"][target]["error"] = detail.get("error_reason") or error
+                    results["asset_results"][target]["error_detail"] = error_detail
+
         return results
     
     async def _calculate_and_update_score(self, db: AsyncSession, project_id: int):
@@ -963,17 +1580,23 @@ class Orchestrator:
             logger.error(f"Failed to calculate score for project {project_id}: {e}", exc_info=True)
             await db.rollback()
     
-    def get_status(self) -> dict:
-        """获取当前状态"""
+    def get_status(self, user_id: int = None) -> dict:
+        """获取当前状态，如果指定 user_id 则只返回该用户的任务"""
         return {
             "running": [
                 {
-                    "agent_id": tid,
+                    "task_id": tid,
                     "name": "AI 执行任务",
                     "status": "running",
-                    "progress": 0,
+                    "current_step": progress.get("current_step", "任务执行中..."),
+                    "step_progress": {
+                        "step_index": progress.get("step_index", 0),
+                        "total_steps": progress.get("total_steps", 0),
+                        "steps": progress.get("steps", []),
+                    },
                 }
-                for tid in self.active_agents
+                for tid, progress in self.task_progress.items()
+                if user_id is None or progress.get("user_id") == user_id
             ],
             "completed": [
                 {
@@ -985,6 +1608,7 @@ class Orchestrator:
                     "completed_at": t["completed_at"],
                 }
                 for t in self.completed_tasks
+                if user_id is None or t.get("user_id") == user_id
             ],
         }
 

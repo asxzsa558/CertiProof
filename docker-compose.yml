@@ -83,6 +83,12 @@ services:
     depends_on:
       - security-tools
       - ocr-server
+      - ssh-checker
+      - fast-scanner
+      - web-tools
+      - network-tools
+      - db-tools
+      - windows-tools
     restart: unless-stopped
     networks:
       - certiproof-net
@@ -93,6 +99,78 @@ services:
       context: ./mcp-servers/security-tools
       dockerfile: Dockerfile
     container_name: certiproof-security-tools
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # SSH 白盒配置核查服务
+  ssh-checker:
+    build:
+      context: ./mcp-servers/ssh-checker
+      dockerfile: Dockerfile
+    container_name: certiproof-ssh-checker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # 快速端口扫描服务 (masscan + fping)
+  fast-scanner:
+    build:
+      context: ./mcp-servers/fast-scanner
+      dockerfile: Dockerfile
+    container_name: certiproof-fast-scanner
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # Web 安全检测服务 (nikto + sqlmap + gobuster + ffuf)
+  web-tools:
+    build:
+      context: ./mcp-servers/web-tools
+      dockerfile: Dockerfile
+    container_name: certiproof-web-tools
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # 网络设备检测服务 (snmpwalk + onesixtyone)
+  network-tools:
+    build:
+      context: ./mcp-servers/network-tools
+      dockerfile: Dockerfile
+    container_name: certiproof-network-tools
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # 数据库安全检测服务 (redis-cli + tnscmd10g + mysql-client)
+  db-tools:
+    build:
+      context: ./mcp-servers/db-tools
+      dockerfile: Dockerfile
+    container_name: certiproof-db-tools
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # Windows/AD 安全检测服务 (enum4linux-ng + netexec + impacket)
+  windows-tools:
+    build:
+      context: ./mcp-servers/windows-tools
+      dockerfile: Dockerfile
+    container_name: certiproof-windows-tools
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

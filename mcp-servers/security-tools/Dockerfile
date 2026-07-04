@@ -11,6 +11,7 @@ RUN apt-get update && \
     wget \
     unzip \
     bsdmainutils \
+    dnsutils \
     procps \
     hydra \
     nmap \
@@ -27,6 +28,12 @@ RUN wget -q https://ghfast.top/https://github.com/projectdiscovery/nuclei/releas
     unzip /tmp/nuclei.zip -d /usr/local/bin/ && \
     chmod +x /usr/local/bin/nuclei && \
     rm /tmp/nuclei.zip
+
+# 预置 nuclei 官方模板；没有模板时 nuclei 会启动但实际不扫描
+RUN mkdir -p /root/nuclei-templates && \
+    curl -fsSL https://ghfast.top/https://github.com/projectdiscovery/nuclei-templates/archive/refs/heads/main.tar.gz | tar xz -C /tmp && \
+    mv /tmp/nuclei-templates-main/* /root/nuclei-templates/ && \
+    rm -rf /tmp/nuclei-templates-main
 
 # 安装 Python 依赖
 WORKDIR /app

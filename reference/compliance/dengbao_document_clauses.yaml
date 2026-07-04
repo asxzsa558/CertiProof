@@ -1,0 +1,241 @@
+name: "等保文档类条款"
+standard: "GB/T 22239-2019"
+version: "1.0"
+description: "等保测评中需要上传文档证据的条款"
+
+clauses:
+  # ===== 安全管理制度 =====
+  - id: "8.1.5.1.1"
+    name: "安全管理制度"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立信息安全管理制度，明确信息安全工作的方针、目标、范围、原则和框架"
+    weight: 2.5
+    required_docs:
+      - name: "《信息安全管理制度》"
+        type: "policy"
+        min_size_kb: 10
+        required_keywords: ["信息安全", "管理制度", "方针", "目标"]
+        allowed_types: ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+      - name: "《信息安全策略文件》"
+        type: "policy"
+        min_size_kb: 5
+        required_keywords: ["信息安全", "策略"]
+    pass_threshold: 1.0
+    risk_level: "high"
+
+  - id: "8.1.5.1.2"
+    name: "安全管理制度评审和修订"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期对信息安全管理制度进行评审和修订"
+    weight: 1.5
+    required_docs:
+      - name: "《安全管理制度评审记录》"
+        type: "record"
+        min_size_kb: 2
+        required_keywords: ["评审", "修订", "记录"]
+    pass_threshold: 1.0
+    risk_level: "medium"
+
+  # ===== 安全管理机构 =====
+  - id: "8.1.5.2.1"
+    name: "安全管理机构"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应设立信息安全管理工作的职能部门，成立信息安全委员会"
+    weight: 2.0
+    required_docs:
+      - name: "《信息安全管理机构设置文件》"
+        type: "policy"
+        min_size_kb: 5
+        required_keywords: ["安全管理", "机构", "职责"]
+      - name: "《信息安全委员会成立文件》"
+        type: "policy"
+        min_size_kb: 3
+        required_keywords: ["信息安全委员会", "成立"]
+    pass_threshold: 1.0
+    risk_level: "high"
+
+  - id: "8.1.5.2.2"
+    name: "安全管理机构职责"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应明确信息安全管理机构各部门的职责"
+    weight: 1.5
+    required_docs:
+      - name: "《信息安全管理机构职责说明》"
+        type: "policy"
+        min_size_kb: 3
+        required_keywords: ["职责", "部门", "管理"]
+    pass_threshold: 1.0
+    risk_level: "medium"
+
+  # ===== 人员安全管理 =====
+  - id: "8.1.5.3.1"
+    name: "人员安全管理"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立人员安全管理制度，明确人员录用、离岗、考核、教育培训等方面的安全管理要求"
+    weight: 2.0
+    required_docs:
+      - name: "《人员安全管理制度》"
+        type: "policy"
+        min_size_kb: 8
+        required_keywords: ["人员", "安全", "录用", "离岗", "考核"]
+      - name: "《人员安全教育培训记录》"
+        type: "record"
+        min_size_kb: 2
+        required_keywords: ["培训", "教育", "记录"]
+    pass_threshold: 1.0
+    risk_level: "high"
+
+  - id: "8.1.5.3.2"
+    name: "人员离岗管理"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立人员离岗安全管理制度，明确人员离岗后的安全管理要求"
+    weight: 1.5
+    required_docs:
+      - name: "《人员离岗安全管理制度》"
+        type: "policy"
+        min_size_kb: 3
+        required_keywords: ["离岗", "安全", "管理"]
+    pass_threshold: 1.0
+    risk_level: "medium"
+
+  # ===== 安全建设管理 =====
+  - id: "8.1.5.4.1"
+    name: "安全建设管理"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立安全建设管理制度，明确安全建设的目标、范围、原则和框架"
+    weight: 2.0
+    required_docs:
+      - name: "《安全建设管理制度》"
+        type: "policy"
+        min_size_kb: 8
+        required_keywords: ["安全建设", "管理制度", "目标", "范围"]
+      - name: "《系统安全方案》"
+        type: "policy"
+        min_size_kb: 10
+        required_keywords: ["系统", "安全", "方案"]
+    pass_threshold: 1.0
+    risk_level: "high"
+
+  - id: "8.1.5.4.2"
+    name: "安全建设管理评审"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期对安全建设管理进行评审和修订"
+    weight: 1.5
+    required_docs:
+      - name: "《安全建设管理评审记录》"
+        type: "record"
+        min_size_kb: 2
+        required_keywords: ["评审", "修订", "记录"]
+    pass_threshold: 1.0
+    risk_level: "medium"
+
+  # ===== 安全运维管理 =====
+  - id: "8.1.5.5.1"
+    name: "安全运维管理"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立安全运维管理制度，明确安全运维的目标、范围、原则和框架"
+    weight: 2.0
+    required_docs:
+      - name: "《安全运维管理制度》"
+        type: "policy"
+        min_size_kb: 8
+        required_keywords: ["安全运维", "管理制度", "目标", "范围"]
+      - name: "《安全运维记录》"
+        type: "record"
+        min_size_kb: 5
+        required_keywords: ["运维", "记录"]
+    pass_threshold: 1.0
+    risk_level: "high"
+
+  - id: "8.1.5.5.2"
+    name: "安全运维管理评审"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应定期对安全运维管理进行评审和修订"
+    weight: 1.5
+    required_docs:
+      - name: "《安全运维管理评审记录》"
+        type: "record"
+        min_size_kb: 2
+        required_keywords: ["评审", "修订", "记录"]
+    pass_threshold: 1.0
+    risk_level: "medium"
+
+  # ===== 应急预案管理 =====
+  - id: "8.1.5.6.1"
+    name: "应急预案管理"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应制定信息安全事件应急预案，明确应急响应流程"
+    weight: 2.5
+    required_docs:
+      - name: "《信息安全事件应急预案》"
+        type: "policy"
+        min_size_kb: 10
+        required_keywords: ["应急预案", "应急响应", "流程"]
+      - name: "《应急预案演练记录》"
+        type: "record"
+        min_size_kb: 3
+        required_keywords: ["演练", "记录"]
+    pass_threshold: 1.0
+    risk_level: "high"
+
+  # ===== 安全事件管理 =====
+  - id: "8.1.5.7.1"
+    name: "安全事件管理"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立安全事件管理制度，明确安全事件的报告、处理、分析流程"
+    weight: 2.0
+    required_docs:
+      - name: "《安全事件管理制度》"
+        type: "policy"
+        min_size_kb: 8
+        required_keywords: ["安全事件", "报告", "处理", "分析"]
+      - name: "《安全事件处理记录》"
+        type: "record"
+        min_size_kb: 3
+        required_keywords: ["事件", "处理", "记录"]
+    pass_threshold: 1.0
+    risk_level: "high"
+
+  # ===== 安全审计管理 =====
+  - id: "8.1.5.8.1"
+    name: "安全审计管理"
+    pillar: "management"
+    level: [2, 3]
+    check_type: "document"
+    description: "应建立安全审计管理制度，明确安全审计的目标、范围、原则和框架"
+    weight: 2.0
+    required_docs:
+      - name: "《安全审计管理制度》"
+        type: "policy"
+        min_size_kb: 8
+        required_keywords: ["安全审计", "管理制度", "目标", "范围"]
+      - name: "《安全审计报告》"
+        type: "record"
+        min_size_kb: 5
+        required_keywords: ["审计", "报告"]
+    pass_threshold: 1.0
+    risk_level: "high"

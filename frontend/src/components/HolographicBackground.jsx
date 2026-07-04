@@ -155,7 +155,8 @@ function Scene() {
 }
 
 // 导出的背景组件
-export default function HolographicBackground() {
+export default function HolographicBackground({ enabled = true }) {
+  if (!enabled) return null
   return (
     <div style={{
       position: 'fixed',

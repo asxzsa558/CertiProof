@@ -1,6 +1,6 @@
 .results-page {
   min-height: 100vh;
-  background: #0a0a0b;
+  background: var(--bg-primary);
 }
 
 .results-header {

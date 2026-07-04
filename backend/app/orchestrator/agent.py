@@ -1,6 +1,10 @@
 """
 Agent - 独立的 Agent 执行实例
 支持实时进度更新和证据持久化
+
+根据 design-v2.md：
+- L1 Agent（协调者）：意图理解、任务规划、派发 Skill、接收结果、合成判定
+- L2 Skill（Worker）：执行具体检查逻辑、调用 MCP 工具、返回结构化结果
 """
 
 import asyncio
@@ -481,3 +485,69 @@ class Agent:
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "error": self.error,
         }
+
+    async def coordinate_skills(
+        self,
+        plan: List[Dict],
+        user_id: int,
+        max_concurrent: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        L1 Agent 协调多个 L2 Skill 并发执行
+
+        根据 design-v2.md 的 Coordinator 模式：
+        - Agent 负责意图理解、任务规划、派发 Skill
+        - Agent 收集 Skill 的结果
+        - Agent 合成最终判定
+
+        Args:
+            plan: 执行计划，每个步骤包含 capability 和 parameters
+            user_id: 用户 ID
+            max_concurrent: 最大并发数
+
+        Returns:
+            所有 Skill 的执行结果列表
+        """
+        from app.orchestrator.skill import Skill
+
+        # 为每个 step 创建独立的 Skill 实例
+        skills = []
+        for i, step in enumerate(plan):
+            skill_id = f"{self.agent_id}-skill-{i}"
+            skill = Skill(
+                skill_id=skill_id,
+                capability=step.get("capability", ""),
+                parameters=step.get("parameters", {}),
+                user_id=user_id,
+                project_id=self.project_id,
+            )
+            skills.append(skill)
+
+        logger.info(f"Agent {self.agent_id} dispatching {len(skills)} Skills")
+
+        # Agent 派发 Skill 并发执行
+        from app.orchestrator.skill import Skill
+        results = await Skill.dispatch_skills_concurrent(
+            skills=skills,
+            max_concurrent=max_concurrent,
+        )
+
+        # Agent 合成结果（不直接写 DB，由主流程统一处理）
+        synthesized = self._synthesize_results(results)
+
+        return synthesized
+
+    def _synthesize_results(self, skill_results: List[Dict]) -> List[Dict]:
+        """
+        Agent 合成 Skill 的结果
+
+        根据 design-v2.md：
+        - Agent 必须亲自"合成"判定结果，不能"转发" Skill 的结论
+        - Agent 需要理解 Skill 返回的证据链
+
+        Returns:
+            合成后的结果列表（与原 Skill 结果格式相同）
+        """
+        # 这里目前只是透传 Skill 的结果
+        # 后续可以添加更复杂的合成逻辑（如：跨 Skill 关联分析）
+        return skill_results

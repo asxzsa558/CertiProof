@@ -21,6 +21,233 @@ class ExecutionEngine:
     
     def __init__(self, registry: CapabilityRegistry = None):
         self.registry = registry or capability_registry
+
+    def _normalize_capability_name(self, capability_name: str) -> str:
+        aliases = {
+            "ping_host": "ping_asset",
+            "ssh_check": "ssh_config_check",
+            "nmap_scan": "scan_ports",
+            "port_scan": "scan_ports",
+            "nikto": "nikto_scan",
+            "gobuster": "web_discovery_scan",
+            "dirbust": "web_discovery_scan",
+            "sqlmap": "sqlmap_scan",
+            "ffuf": "web_discovery_scan",
+            "testssl_scan": "scan_ssl",
+            "ssl_check": "scan_ssl",
+            "nuclei_scan": "scan_vulnerabilities",
+            "vuln_scan": "scan_vulnerabilities",
+            "hydra_bruteforce": "scan_weak_passwords",
+            "password_test": "scan_weak_passwords",
+            "redis": "redis_check",
+            "mysql": "mysql_check",
+            "mongodb": "mongodb_check",
+            "mongo": "mongodb_check",
+            "oracle": "oracle_check",
+            "memcached": "memcached_check",
+            "db": "database_security_scan",
+            "database_check": "database_security_scan",
+            "database_scan": "database_security_scan",
+            "snmp": "network_device_scan",
+            "snmpget": "snmp_get",
+            "windows": "windows_security_scan",
+            "smb": "windows_security_scan",
+            "cme": "crackmapexec_scan",
+            "baseline": "baseline_check",
+            "linux_baseline": "baseline_check",
+        }
+        return aliases.get(capability_name, capability_name)
+
+    def _ssh_params(self, parameters: Dict) -> Dict:
+        params = {
+            "target": parameters["target"],
+            "username": parameters.get("username") or parameters.get("ssh_username") or "root",
+            "port": parameters.get("port") or parameters.get("ssh_port") or 22,
+        }
+        password = parameters.get("password") or parameters.get("ssh_password")
+        key_file = parameters.get("key_file") or parameters.get("ssh_key_file")
+        if password:
+            params["password"] = password
+        if key_file:
+            params["key_file"] = key_file
+        if "categories" in parameters:
+            params["categories"] = parameters["categories"]
+        return params
+
+    def _clean_error_message(self, error: Any) -> str:
+        message = str(error or "未知错误")
+        if '{"detail":"' in message:
+            message = message.split('{"detail":"', 1)[1].split('"}', 1)[0]
+        return message.replace("\\n", "\n").strip()
+
+    def _error_detail(self, error: Any, capability: str = None) -> Dict[str, str]:
+        message = self._clean_error_message(error)
+        lower = message.lower()
+
+        if "filtered" in lower or "no-response" in lower or "无法连接到目标" in message or "unreachable" in lower:
+            error_type = "network_filtered_or_unreachable"
+            reason = "目标端口无响应或被防火墙/安全组过滤，工具无法建立连接。"
+            remediation = "确认目标端口状态是 open 而不是 filtered；检查云安全组、防火墙、ACL、来源 IP 白名单和实际服务端口。"
+        elif "timeout" in lower or "timed out" in lower:
+            error_type = "timeout"
+            reason = "工具等待目标响应超时，可能是网络丢包、目标限速或服务响应过慢。"
+            remediation = "降低并发或速率后重试；确认目标允许扫描来源访问；必要时延长超时时间。"
+        elif "auth" in lower or "permission denied" in lower or "认证失败" in message:
+            error_type = "authentication_failed"
+            reason = "已连到服务，但认证失败或权限不足。"
+            remediation = "检查用户名、密码/密钥、root 登录策略、密码登录开关和账号权限。"
+        elif "必须提供 password 或 key_file" in message or "missing required parameter" in lower or "缺少必要参数" in message:
+            error_type = "missing_parameter"
+            reason = "工具缺少必要参数。"
+            remediation = "补齐目标、端口、账号凭据或工具要求的参数后重试。"
+        elif "not installed" in lower or "工具未安装" in message:
+            error_type = "tool_dependency_missing"
+            reason = "工具服务缺少依赖或二进制。"
+            remediation = "检查工具容器镜像和 /diagnose 依赖检测结果，重建对应工具服务。"
+        elif "connection refused" in lower or "refused" in lower:
+            error_type = "connection_refused"
+            reason = "目标明确拒绝连接，通常表示端口关闭或服务未监听。"
+            remediation = "确认服务已启动并监听正确端口；检查本机防火墙是否拒绝连接。"
+        elif "name or service not known" in lower or "dns" in lower:
+            error_type = "dns_resolution_failed"
+            reason = "域名无法解析。"
+            remediation = "检查域名拼写、DNS 解析和容器网络 DNS 配置。"
+        else:
+            error_type = "tool_execution_failed"
+            reason = message
+            remediation = "查看工具详情和 /diagnose；如目标受防护或限速，调整参数后重试。"
+
+        if capability in {"baseline_check", "ssh_config_check", "password_policy_check"} and error_type == "network_filtered_or_unreachable":
+            remediation = "确认 SSH 端口实际开放为 open；检查云安全组/防火墙是否允许当前扫描出口 IP；确认 SSH 端口是否不是 22。"
+
+        return {
+            "error_type": error_type,
+            "error_reason": reason,
+            "remediation": remediation,
+            "raw_error": message,
+        }
+
+    def _ssh_unavailable_payload(self, parameters: Dict, error: Exception) -> Dict:
+        detail = self._error_detail(error, "baseline_check")
+        message = detail["raw_error"]
+        return {
+            "target": parameters.get("target"),
+            "os_type": "unknown",
+            "supported": False,
+            "skipped": True,
+            "connection_error": True,
+            "skip_reason": message,
+            "tool_error": message,
+            "error_detail": detail,
+            "summary": {
+                "total_checks": 0,
+                "compliant": 0,
+                "non_compliant": 0,
+                "info_only": 0,
+                "compliance_rate": 0,
+            },
+            "metadata": {},
+            "tool_status": "skipped",
+        }
+
+    async def _call_ssh_checker(self, tool_name: str, parameters: Dict) -> Dict:
+        from app.mcp.gateway_client import MCPGatewayClient
+
+        client = MCPGatewayClient()
+        params = self._ssh_params(parameters)
+        try:
+            result = await client.call(tool_name, params)
+            return self._gateway_payload(result)
+        except Exception as e:
+            return self._ssh_unavailable_payload(parameters, e)
+
+    def _target_from_parameters(self, parameters: Dict) -> str:
+        if parameters.get("target"):
+            return parameters["target"]
+        if parameters.get("url"):
+            return parameters["url"]
+        if parameters.get("network"):
+            return parameters["network"]
+        if isinstance(parameters.get("targets"), list):
+            return ",".join(parameters["targets"][:3])
+        return "unknown"
+
+    def _tool_display_status(self, data: Dict) -> str:
+        if not isinstance(data, dict):
+            return "success"
+        if data.get("scan_completed") is False or data.get("success") is False or data.get("reachable") is False:
+            return "warning"
+        return "success"
+
+    async def _run_subtool(
+        self,
+        capability_name: str,
+        parameters: Dict,
+        user_id: int,
+        project_id: int,
+        db: AsyncSession,
+        label: str = None,
+    ) -> Dict:
+        """Run one child tool and always return the same result shape."""
+        normalized = self._normalize_capability_name(capability_name)
+        target = self._target_from_parameters(parameters)
+        try:
+            data = await self._execute_capability(normalized, dict(parameters), user_id, project_id, db)
+            metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
+            sub_status = self._tool_display_status(data)
+            return {
+                "status": sub_status,
+                "target": target,
+                "capability": normalized,
+                "label": label or normalized,
+                "data": data if isinstance(data, dict) else {"value": data},
+                "metadata": metadata,
+                "error": None,
+            }
+        except Exception as e:
+            logger.warning(f"Subtool {normalized}({target}) failed: {e}")
+            error_detail = self._error_detail(e, normalized)
+            return {
+                "status": "failed",
+                "target": target,
+                "capability": normalized,
+                "label": label or normalized,
+                "data": {},
+                "metadata": {},
+                "error": error_detail["raw_error"],
+                "error_detail": error_detail,
+            }
+
+    def _skipped_subtool(self, capability_name: str, target: str, reason: str, label: str = None) -> Dict:
+        normalized = self._normalize_capability_name(capability_name)
+        return {
+            "status": "skipped",
+            "target": target,
+            "capability": normalized,
+            "label": label or normalized,
+            "data": {},
+            "metadata": {},
+            "error": reason,
+        }
+
+    def _summarize_subtools(self, sub_results: List[Dict]) -> Dict:
+        return {
+            "total": len(sub_results),
+            "success": sum(1 for r in sub_results if r.get("status") == "success"),
+            "warning": sum(1 for r in sub_results if r.get("status") == "warning"),
+            "failed": sum(1 for r in sub_results if r.get("status") == "failed"),
+            "skipped": sum(1 for r in sub_results if r.get("status") == "skipped"),
+        }
+
+    def _url_param(self, parameters: Dict, *, require_fuzz: bool = False) -> str:
+        url = parameters.get("url") or parameters.get("target")
+        if not url:
+            raise ValueError("缺少目标 URL")
+        if not url.startswith(("http://", "https://")):
+            url = f"http://{url}"
+        if require_fuzz and "FUZZ" not in url:
+            url = url.rstrip("/") + "/FUZZ"
+        return url
     
     async def execute_plan(
         self,
@@ -84,7 +311,7 @@ class ExecutionEngine:
                         failed_count += 1
                     break
             
-            capability_name = step.get("capability")
+            capability_name = self._normalize_capability_name(step.get("capability"))
             parameters = step.get("parameters", {})
             
             # 获取能力
@@ -116,6 +343,7 @@ class ExecutionEngine:
                 results.append({
                     "capability": capability_name,
                     "status": "success",
+                    "target": parameters.get("target", "unknown"),
                     "result": result,
                 })
                 success_count += 1
@@ -145,6 +373,7 @@ class ExecutionEngine:
                 results.append({
                     "capability": capability_name,
                     "status": "failed",
+                    "target": parameters.get("target", "unknown"),
                     "error": str(e),
                 })
                 failed_count += 1
@@ -248,11 +477,13 @@ class ExecutionEngine:
                     })
                 else:
                     logger.error(f"Task {i} raised exception: {result}", exc_info=result)
+                    error_detail = self._error_detail(result, plan[i].get("capability"))
                     processed_results.append({
                         "capability": plan[i].get("capability"),
                         "target": plan[i].get("parameters", {}).get("target", "unknown"),
                         "status": "failed",
-                        "error": str(result),
+                        "error": error_detail["raw_error"],
+                        "error_detail": error_detail,
                         "attempts": 0,
                     })
             else:
@@ -323,9 +554,11 @@ class ExecutionEngine:
             f"All {max_retries} attempts failed for {capability_name}({target}): {last_error}",
             exc_info=last_error
         )
+        error_detail = self._error_detail(last_error, capability_name)
         return {
             "status": "failed", 
-            "error": str(last_error), 
+            "error": error_detail["raw_error"],
+            "error_detail": error_detail,
             "attempts": max_retries
         }
     
@@ -337,19 +570,26 @@ class ExecutionEngine:
         total_assets: int,
         user_id: int,
         project_id: int,
-        db: AsyncSession,
-        context_manager: ContextManager,
-        task_id: str,
-        progress_callback: Callable,
-        max_retries: int,
+        db: AsyncSession = None,
+        context_manager: ContextManager = None,
+        task_id: str = None,
+        progress_callback: Callable = None,
+        max_retries: int = 3,
         check_stop: Callable = None,
         wait_if_paused: Callable = None,
     ) -> Dict:
-        """执行单个资产任务"""
-        capability_name = step.get("capability")
+        """
+        执行单个资产任务（L2 Skill Worker）
+
+        重要约束（来自 design-v2.md）：
+        - Skill 没有写权限，不能直接修改全局看板
+        - 每个 Skill 使用独立 session，避免并发冲突
+        - Skill 只返回结果到内存，由 Agent 统一写 DB
+        """
+        capability_name = self._normalize_capability_name(step.get("capability"))
         parameters = step.get("parameters", {})
         target = parameters.get("target", "unknown")
-        
+
         # 检查是否被停止
         if check_stop and check_stop():
             logger.info(f"Task {asset_index} stopped before execution for {capability_name}({target})")
@@ -360,7 +600,7 @@ class ExecutionEngine:
                 "error": "Task was stopped",
                 "attempts": 0,
             }
-        
+
         # 如果暂停，等待恢复
         if wait_if_paused:
             stopped = await wait_if_paused()
@@ -373,9 +613,9 @@ class ExecutionEngine:
                     "error": "Task was stopped while paused",
                     "attempts": 0,
                 }
-        
+
         logger.info(f"Task {asset_index} waiting for semaphore for {capability_name}({target})")
-        
+
         async with semaphore:
             # 再次检查是否被停止（可能在等待 semaphore 期间被停止）
             if check_stop and check_stop():
@@ -387,7 +627,7 @@ class ExecutionEngine:
                     "error": "Task was stopped",
                     "attempts": 0,
                 }
-            
+
             # 再次检查是否暂停（可能在等待 semaphore 期间被暂停）
             if wait_if_paused:
                 stopped = await wait_if_paused()
@@ -400,45 +640,44 @@ class ExecutionEngine:
                         "error": "Task was stopped while paused",
                         "attempts": 0,
                     }
-            
+
             logger.info(f"Task {asset_index} acquired semaphore, starting {capability_name}({target})")
-            
+
             # 通知开始
             if progress_callback and task_id:
                 progress_callback(
-                    task_id, asset_index, total_assets, target, 
+                    task_id, asset_index, total_assets, target,
                     "running", capability_name
                 )
-            
-            # 执行（带重试）
-            result = await self._execute_with_retry(
-                capability_name, parameters, user_id, project_id, db, max_retries
-            )
-            
-            # 通知完成
-            if progress_callback and task_id:
-                progress_callback(
-                    task_id, asset_index, total_assets, target, 
-                    result["status"], capability_name
+
+            # 为每个并发任务创建独立的数据库 session，避免共享 session 导致的并发冲突
+            # 这是 L2 Skill 的隔离原则（design-v2.md）
+            from app.core.database import AsyncSessionLocal
+            async with AsyncSessionLocal() as task_db:
+                # 执行（带重试）
+                result = await self._execute_with_retry(
+                    capability_name, parameters, user_id, project_id, task_db, max_retries
                 )
-            
-            # 记录操作历史
-            if context_manager:
-                await context_manager.add_action(
-                    action_type=capability_name,
-                    parameters=parameters,
-                    result=result,
-                    status=result["status"]
-                )
-                
-                if result["status"] == "success":
-                    cache_key = f"{capability_name}:{self._generate_cache_key(parameters)}"
-                    await context_manager.cache_result(cache_key, result["result"])
-            
+
+                # 通知完成
+                if progress_callback and task_id:
+                    progress_callback(
+                        task_id, asset_index, total_assets, target,
+                        result["status"], capability_name
+                    )
+
+            # L2 Skill 没有写权限！
+            # 之前的代码会在这里调用 context_manager.add_action() 和 cache_result()
+            # 现在改为只返回结果，由 Agent（主流程）统一处理 DB 写入
+
             return {
                 "capability": capability_name,
                 "target": target,
-                **result
+                "status": result.get("status"),
+                "result": result.get("result"),
+                "error": result.get("error"),
+                "error_detail": result.get("error_detail"),
+                "attempts": result.get("attempts", 1),
             }
     
     async def _execute_capability(
@@ -454,6 +693,8 @@ class ExecutionEngine:
         
         根据能力类型调用不同的处理器
         """
+        capability_name = self._normalize_capability_name(capability_name)
+
         # 标准化目标地址：localhost -> host.docker.internal（容器内访问宿主机）
         if "target" in parameters:
             target = parameters["target"]
@@ -463,6 +704,69 @@ class ExecutionEngine:
         # 扫描类能力
         if capability_name == "scan_ports":
             return await self._scan_ports(parameters, user_id, project_id, db)
+        
+        elif capability_name == "masscan_scan":
+            return await self._masscan_scan(parameters, user_id, project_id, db)
+        
+        elif capability_name == "fping_scan":
+            return await self._fping_scan(parameters, user_id, project_id, db)
+        
+        elif capability_name == "nikto_scan":
+            return await self._nikto_scan(parameters, user_id, project_id, db)
+        
+        elif capability_name == "sqlmap_scan":
+            return await self._sqlmap_scan(parameters, user_id, project_id, db)
+        
+        elif capability_name == "gobuster_scan":
+            return await self._gobuster_scan(parameters, user_id, project_id, db)
+        
+        elif capability_name == "ffuf_scan":
+            return await self._ffuf_scan(parameters, user_id, project_id, db)
+
+        elif capability_name == "web_discovery_scan":
+            return await self._web_discovery_scan(parameters, user_id, project_id, db)
+        
+        elif capability_name == "snmp_walk":
+            return await self._snmp_walk(parameters, user_id, project_id, db)
+        
+        elif capability_name == "snmp_bruteforce":
+            return await self._snmp_bruteforce(parameters, user_id, project_id, db)
+        
+        elif capability_name == "snmp_get":
+            return await self._snmp_get(parameters, user_id, project_id, db)
+
+        elif capability_name == "network_device_scan":
+            return await self._network_device_scan(parameters, user_id, project_id, db)
+        
+        elif capability_name == "enum4linux_scan":
+            return await self._enum4linux_scan(parameters, user_id, project_id, db)
+        
+        elif capability_name == "crackmapexec_scan":
+            return await self._crackmapexec_scan(parameters, user_id, project_id, db)
+        
+        elif capability_name == "smb_enum":
+            return await self._smb_enum(parameters, user_id, project_id, db)
+
+        elif capability_name == "windows_security_scan":
+            return await self._windows_security_scan(parameters, user_id, project_id, db)
+        
+        elif capability_name == "redis_check":
+            return await self._redis_check(parameters, user_id, project_id, db)
+        
+        elif capability_name == "oracle_check":
+            return await self._oracle_check(parameters, user_id, project_id, db)
+        
+        elif capability_name == "mongodb_check":
+            return await self._mongodb_check(parameters, user_id, project_id, db)
+        
+        elif capability_name == "memcached_check":
+            return await self._memcached_check(parameters, user_id, project_id, db)
+        
+        elif capability_name == "mysql_check":
+            return await self._mysql_check(parameters, user_id, project_id, db)
+
+        elif capability_name == "database_security_scan":
+            return await self._database_security_scan(parameters, user_id, project_id, db)
         
         elif capability_name == "scan_ssl":
             return await self._scan_ssl(parameters, user_id, project_id, db)
@@ -475,6 +779,31 @@ class ExecutionEngine:
         
         elif capability_name == "full_compliance_scan":
             return await self._full_compliance_scan(parameters, user_id, project_id, db)
+        
+        elif capability_name == "tech_assessment":
+            return await self._tech_assessment(parameters, user_id, project_id, db)
+        
+        # SSH 白盒配置核查能力
+        elif capability_name == "baseline_check":
+            return await self._baseline_check(parameters, user_id, project_id, db)
+        
+        elif capability_name == "password_policy_check":
+            return await self._password_policy_check(parameters, user_id, project_id, db)
+        
+        elif capability_name == "ssh_config_check":
+            return await self._ssh_config_check(parameters, user_id, project_id, db)
+        
+        elif capability_name == "audit_config_check":
+            return await self._audit_config_check(parameters, user_id, project_id, db)
+        
+        elif capability_name == "service_port_check":
+            return await self._service_port_check(parameters, user_id, project_id, db)
+        
+        elif capability_name == "file_permission_check":
+            return await self._file_permission_check(parameters, user_id, project_id, db)
+        
+        elif capability_name == "mac_check":
+            return await self._mac_check(parameters, user_id, project_id, db)
         
         # 查询类能力
         elif capability_name == "view_scan_results":
@@ -563,10 +892,20 @@ class ExecutionEngine:
         from app.mcp.gateway_client import MCPGatewayClient
         
         client = MCPGatewayClient()
-        result = await client.call("nmap_scan", {
-            "target": parameters["target"],
-            "port_range": parameters.get("port_range", "1-65535"),
-        })
+        
+        # 使用 call_with_progress 避免长时间阻塞
+        def on_progress(progress):
+            logger.info(f"Scan progress: {progress}")
+        
+        result = await client.call_with_progress(
+            "nmap_scan",
+            {
+                "target": parameters["target"],
+                "port_range": parameters.get("port_range", "high-risk"),
+            },
+            on_progress=on_progress,
+            poll_interval=2.0
+        )
         
         data = result.get("data", {})
         
@@ -579,6 +918,346 @@ class ExecutionEngine:
             **data,
             "metadata": result.get("metadata", {}),
         }
+
+    def _gateway_payload(self, result: Dict, *, allow_tool_failed: bool = False) -> Dict:
+        data = result.get("data") or {}
+        metadata = result.get("metadata") or {}
+        tool_status = result.get("status", "success")
+        tool_error = result.get("error") or metadata.get("error")
+        payload = data if isinstance(data, dict) else {"value": data}
+        payload = {
+            **payload,
+            "metadata": metadata,
+            "tool_status": tool_status,
+        }
+        if tool_error:
+            payload["tool_error"] = tool_error
+        if tool_status == "failed" and not allow_tool_failed:
+            raise ValueError(tool_error or "工具执行失败")
+        return payload
+    
+    async def _masscan_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """masscan 超高速端口扫描"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {
+            "target": parameters["target"],
+            "port_range": parameters.get("port_range", "1-65535"),
+        }
+        if "rate" in parameters:
+            params["rate"] = parameters["rate"]
+        if "banner_grab" in parameters:
+            params["banner_grab"] = parameters["banner_grab"]
+        
+        result = await client.call("masscan_scan", params)
+        
+        data = result.get("data", {})
+        return self._gateway_payload(result)
+    
+    async def _fping_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """fping 批量存活检测"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {}
+        if "network" in parameters:
+            params["network"] = parameters["network"]
+        elif "target" in parameters:
+            # AI 可能传 target 而不是 network，兼容处理
+            params["network"] = parameters["target"]
+        if "targets" in parameters:
+            params["targets"] = parameters["targets"]
+        
+        result = await client.call("fping_scan", params)
+        return self._gateway_payload(result)
+    
+    async def _nikto_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """nikto Web 服务器扫描"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        # 标准化目标：移除 scheme 前缀（如果用户传了完整 URL）
+        target = parameters["target"]
+        if target.startswith("http://"):
+            target = target[7:]  # 去掉 "http://"
+        elif target.startswith("https://"):
+            target = target[8:]  # 去掉 "https://"
+        
+        params = {"target": target}
+        if "port" in parameters:
+            params["port"] = parameters["port"]
+        if "ssl" in parameters:
+            params["ssl"] = parameters["ssl"]
+        
+        result = await client.call("nikto_scan", params)
+        return self._gateway_payload(result)
+    
+    async def _sqlmap_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """sqlmap SQL 注入检测"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"url": self._url_param(parameters)}
+        if "data" in parameters:
+            params["data"] = parameters["data"]
+        if "level" in parameters:
+            params["level"] = parameters["level"]
+        if "risk" in parameters:
+            params["risk"] = parameters["risk"]
+        
+        result = await client.call("sqlmap_scan", params)
+        return self._gateway_payload(result)
+    
+    async def _gobuster_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """gobuster 目录/文件爆破"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        url = self._url_param(parameters)
+        
+        params = {"url": url}
+        if "wordlist" in parameters:
+            params["wordlist"] = parameters["wordlist"]
+        if "extensions" in parameters:
+            params["extensions"] = parameters["extensions"]
+        if "threads" in parameters:
+            params["threads"] = parameters["threads"]
+        
+        result = await client.call("gobuster_scan", params)
+        return self._gateway_payload(result)
+    
+    async def _ffuf_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """ffuf Web 模糊测试"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        url = self._url_param(parameters, require_fuzz=True)
+        
+        params = {"url": url}
+        if "wordlist" in parameters:
+            params["wordlist"] = parameters["wordlist"]
+        if "method" in parameters:
+            params["method"] = parameters["method"]
+        
+        result = await client.call("ffuf_scan", params)
+        return self._gateway_payload(result)
+
+    async def _web_discovery_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """Web 路径/目录发现：组合 gobuster 与 ffuf。"""
+        url = self._url_param(parameters)
+        sub_results = await asyncio.gather(
+            self._run_subtool("gobuster_scan", {"url": url}, user_id, project_id, db, "目录爆破"),
+            self._run_subtool("ffuf_scan", {"url": url}, user_id, project_id, db, "Web 模糊测试"),
+        )
+        return {
+            "target": url,
+            "sub_results": sub_results,
+            "summary": self._summarize_subtools(sub_results),
+        }
+    
+    async def _snmp_walk(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """snmpwalk 获取 SNMP 信息"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"target": parameters["target"]}
+        if "community" in parameters:
+            params["community"] = parameters["community"]
+        if "version" in parameters:
+            params["version"] = parameters["version"]
+        if "oid" in parameters:
+            params["oid"] = parameters["oid"]
+        
+        result = await client.call("snmp_walk", params)
+        return self._gateway_payload(result, allow_tool_failed=True)
+    
+    async def _snmp_bruteforce(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """SNMP 团体字爆破"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"target": parameters["target"]}
+        if "wordlist" in parameters:
+            params["wordlist"] = parameters["wordlist"]
+        
+        result = await client.call("snmp_bruteforce", params)
+        return self._gateway_payload(result, allow_tool_failed=True)
+    
+    async def _snmp_get(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """snmpget 获取单个 OID 值"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"target": parameters["target"], "oid": parameters["oid"]}
+        if "community" in parameters:
+            params["community"] = parameters["community"]
+        if "version" in parameters:
+            params["version"] = parameters["version"]
+        
+        result = await client.call("snmp_get", params)
+        return self._gateway_payload(result, allow_tool_failed=True)
+
+    async def _network_device_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """网络设备检测：组合 SNMP 信息读取与默认团体字检测。"""
+        target = parameters["target"]
+        sub_results = await asyncio.gather(
+            self._run_subtool("snmp_walk", {"target": target}, user_id, project_id, db, "SNMP 信息读取"),
+            self._run_subtool("snmp_bruteforce", {"target": target}, user_id, project_id, db, "SNMP 团体字检测"),
+        )
+        return {
+            "target": target,
+            "sub_results": sub_results,
+            "summary": self._summarize_subtools(sub_results),
+        }
+    
+    async def _enum4linux_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """enum4linux Windows 信息枚举"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"target": parameters["target"]}
+        if "username" in parameters:
+            params["username"] = parameters["username"]
+        if "password" in parameters:
+            params["password"] = parameters["password"]
+        if "scan_type" in parameters:
+            params["scan_type"] = parameters["scan_type"]
+        
+        result = await client.call("enum4linux_scan", params)
+        return self._gateway_payload(result, allow_tool_failed=True)
+    
+    async def _crackmapexec_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """crackmapexec SMB/Windows 枚举"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"target": parameters["target"]}
+        if "username" in parameters:
+            params["username"] = parameters["username"]
+        if "password" in parameters:
+            params["password"] = parameters["password"]
+        if "scan_type" in parameters:
+            params["scan_type"] = parameters["scan_type"]
+        
+        result = await client.call("crackmapexec_scan", params)
+        return self._gateway_payload(result, allow_tool_failed=True)
+    
+    async def _smb_enum(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """SMB 共享枚举"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"target": parameters["target"]}
+        if "username" in parameters:
+            params["username"] = parameters["username"]
+        if "password" in parameters:
+            params["password"] = parameters["password"]
+        
+        result = await client.call("smb_enum", params)
+        return self._gateway_payload(result, allow_tool_failed=True)
+
+    async def _windows_security_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """Windows/AD 安全检测：组合用户、SID 与 SMB 共享枚举。"""
+        target = parameters["target"]
+        base = {"target": target}
+        if "username" in parameters:
+            base["username"] = parameters["username"]
+        if "password" in parameters:
+            base["password"] = parameters["password"]
+        sub_results = await asyncio.gather(
+            self._run_subtool("enum4linux_scan", base, user_id, project_id, db, "Windows 用户/组枚举"),
+            self._run_subtool("crackmapexec_scan", base, user_id, project_id, db, "Windows SID 枚举"),
+            self._run_subtool("smb_enum", base, user_id, project_id, db, "SMB 共享枚举"),
+        )
+        return {
+            "target": target,
+            "sub_results": sub_results,
+            "summary": self._summarize_subtools(sub_results),
+        }
+    
+    async def _redis_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """Redis 未授权访问检查"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"target": parameters["target"]}
+        if "port" in parameters:
+            params["port"] = parameters["port"]
+        
+        result = await client.call("redis_check", params)
+        return self._gateway_payload(result)
+    
+    async def _oracle_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """Oracle TNS 版本信息检查"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"target": parameters["target"]}
+        if "port" in parameters:
+            params["port"] = parameters["port"]
+        
+        result = await client.call("oracle_check", params)
+        return self._gateway_payload(result)
+    
+    async def _mongodb_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """MongoDB 未授权访问检查"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"target": parameters["target"]}
+        if "port" in parameters:
+            params["port"] = parameters["port"]
+        
+        result = await client.call("mongodb_check", params)
+        return self._gateway_payload(result)
+    
+    async def _memcached_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """Memcached 未授权访问检查"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"target": parameters["target"]}
+        if "port" in parameters:
+            params["port"] = parameters["port"]
+        
+        result = await client.call("memcached_check", params)
+        return self._gateway_payload(result)
+    
+    async def _mysql_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """MySQL 空口令检查"""
+        from app.mcp.gateway_client import MCPGatewayClient
+        
+        client = MCPGatewayClient()
+        params = {"target": parameters["target"]}
+        if "port" in parameters:
+            params["port"] = parameters["port"]
+        if "username" in parameters:
+            params["username"] = parameters["username"]
+        
+        result = await client.call("mysql_check", params)
+        return self._gateway_payload(result, allow_tool_failed=True)
+
+    async def _database_security_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """数据库安全组合检测：Redis/MySQL/MongoDB/Memcached/Oracle。"""
+        target = parameters["target"]
+        sub_tasks = [
+            ("redis_check", {"target": target}, "Redis 未授权检测"),
+            ("mysql_check", {"target": target}, "MySQL 空口令检测"),
+            ("mongodb_check", {"target": target}, "MongoDB 未授权检测"),
+            ("memcached_check", {"target": target}, "Memcached 未授权检测"),
+            ("oracle_check", {"target": target}, "Oracle TNS 检测"),
+        ]
+        sub_results = await asyncio.gather(*[
+            self._run_subtool(capability, params, user_id, project_id, db, label)
+            for capability, params, label in sub_tasks
+        ])
+
+        return {
+            "target": target,
+            "sub_results": sub_results,
+            "summary": self._summarize_subtools(sub_results),
+        }
     
     async def _scan_ssl(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """SSL 扫描"""
@@ -590,7 +1269,7 @@ class ExecutionEngine:
             "port": parameters.get("port", 443),
         })
         
-        return result.get("data", {})
+        return self._gateway_payload(result)
     
     async def _scan_vulnerabilities(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """漏洞扫描"""
@@ -605,7 +1284,7 @@ class ExecutionEngine:
             params["severity"] = parameters["severity"]
         
         result = await client.call("nuclei_scan", params)
-        return result.get("data", {})
+        return self._gateway_payload(result)
     
     async def _scan_weak_passwords(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """弱口令扫描"""
@@ -618,21 +1297,104 @@ class ExecutionEngine:
             "port": parameters.get("port", 22),
         })
         
-        return result.get("data", {})
+        return self._gateway_payload(result)
     
     async def _full_compliance_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """全量合规扫描"""
-        # 执行所有扫描
+        target = parameters["target"]
+        sub_tasks = [
+            ("scan_ports", {"target": target, "port_range": parameters.get("port_range", "high-risk")}, "端口扫描"),
+            ("scan_ssl", {"target": target, "port": parameters.get("ssl_port", 443)}, "SSL/TLS 检测"),
+            ("scan_vulnerabilities", {"target": target}, "漏洞扫描"),
+            ("scan_weak_passwords", {"target": target}, "弱口令检测"),
+        ]
+        sub_results = await asyncio.gather(*[
+            self._run_subtool(capability, params, user_id, project_id, db, label)
+            for capability, params, label in sub_tasks
+        ])
+
+        return {
+            "target": target,
+            "sub_results": sub_results,
+            "summary": self._summarize_subtools(sub_results),
+        }
+    
+    async def _tech_assessment(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """等保技术要求测评（10项检查）"""
         target = parameters["target"]
         
-        results = {
-            "port_scan": await self._scan_ports({"target": target}, user_id, project_id, db),
-            "ssl_scan": await self._scan_ssl({"target": target}, user_id, project_id, db),
-            "vuln_scan": await self._scan_vulnerabilities({"target": target}, user_id, project_id, db),
-            "password_scan": await self._scan_weak_passwords({"target": target}, user_id, project_id, db),
-        }
+        # 构建 SSH 凭据参数
+        ssh_params = self._ssh_params(parameters)
+        has_ssh_credential = bool(ssh_params.get("password") or ssh_params.get("key_file"))
         
-        return results
+        sub_coroutines = [
+            self._run_subtool("scan_ports", {"target": target}, user_id, project_id, db, "端口扫描"),
+            self._run_subtool("scan_vulnerabilities", {"target": target}, user_id, project_id, db, "漏洞扫描"),
+            self._run_subtool("nikto_scan", {"target": target}, user_id, project_id, db, "Web 扫描"),
+            self._run_subtool("scan_ssl", {"target": target}, user_id, project_id, db, "SSL/TLS 检测"),
+            self._run_subtool("redis_check", {"target": target}, user_id, project_id, db, "Redis 检测"),
+            self._run_subtool("mysql_check", {"target": target}, user_id, project_id, db, "MySQL 检测"),
+            self._run_subtool("mongodb_check", {"target": target}, user_id, project_id, db, "MongoDB 检测"),
+            self._run_subtool("snmp_walk", {"target": target}, user_id, project_id, db, "SNMP 检测"),
+        ]
+
+        sub_results = await asyncio.gather(*sub_coroutines)
+        if has_ssh_credential:
+            sub_results.append(await self._run_subtool(
+                "baseline_check",
+                ssh_params,
+                user_id,
+                project_id,
+                db,
+                "安全基线",
+            ))
+            sub_results.append(await self._run_subtool(
+                "scan_weak_passwords",
+                {"target": target},
+                user_id,
+                project_id,
+                db,
+                "弱口令检测",
+            ))
+        else:
+            sub_results.append(self._skipped_subtool("baseline_check", target, "未提供 SSH 凭据", "安全基线"))
+            sub_results.append(self._skipped_subtool("scan_weak_passwords", target, "未提供 SSH 凭据", "弱口令检测"))
+
+        return {
+            "target": target,
+            "sub_results": sub_results,
+            "summary": self._summarize_subtools(sub_results),
+        }
+    
+    # ========== SSH 白盒配置核查方法 ==========
+    
+    async def _baseline_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """安全基线核查：由工具侧自动识别操作系统。"""
+        return await self._call_ssh_checker("linux_baseline", parameters)
+    
+    async def _password_policy_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """密码策略检查"""
+        return await self._call_ssh_checker("password_policy_check", parameters)
+    
+    async def _ssh_config_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """SSH 配置检查"""
+        return await self._call_ssh_checker("ssh_config_check", parameters)
+    
+    async def _audit_config_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """审计配置检查"""
+        return await self._call_ssh_checker("audit_config_check", parameters)
+    
+    async def _service_port_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """服务端口检查"""
+        return await self._call_ssh_checker("service_port_check", parameters)
+    
+    async def _file_permission_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """文件权限检查"""
+        return await self._call_ssh_checker("file_permission_check", parameters)
+    
+    async def _mac_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """强制访问控制检查"""
+        return await self._call_ssh_checker("mac_check", parameters)
     
     async def _view_scan_results(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """查看扫描结果"""
@@ -643,6 +1405,7 @@ class ExecutionEngine:
         result = await db.execute(
             select(ResultCache)
             .where(ResultCache.user_id == user_id)
+            .where(ResultCache.project_id == project_id)
             .order_by(ResultCache.created_at.desc())
             .limit(5)
         )
@@ -668,6 +1431,7 @@ class ExecutionEngine:
             select(ResultCache)
             .where(
                 ResultCache.user_id == user_id,
+                ResultCache.project_id == project_id,
                 ResultCache.cache_key.like("scan_ports:%")
             )
             .order_by(ResultCache.created_at.desc())
@@ -716,6 +1480,7 @@ class ExecutionEngine:
             select(ResultCache)
             .where(
                 ResultCache.user_id == user_id,
+                ResultCache.project_id == project_id,
                 ResultCache.cache_key.like("scan_vulnerabilities:%")
             )
             .order_by(ResultCache.created_at.desc())

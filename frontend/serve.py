@@ -12,7 +12,10 @@ async def handle_index(request):
 
 async def proxy_api(request):
     path = request.match_info.get('path', '')
+    query_string = request.query_string
     url = f"{BACKEND_URL}/api/{path}"
+    if query_string:
+        url = f"{url}?{query_string}"
     
     # 设置较长的超时时间（180秒），避免 LLM 调用超时
     timeout = aiohttp.ClientTimeout(total=180)

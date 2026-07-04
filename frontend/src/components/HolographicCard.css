@@ -10,6 +10,15 @@
   overflow: hidden;
 }
 
+.holographic-card.bare {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  backdrop-filter: none;
+  overflow: visible;
+}
+
 .holographic-card:hover {
   box-shadow: 
     0 0 30px rgba(0, 255, 136, 0.3),

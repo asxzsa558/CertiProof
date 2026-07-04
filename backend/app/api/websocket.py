@@ -102,6 +102,9 @@ async def agent_websocket(websocket: WebSocket, task_id: str):
                             "task_id": task["task_id"],
                             "agent_name": task["agent_name"],
                             "evidence_count": task.get("evidence_count", 0),
+                            "result_description": task.get("result_description", ""),
+                            "scan_results": task.get("scan_results", {}),
+                            "is_multi_asset": task.get("is_multi_asset", False),
                             "completed_at": task["completed_at"],
                         },
                     }, websocket)

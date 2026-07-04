@@ -1,709 +1,130 @@
-/* ============================================
-   Dashboard - 《碟中谍》CIA 指挥中心风格
-   ============================================ */
+/* Dashboard ARGUS Styles - Minimal overrides */
 
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
-
-.dash-root {
-  position: relative;
+.dashboard-container {
   min-height: 100vh;
-  background: #0a0a0b;
-  color: #fff;
-  overflow-x: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: transparent;
 }
 
-/* 内容层 */
-.dash-content-layer {
-  position: relative;
-  z-index: 10;
-  padding: 0 40px 60px;
-}
-
-/* 品牌水印层 */
-.dash-bg-watermark {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  opacity: 0.7;
-  pointer-events: none;
-  z-index: 0;
-  width: 600px;
-  height: 600px;
-}
-
-.dash-bg-watermark img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-/* 顶部导航栏 */
-.dash-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 40px;
-  background: rgba(10, 10, 11, 0.85);
-  border-bottom: 1px solid rgba(0, 255, 136, 0.2);
-  backdrop-filter: blur(20px);
-  margin: 0 -40px 32px;
-}
-
-.dash-header::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(0, 255, 136, 0.6), transparent);
-}
-
-.dash-header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.dash-brand {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-left: 16px;
-  border-left: 1px solid rgba(0, 255, 136, 0.3);
-}
-
-.dash-brand-name {
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  background: linear-gradient(135deg, #00ff88 0%, #d4af37 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.dash-brand-sub {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 2px;
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 500;
-}
-
-.dash-classification {
-  margin-left: 16px;
-  padding: 4px 12px;
-  font-size: 10px;
-  font-weight: 700;
-  color: #ff4d4f;
-  border: 1px solid rgba(255, 77, 79, 0.5);
-  background: rgba(255, 77, 79, 0.1);
-  letter-spacing: 2px;
-  font-family: 'JetBrains Mono', monospace;
-  animation: dash-classify-blink 3s ease-in-out infinite;
-}
-
-@keyframes dash-classify-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-.dash-header-center {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-}
-
-.dash-org-switcher {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  background: rgba(0, 255, 136, 0.05);
-  border: 1px solid rgba(0, 255, 136, 0.2);
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.dash-org-switcher:hover {
-  background: rgba(0, 255, 136, 0.1);
-  border-color: rgba(0, 255, 136, 0.4);
-  box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
-}
-
-.dash-org-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: #fff;
-}
-
-.dash-org-role {
-  font-size: 10px !important;
-  font-weight: 700 !important;
-  letter-spacing: 1px;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.dash-header-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.dash-user-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.dash-user-avatar {
-  background: linear-gradient(135deg, #00ff88, #00b4d8) !important;
-  box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
-}
-
-.dash-user-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.dash-icon-btn {
-  background: rgba(0, 255, 136, 0.05);
-  border: 1px solid rgba(0, 255, 136, 0.2);
-  color: rgba(255, 255, 255, 0.7);
-  width: 36px;
-  height: 36px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.3s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.dash-icon-btn:hover {
-  background: rgba(0, 255, 136, 0.15);
-  border-color: rgba(0, 255, 136, 0.5);
-  color: #00ff88;
-  box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
-}
-
-/* 主内容区域 - 左右分栏 */
-.dash-main {
-  display: grid;
-  grid-template-columns: 1fr 400px;
-  gap: 32px;
-  margin-bottom: 40px;
-}
-
-.dash-left-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
-}
-
-.dash-right-panel {
-  position: sticky;
-  top: 100px;
-  height: fit-content;
-}
-
-/* Section */
-.dash-section {
-  margin-bottom: 40px;
-}
-
-.dash-section-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 20px;
-  padding: 12px 0;
-  border-bottom: 1px solid rgba(0, 255, 136, 0.15);
-}
-
-.dash-section-tag {
-  font-size: 11px;
-  color: #00ff88;
-  font-family: 'JetBrains Mono', monospace;
-  letter-spacing: 2px;
-  font-weight: 600;
-}
-
-.dash-section-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #fff;
-  letter-spacing: 0.5px;
-}
-
-.dash-filters {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-left: auto;
-}
-
-.dash-filters .ant-select,
-.dash-filters .ant-input {
-  background: rgba(0, 0, 0, 0.4) !important;
-  border: 1px solid rgba(0, 255, 136, 0.2) !important;
-}
-
-/* 统计面板网格 */
-.dash-stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
-}
-
-.dash-stat-panel {
-  text-align: left;
-}
-
-.dash-stat-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.dash-stat-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.6);
-  letter-spacing: 2px;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.dash-stat-icon {
-  font-size: 16px;
-  opacity: 0.8;
-}
-
-.dash-stat-value {
-  font-size: 48px;
-  font-weight: 700;
-  font-family: 'JetBrains Mono', monospace;
-  line-height: 1;
-  margin-bottom: 8px;
-}
-
-.dash-stat-sub {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
-  font-family: 'JetBrains Mono', monospace;
-  letter-spacing: 0.5px;
-}
-
-/* 图表区域 */
-.dash-charts-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-}
-
-.dash-chart-card {
-  padding: 20px;
-}
-
-.dash-chart-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid rgba(0, 255, 136, 0.1);
-}
-
-.dash-chart-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #fff;
-  letter-spacing: 0.5px;
-}
-
-.dash-chart-sub {
-  font-size: 10px;
-  color: rgba(0, 255, 136, 0.7);
-  font-family: 'JetBrains Mono', monospace;
-  letter-spacing: 2px;
-  font-weight: 600;
-}
-
-/* 风险态势面板 */
-.dash-risk-panel {
-  padding: 0;
-  overflow: hidden;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.dash-risk-header {
-  padding: 20px 24px;
-  border-bottom: 1px solid rgba(0, 255, 136, 0.1);
-}
-
-.dash-risk-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: #ff6b35;
-  letter-spacing: 2px;
-  font-family: 'JetBrains Mono', monospace;
-  display: block;
-}
-
-.dash-risk-sub {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 1px;
-}
-
-.dash-risk-chart {
-  padding: 16px 24px;
-  border-bottom: 1px solid rgba(0, 255, 136, 0.1);
-}
-
-.dash-risk-status {
-  padding: 16px 24px;
-  display: flex;
-  justify-content: space-around;
-  border-bottom: 1px solid rgba(0, 255, 136, 0.1);
-}
-
-.dash-risk-status-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.dash-risk-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  box-shadow: 0 0 8px currentColor;
-}
-
-.dash-risk-status-item strong {
-  font-size: 18px;
-  color: #fff;
-  font-family: 'JetBrains Mono', monospace;
-  margin-left: 4px;
-}
-
-.dash-risk-top {
-  padding: 16px 24px;
-  flex: 1;
-}
-
-.dash-risk-top-title {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 2px;
-  font-family: 'JetBrains Mono', monospace;
-  margin-bottom: 12px;
-}
-
-.dash-risk-top-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.dash-risk-top-rank {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 77, 79, 0.2);
-  color: #ff4d4f;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.dash-risk-top-id {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
-  font-family: 'JetBrains Mono', monospace;
-  min-width: 70px;
-}
-
-.dash-risk-top-name {
-  flex: 1;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.8);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dash-risk-top-count {
-  font-size: 14px;
-  font-weight: 700;
-  color: #ff4d4f;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.dash-risk-top-empty {
-  text-align: center;
-  padding: 20px;
-  color: rgba(255, 255, 255, 0.3);
-  font-size: 12px;
-}
-
-/* 项目卡片网格 */
-.dash-projects-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-  gap: 20px;
-}
-
-.dash-empty {
-  grid-column: 1 / -1;
-  text-align: center;
-  padding: 80px 20px;
-  background: rgba(17, 17, 19, 0.4);
-  border: 1px dashed rgba(0, 255, 136, 0.2);
-  border-radius: 8px;
-}
-
-/* 创建按钮 */
-.dash-create-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 20px;
-  height: 36px;
-  background: linear-gradient(135deg, #00ff88, #00b4d8);
-  border: none;
-  border-radius: 4px;
-  color: #0a0a0b;
-  font-weight: 600;
-  font-size: 13px;
-  letter-spacing: 0.5px;
-  cursor: pointer;
-  transition: all 0.3s;
-  margin-left: 16px;
-  box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
-}
-
-.dash-create-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 0 30px rgba(0, 255, 136, 0.5);
-}
-
-.dash-create-btn-large {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 28px;
-  background: linear-gradient(135deg, #00ff88, #00b4d8);
-  border: none;
-  border-radius: 4px;
-  color: #0a0a0b;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  margin-top: 20px;
-  box-shadow: 0 0 25px rgba(0, 255, 136, 0.4);
-  transition: all 0.3s;
-}
-
-.dash-create-btn-large:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 0 35px rgba(0, 255, 136, 0.6);
-}
-
-/* 模态框 */
-.dash-create-modal .ant-modal-content {
-  background: rgba(17, 17, 19, 0.98) !important;
-  border: 1px solid rgba(0, 255, 136, 0.3) !important;
-  backdrop-filter: blur(20px);
-  box-shadow: 0 0 40px rgba(0, 255, 136, 0.2);
-}
-
-.dash-create-modal .ant-modal-header {
+/* Override Ant Design styles for ARGUS theme */
+.ant-layout {
   background: transparent !important;
-  border-bottom: 1px solid rgba(0, 255, 136, 0.15) !important;
 }
 
-.dash-modal-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: #fff;
+.ant-layout-header {
+  background: var(--bg-secondary) !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
 }
 
-.dash-modal-tag {
-  font-size: 11px;
-  color: #00ff88;
-  font-family: 'JetBrains Mono', monospace;
-  letter-spacing: 2px;
-  font-weight: 600;
+.ant-layout-sider {
+  background: var(--bg-secondary) !important;
+  border-right: 1px solid var(--border-subtle) !important;
 }
 
-.dash-create-form .ant-form-item-label > label {
-  color: rgba(255, 255, 255, 0.8) !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
+.ant-menu {
+  background: transparent !important;
 }
 
-.dash-create-form .ant-input,
-.dash-create-form .ant-input-affix-wrapper,
-.dash-create-form .ant-select-selector,
-.dash-create-form textarea {
-  background: rgba(0, 0, 0, 0.5) !important;
-  border: 1px solid rgba(0, 255, 136, 0.2) !important;
-  color: #fff !important;
+.ant-menu-item {
+  color: var(--text-secondary) !important;
+  margin: 2px 8px !important;
+  border-radius: 2px !important;
 }
 
-.dash-create-form .ant-input:focus,
-.dash-create-form .ant-input-affix-wrapper:focus,
-.dash-create-form textarea:focus {
-  border-color: rgba(0, 255, 136, 0.6) !important;
-  box-shadow: 0 0 15px rgba(0, 255, 136, 0.2) !important;
+.ant-menu-item:hover {
+  background: rgba(0, 212, 255, 0.1) !important;
+  color: var(--text-primary) !important;
 }
 
-.dash-type-checkboxes {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(0, 255, 136, 0.15);
-  border-radius: 4px;
+.ant-menu-item-selected {
+  background: rgba(0, 212, 255, 0.15) !important;
+  color: var(--accent-cyan) !important;
 }
 
-.dash-type-checkboxes .ant-checkbox-wrapper {
-  color: rgba(255, 255, 255, 0.8);
+.ant-menu-item-selected::after {
+  border-right-color: var(--accent-cyan) !important;
 }
 
-.dash-create-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 12px;
+/* Card hover effects */
+.argus-card {
+  transition: all 0.2s ease;
 }
 
-.dash-btn-cancel {
-  padding: 0 24px;
-  height: 40px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: rgba(255, 255, 255, 0.8);
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.3s;
+/* Table styles */
+.ant-table {
+  background: transparent !important;
 }
 
-.dash-btn-cancel:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+/* Button styles */
+.ant-btn-primary {
+  background: rgba(0, 212, 255, 0.15) !important;
+  border-color: var(--accent-cyan) !important;
+  color: var(--accent-cyan) !important;
 }
 
-.dash-btn-primary {
-  padding: 0 28px;
-  height: 40px;
-  background: linear-gradient(135deg, #00ff88, #00b4d8);
-  border: none;
-  color: #0a0a0b;
-  font-weight: 600;
-  border-radius: 4px;
-  cursor: pointer;
-  letter-spacing: 0.5px;
-  box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
-  transition: all 0.3s;
+.ant-btn-primary:hover {
+  background: rgba(0, 212, 255, 0.25) !important;
 }
 
-.dash-btn-primary:hover {
-  box-shadow: 0 0 30px rgba(0, 255, 136, 0.5);
+/* Tag styles */
+.ant-tag {
+  background: transparent !important;
+  border-radius: 2px !important;
 }
 
-/* 组织菜单 */
-.dash-org-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 220px;
+/* Progress bar */
+.ant-progress-bg {
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue)) !important;
 }
 
-/* 加载状态 */
-.dash-loading {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: #0a0a0b;
-  color: #fff;
-  gap: 20px;
-  position: relative;
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
 }
 
-.dash-loading-text {
-  font-size: 12px;
-  color: rgba(0, 255, 136, 0.8);
-  letter-spacing: 3px;
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 600;
-  animation: dash-loading-pulse 2s ease-in-out infinite;
-  position: relative;
-  z-index: 10;
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
 }
 
-@keyframes dash-loading-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+::-webkit-scrollbar-thumb {
+  background: var(--bg-tertiary);
+  border-radius: 2px;
 }
 
-/* 响应式 */
-@media (max-width: 1600px) {
-  .dash-main {
-    grid-template-columns: 1fr 350px;
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-subtle);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-@media (max-width: 1400px) {
-  .dash-main {
-    grid-template-columns: 1fr;
+.argus-card {
+  animation: fadeIn 0.3s ease;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .argus-grid-3 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .argus-grid-3,
+  .argus-grid-2 {
+    grid-template-columns: 1fr !important;
   }
   
-  .dash-right-panel {
-    position: relative;
-    top: 0;
+  .ant-layout-sider {
+    display: none;
   }
-  
-  .dash-risk-panel {
-    height: 500px;
-  }
-}
-
-@media (max-width: 1280px) {
-  .dash-stats-grid { grid-template-columns: repeat(2, 1fr); }
-  .dash-charts-grid { grid-template-columns: 1fr; }
-}
-
-@media (max-width: 960px) {
-  .dash-content-layer { padding: 0 20px 40px; }
-  .dash-header { flex-wrap: wrap; gap: 16px; padding: 16px 20px; margin: 0 -20px 24px; }
-  .dash-stats-grid { grid-template-columns: 1fr; }
-  .dash-projects-grid { grid-template-columns: 1fr; }
 }

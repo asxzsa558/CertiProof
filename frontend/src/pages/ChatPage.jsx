@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { Layout, Avatar, Dropdown, Space, Button, Tooltip, Modal, Form, Input, Select, message, Tag, Popconfirm, Table, Badge, Tabs } from 'antd'
 import {
   ProjectOutlined,
@@ -32,6 +32,7 @@ const { Header, Sider, Content } = Layout
 
 function ChatPage() {
   const navigate = useNavigate()
+  const { projectId: urlProjectId } = useParams()
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
   const [projects, setProjects] = useState([])
@@ -52,7 +53,7 @@ function ChatPage() {
 
   useEffect(() => {
     fetchProjects()
-  }, [])
+  }, [urlProjectId])
 
   useEffect(() => {
     if (selectedProject) {
@@ -72,6 +73,27 @@ function ChatPage() {
     try {
       const response = await api.get('/projects/')
       setProjects(response.data)
+      
+      // 如果 URL 中有 projectId，优先选择该项目
+      if (urlProjectId) {
+        const urlProject = response.data.find(p => p.id === parseInt(urlProjectId))
+        if (urlProject) {
+          setSelectedProject(urlProject)
+          return
+        }
+      }
+      
+      // 从 localStorage 读取上次访问的项目
+      const lastProjectId = localStorage.getItem('lastProjectId')
+      if (lastProjectId && response.data.length > 0) {
+        const lastProject = response.data.find(p => p.id === parseInt(lastProjectId))
+        if (lastProject) {
+          setSelectedProject(lastProject)
+          return
+        }
+      }
+      
+      // 否则选择第一个项目
       if (response.data.length > 0 && !selectedProject) {
         setSelectedProject(response.data[0])
       }
@@ -86,6 +108,7 @@ function ChatPage() {
       setAssets(response.data)
     } catch (error) {
       console.error('Failed to fetch assets:', error)
+      message.error('获取资产列表失败，请检查项目是否存在')
       setAssets([])
     }
   }
@@ -207,6 +230,10 @@ function ChatPage() {
 
   const handleSelectProject = (project) => {
     setSelectedProject(project)
+    // 保存项目 ID 到 localStorage
+    if (project && project.id) {
+      localStorage.setItem('lastProjectId', project.id.toString())
+    }
   }
 
   const handleNewProject = () => {
@@ -371,149 +398,97 @@ function ChatPage() {
           >
             态势总览
           </Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={handleNewProject}
-            block
-            className="new-project-btn"
-          >
-            新建项目
-          </Button>
         </div>
 
         <div className="sider-section">
           <div className="section-title">
-            <HistoryOutlined style={{ marginRight: 8 }} />
-            项目列表
+            <ProjectOutlined style={{ marginRight: 8 }} />
+            当前项目
           </div>
-          <div className="project-list">
-            {projects.map((project) => (
-              <div key={project.id}>
-                <div
-                  className={`project-item ${selectedProject?.id === project.id && !showManager ? 'active' : ''}`}
-                  onClick={() => {
-                    handleSelectProject(project)
-                    if (showManager) setShowManager(false)
-                  }}
-                >
-                  <div className="project-item-info">
-                    <div className="project-item-name">{project.name}</div>
-                    <div className="project-item-meta">
-                      <span className="project-level">
-                        {project.compliance_level}
+          {selectedProject && (
+            <div className="current-project-info">
+              <div className="project-item active">
+                <div className="project-item-info">
+                  <div className="project-item-name">{selectedProject.name}</div>
+                  <div className="project-item-meta">
+                    <span className="project-level">
+                      {selectedProject.compliance_level}
+                    </span>
+                    {selectedProject.compliance_score !== null && selectedProject.compliance_score !== undefined ? (
+                      <span className="project-score" style={{ color: getScoreColor(selectedProject.compliance_score) }}>
+                        {selectedProject.compliance_score} 分
                       </span>
-                      {project.compliance_score !== null && project.compliance_score !== undefined ? (
-                        <span className="project-score" style={{ color: getScoreColor(project.compliance_score) }}>
-                          {project.compliance_score} 分
-                        </span>
-                      ) : (
-                        <span className="project-score-unchecked">未检测</span>
-                      )}
-                    </div>
-                  </div>
-                  <Space size={0}>
-                    <Tooltip title="管理项目">
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<SettingOutlined />}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleOpenManager(project)
-                        }}
-                        className="project-manage-btn"
-                      />
-                    </Tooltip>
-                    <Tooltip title="查看扫描结果">
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<FileSearchOutlined />}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          navigate(`/projects/${project.id}/results`)
-                        }}
-                        className="project-results-btn"
-                      />
-                    </Tooltip>
-                  </Space>
-                </div>
-                {/* Inline assets for selected project */}
-                {selectedProject?.id === project.id && !showManager && (
-                  <div className="inline-assets">
-                    <div className="inline-assets-header">
-                      <CloudServerOutlined style={{ marginRight: 4 }} />
-                      <span>资产</span>
-                      <Badge count={assets.length} size="small" style={{ backgroundColor: '#6366f1', marginLeft: 4 }} />
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<PlusOutlined />}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleNewAsset()
-                        }}
-                        className="add-asset-btn"
-                      />
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={assetsExpanded ? <UpOutlined /> : <DownOutlined />}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setAssetsExpanded(!assetsExpanded)
-                        }}
-                        className="toggle-assets-btn"
-                      />
-                    </div>
-                    {assetsExpanded && (
-                      <>
-                        {assets.length === 0 ? (
-                          <div className="empty-assets-inline">
-                            <Button type="link" size="small" onClick={(e) => { e.stopPropagation(); handleNewAsset() }}>
-                              + 添加资产
-                            </Button>
-                          </div>
-                        ) : (
-                          assets.slice(0, 5).map((asset) => (
-                            <div key={asset.id} className="asset-item-inline" onClick={(e) => e.stopPropagation()}>
-                              <Tag color={asset.asset_type === 'ip' ? 'blue' : asset.asset_type === 'domain' ? 'green' : 'purple'} className="asset-type-tag">
-                                {asset.asset_type === 'ip' ? 'IP' : asset.asset_type === 'domain' ? '域名' : '云'}
-                              </Tag>
-                              <span className="asset-value">{asset.value}</span>
-                              <Popconfirm
-                                title="确定删除？"
-                                onConfirm={() => handleDeleteAsset(asset.id)}
-                                okText="删除"
-                                cancelText="取消"
-                              >
-                                <Button type="text" size="small" icon={<DeleteOutlined />} className="delete-asset-btn" />
-                              </Popconfirm>
-                            </div>
-                          ))
-                        )}
-                        {assets.length > 5 && (
-                          <div className="more-assets-hint" onClick={(e) => { e.stopPropagation(); handleOpenManager(project) }}>
-                            还有 {assets.length - 5} 个资产...
-                          </div>
-                        )}
-                      </>
+                    ) : (
+                      <span className="project-score-unchecked">未检测</span>
                     )}
                   </div>
+                </div>
+                <Space size={0}>
+                  <Tooltip title="查看扫描结果">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<FileSearchOutlined />}
+                      onClick={() => navigate(`/projects/${selectedProject.id}/results`)}
+                      className="project-results-btn"
+                    />
+                  </Tooltip>
+                </Space>
+              </div>
+              <div className="inline-assets">
+                <div className="inline-assets-header">
+                  <CloudServerOutlined style={{ marginRight: 4 }} />
+                  <span>资产</span>
+                  <Badge count={assets.length} size="small" style={{ backgroundColor: '#6366f1', marginLeft: 4 }} />
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={handleNewAsset}
+                    className="add-asset-btn"
+                  />
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={assetsExpanded ? <UpOutlined /> : <DownOutlined />}
+                    onClick={() => setAssetsExpanded(!assetsExpanded)}
+                    className="toggle-assets-btn"
+                  />
+                </div>
+                {assetsExpanded && (
+                  <>
+                    {assets.length === 0 ? (
+                      <div className="empty-assets-inline">
+                        <Button type="link" size="small" onClick={handleNewAsset}>
+                          + 添加资产
+                        </Button>
+                      </div>
+                    ) : (
+                      assets.slice(0, 5).map((asset) => (
+                        <div key={asset.id} className="asset-item-inline">
+                          <Tag color={asset.asset_type === 'ip' ? 'blue' : asset.asset_type === 'domain' ? 'green' : 'purple'} className="asset-type-tag">
+                            {asset.asset_type === 'ip' ? 'IP' : asset.asset_type === 'domain' ? '域名' : '云'}
+                          </Tag>
+                          <span className="asset-value">{asset.value}</span>
+                          <Popconfirm
+                            title="确定删除？"
+                            onConfirm={() => handleDeleteAsset(asset.id)}
+                            okText="删除"
+                            cancelText="取消"
+                          >
+                            <Button type="text" size="small" icon={<DeleteOutlined />} className="delete-asset-btn" />
+                          </Popconfirm>
+                        </div>
+                      ))
+                    )}
+                  </>
                 )}
               </div>
-            ))}
-            {projects.length === 0 && (
-              <div className="empty-projects">
-                <p>还没有项目</p>
-                <p>点击"新建项目"开始</p>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
           
           {/* Assessment Progress - 显示在侧边栏底部 */}
-          {selectedProject && !showManager && (
+          {selectedProject && (
             <div className="sider-assessment-section">
               <AssessmentProgress 
                 projectId={selectedProject.id} 

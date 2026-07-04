@@ -10,6 +10,7 @@ RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debia
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
+    fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements

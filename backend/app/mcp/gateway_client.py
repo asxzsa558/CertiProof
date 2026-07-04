@@ -6,8 +6,11 @@ MCP Gateway Client - MCP Gateway 客户端
 
 import httpx
 import asyncio
+import logging
 from typing import Dict, Any, Optional, Callable
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class MCPGatewayClient:
@@ -19,11 +22,13 @@ class MCPGatewayClient:
         else:
             self.gateway_url = gateway_url
         
-        self.timeout = 600.0  # 10 分钟超时
+        self.timeout = 900.0  # 15 分钟超时
+        self.max_retries = 2  # 最大重试次数
+        self.retry_delay = 2.0  # 重试延迟（秒）
     
     async def call(self, tool_name: str, params: dict) -> dict:
         """
-        通过 Gateway 调用工具（同步模式）
+        通过 Gateway 调用工具（同步模式，带重试机制）
         
         Args:
             tool_name: 工具名称
@@ -32,21 +37,52 @@ class MCPGatewayClient:
         Returns:
             工具返回结果
         """
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        last_error = None
+        
+        for attempt in range(self.max_retries + 1):
             try:
-                response = await client.post(
-                    f"{self.gateway_url}/call",
-                    json={
-                        "tool": tool_name,
-                        "params": params,
-                    }
-                )
-                response.raise_for_status()
-                return response.json()
+                logger.info(f"MCP Gateway call attempt {attempt + 1}/{self.max_retries + 1}: {tool_name}")
+                
+                async with httpx.AsyncClient(
+                    timeout=self.timeout,
+                    limits=httpx.Limits(max_keepalive_connections=10, max_connections=20)
+                ) as client:
+                    response = await client.post(
+                        f"{self.gateway_url}/call",
+                        json={
+                            "tool": tool_name,
+                            "params": params,
+                        }
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+                    logger.info(f"MCP Gateway call success: {tool_name}")
+                    return result
+                    
             except httpx.HTTPStatusError as e:
-                raise Exception(f"MCP Gateway error: {e.response.status_code} - {e.response.text}")
+                last_error = Exception(f"MCP Gateway error: {e.response.status_code} - {e.response.text}")
+                logger.error(f"MCP Gateway HTTP error (attempt {attempt + 1}): {e.response.status_code} - {e.response.text}")
+                
+                # 如果是 4xx 错误，不重试
+                if 400 <= e.response.status_code < 500:
+                    raise last_error
+                    
             except httpx.RequestError as e:
-                raise Exception(f"MCP Gateway request error: {e}")
+                last_error = Exception(f"MCP Gateway request error: {type(e).__name__}: {str(e)}")
+                logger.error(f"MCP Gateway request error (attempt {attempt + 1}): {type(e).__name__}: {str(e)}")
+                
+            except Exception as e:
+                last_error = Exception(f"MCP Gateway unexpected error: {type(e).__name__}: {str(e)}")
+                logger.error(f"MCP Gateway unexpected error (attempt {attempt + 1}): {type(e).__name__}: {str(e)}")
+            
+            # 如果不是最后一次尝试，等待后重试
+            if attempt < self.max_retries:
+                logger.info(f"Retrying in {self.retry_delay} seconds...")
+                await asyncio.sleep(self.retry_delay)
+        
+        # 所有重试都失败
+        logger.error(f"MCP Gateway call failed after {self.max_retries + 1} attempts")
+        raise last_error
     
     async def call_async(self, tool_name: str, params: dict) -> str:
         """

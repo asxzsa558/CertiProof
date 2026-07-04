@@ -1,7 +1,13 @@
 import { useState, useRef } from 'react'
 import './HolographicCard.css'
 
-export default function HolographicCard({ children, className = '', intensity = 15 }) {
+export default function HolographicCard({
+  children,
+  className = '',
+  intensity = 15,
+  noTilt = false,
+  bare = false,
+}) {
   const [transform, setTransform] = useState('')
   const cardRef = useRef(null)
 
@@ -12,10 +18,9 @@ export default function HolographicCard({ children, className = '', intensity = 
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
 
-    // 计算旋转角度
     const centerX = rect.width / 2
     const centerY = rect.height / 2
-    
+
     const rotateX = ((y - centerY) / centerY) * -intensity
     const rotateY = ((x - centerX) / centerX) * intensity
 
@@ -23,33 +28,31 @@ export default function HolographicCard({ children, className = '', intensity = 
   }
 
   const handleMouseLeave = () => {
-    setTransform('perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)')
+    setTransform(`perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)`)
   }
+
+  const mouseProps = noTilt
+    ? {}
+    : { onMouseMove: handleMouseMove, onMouseLeave: handleMouseLeave }
 
   return (
     <div
       ref={cardRef}
-      className={`holographic-card ${className}`}
-      style={{ transform }}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
+      className={`holographic-card ${bare ? 'bare' : ''} ${className}`}
+      style={noTilt ? {} : { transform }}
+      {...mouseProps}
     >
-      {/* 扫描线效果 */}
-      <div className="holographic-scanline" />
-      
-      {/* 边框发光 */}
-      <div className="holographic-border" />
-      
-      {/* 内容 */}
-      <div className="holographic-content">
-        {children}
-      </div>
-      
-      {/* 四角装饰 */}
-      <div className="holographic-corner holographic-corner-tl" />
-      <div className="holographic-corner holographic-corner-tr" />
-      <div className="holographic-corner holographic-corner-bl" />
-      <div className="holographic-corner holographic-corner-br" />
+      {!bare && <div className="holographic-scanline" />}
+      {!bare && <div className="holographic-border" />}
+      <div className="holographic-content">{children}</div>
+      {!bare && (
+        <>
+          <div className="holographic-corner holographic-corner-tl" />
+          <div className="holographic-corner holographic-corner-tr" />
+          <div className="holographic-corner holographic-corner-bl" />
+          <div className="holographic-corner holographic-corner-br" />
+        </>
+      )}
     </div>
   )
 }

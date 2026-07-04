@@ -1,7 +1,7 @@
 /* SystemConfig - 系统配置抽屉 - 美化版 */
 
 .system-config-drawer .ant-drawer-header {
-  background: linear-gradient(180deg, #0a0a0b 0%, #0f0f12 100%);
+  background: linear-gradient(180deg, var(--bg-primary) 0%, #0f0f12 100%);
   border-bottom: 1px solid rgba(197, 165, 90, 0.15);
   padding: 18px 24px;
 }
@@ -16,14 +16,14 @@
 .system-config-drawer .ant-drawer-body {
   background:
     radial-gradient(ellipse at top, rgba(197, 165, 90, 0.03) 0%, transparent 50%),
-    #0a0a0b;
+    var(--bg-primary);
   padding: 0;
   display: flex;
   flex-direction: column;
 }
 
 .system-config-drawer .ant-drawer-footer {
-  background: linear-gradient(0deg, #0a0a0b 0%, #0f0f12 100%);
+  background: linear-gradient(0deg, var(--bg-primary) 0%, #0f0f12 100%);
   border-top: 1px solid rgba(197, 165, 90, 0.15);
   padding: 14px 24px;
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
@@ -58,7 +58,7 @@
 .drawer-footer .ant-btn-primary {
   background: linear-gradient(135deg, #D4AF37, #C5A55A) !important;
   border: none !important;
-  color: #0a0a0b !important;
+  color: var(--bg-primary) !important;
   font-weight: 600;
   box-shadow: 0 2px 8px rgba(197, 165, 90, 0.2);
 }
@@ -367,7 +367,7 @@
   width: 18px !important;
   height: 18px !important;
   border: 2px solid #D4AF37 !important;
-  background: #0a0a0b !important;
+  background: var(--bg-primary) !important;
   box-shadow: 0 0 8px rgba(197, 165, 90, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3) !important;
   transition: all 0.2s ease;
 }

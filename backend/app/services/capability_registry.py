@@ -103,7 +103,7 @@ class CapabilityRegistry:
                 params.append(f"{name}{req}")
             
             params_str = ", ".join(params) if params else "无参数"
-            lines.append(f"- {cap.name}({params_str}): {cap.description[:50]}")
+            lines.append(f"- {cap.name}({params_str}): {cap.description[:100]}")
         
         return "\n".join(lines)
     
@@ -114,12 +114,323 @@ class CapabilityRegistry:
         
         self.register(Capability(
             name="scan_ports",
-            description="对目标资产进行端口扫描，发现开放的端口和服务。可以指定端口范围，默认扫描全部端口（1-65535）。",
+            description="对目标资产进行端口扫描，发现开放的端口和服务。默认扫描等保/安全检查常关注的高危端口；定制检测可传 port_range='30-3000'，全端口扫描传 port_range='1-65535'。",
             parameters={
                 "type": "object",
                 "properties": {
                     "target": {"type": "string", "description": "目标资产（IP地址、域名或主机名）"},
-                    "port_range": {"type": "string", "description": "端口范围，如 '1-65535'、'80,443'、'22'，不指定则扫描全部端口"},
+                    "port_range": {"type": "string", "description": "端口范围，如 'high-risk'、'30-3000'、'1-65535'、'80,443'、'22'，不指定则扫描高危端口"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="masscan_scan",
+            description="使用 masscan 进行超高速全端口扫描（比 nmap 快 10x）。适合快速发现开放端口，但不做服务版本识别。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标资产（IP地址、域名或主机名）"},
+                    "port_range": {"type": "string", "description": "端口范围，默认 '1-65535'"},
+                    "rate": {"type": "integer", "description": "每秒发包数，默认 2000"},
+                    "banner_grab": {"type": "boolean", "description": "是否抓取 banner，默认 false"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="fping_scan",
+            description="使用 fping 进行批量存活检测。支持 CIDR 网段格式，快速发现网段内存活主机。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "network": {"type": "string", "description": "CIDR 网段，如 '192.168.1.0/24'"},
+                    "targets": {"type": "array", "items": {"type": "string"}, "description": "目标 IP 列表"},
+                },
+                "required": []
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="nikto_scan",
+            description="使用 nikto 进行 Web 服务器漏洞扫描。检测已知漏洞、危险文件、CGI 脚本、服务器配置问题等。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机（IP 或域名）"},
+                    "port": {"type": "integer", "description": "端口，默认 80"},
+                    "ssl": {"type": "boolean", "description": "是否使用 HTTPS，默认 false"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="sqlmap_scan",
+            description="使用 sqlmap 进行 SQL 注入检测。自动检测和利用 SQL 注入漏洞。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "目标 URL，包含参数，如 'http://example.com/page?id=1'"},
+                    "data": {"type": "string", "description": "POST 数据"},
+                    "level": {"type": "integer", "description": "检测级别 1-5，默认 1"},
+                    "risk": {"type": "integer", "description": "风险级别 1-3，默认 1"},
+                },
+                "required": ["url"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="gobuster_scan",
+            description="使用 gobuster 进行目录/文件爆破。发现 Web 应用中隐藏的目录和文件。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "目标 URL"},
+                    "wordlist": {"type": "string", "description": "字典文件路径，默认 /usr/share/wordlists/dirb/common.txt"},
+                    "extensions": {"type": "string", "description": "文件扩展名，如 'php,asp,html'"},
+                    "threads": {"type": "integer", "description": "线程数，默认 10"},
+                },
+                "required": ["url"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="ffuf_scan",
+            description="使用 ffuf 进行 Web 模糊测试。高速 Web 路径/参数发现工具。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "目标 URL，包含 FUZZ 占位符"},
+                    "wordlist": {"type": "string", "description": "字典文件路径"},
+                    "method": {"type": "string", "description": "HTTP 方法，默认 GET"},
+                },
+                "required": ["url"]
+            },
+            category="scan"
+        ))
+
+        self.register(Capability(
+            name="web_discovery_scan",
+            description="Web 路径/目录发现组合检测，内部执行 gobuster 目录爆破和 ffuf 模糊测试，统一返回发现的路径/端点。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "目标 URL 或主机"},
+                    "target": {"type": "string", "description": "目标 URL 或主机"},
+                },
+                "required": []
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="snmp_walk",
+            description="使用 snmpwalk 获取网络设备 SNMP 信息。读取设备接口流量、路由表、系统信息等。对应等保 2.2 安全通信网络。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标设备 IP"},
+                    "community": {"type": "string", "description": "SNMP 团体字，默认 public"},
+                    "version": {"type": "string", "description": "SNMP 版本，默认 2c"},
+                    "oid": {"type": "string", "description": "OID，默认 1.3.6.1.2.1 (MIB-2)"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="snmp_bruteforce",
+            description="使用 onesixtyone 进行 SNMP 团体字爆破。检测默认或弱团体字配置。对应等保 2.2 安全通信网络。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标设备 IP"},
+                    "wordlist": {"type": "string", "description": "字典文件路径"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="snmp_get",
+            description="使用 snmpget 获取单个 SNMP OID 值。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标设备 IP"},
+                    "oid": {"type": "string", "description": "OID"},
+                    "community": {"type": "string", "description": "SNMP 团体字，默认 public"},
+                    "version": {"type": "string", "description": "SNMP 版本，默认 2c"},
+                },
+                "required": ["target", "oid"]
+            },
+            category="scan"
+        ))
+
+        self.register(Capability(
+            name="network_device_scan",
+            description="网络设备安全检测组合能力，内部执行 SNMP 信息读取和默认/弱团体字检测。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标网络设备 IP"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="enum4linux_scan",
+            description="使用 enum4linux 进行 Windows 信息枚举。获取用户列表、共享、密码策略等。对应等保 2.4.1 身份鉴别。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标 Windows 主机 IP"},
+                    "username": {"type": "string", "description": "用户名（可选）"},
+                    "password": {"type": "string", "description": "密码（可选）"},
+                    "scan_type": {"type": "string", "description": "扫描类型: all/users/shares/password_policy，默认 all"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="crackmapexec_scan",
+            description="使用 crackmapexec 进行 SMB/Windows 枚举。获取用户、共享、密码策略、会话等。对应等保 2.4.1 身份鉴别。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标 Windows 主机 IP"},
+                    "username": {"type": "string", "description": "用户名"},
+                    "password": {"type": "string", "description": "密码"},
+                    "scan_type": {"type": "string", "description": "扫描类型: all/users/shares/pass_pol/sessions，默认 all"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="smb_enum",
+            description="使用 smbclient 枚举 SMB 共享。检测匿名/guest 访问和共享权限。对应等保 2.4.2 访问控制。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标 Windows 主机 IP"},
+                    "username": {"type": "string", "description": "用户名，默认 guest"},
+                    "password": {"type": "string", "description": "密码"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+
+        self.register(Capability(
+            name="windows_security_scan",
+            description="Windows/AD 安全检测组合能力，内部执行用户/组枚举、SID 枚举和 SMB 共享枚举。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标 Windows 主机 IP"},
+                    "username": {"type": "string", "description": "用户名（可选）"},
+                    "password": {"type": "string", "description": "密码（可选）"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="redis_check",
+            description="检查 Redis 未授权访问。尝试无密码连接获取服务器信息。对应等保 2.4.6 数据库安全。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP"},
+                    "port": {"type": "integer", "description": "Redis 端口，默认 6379"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="oracle_check",
+            description="检查 Oracle TNS 版本信息泄露。对应等保 2.4.6 数据库安全。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP"},
+                    "port": {"type": "integer", "description": "Oracle TNS 端口，默认 1521"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="mongodb_check",
+            description="检查 MongoDB 未授权访问。对应等保 2.4.6 数据库安全。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP"},
+                    "port": {"type": "integer", "description": "MongoDB 端口，默认 27017"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="memcached_check",
+            description="检查 Memcached 未授权访问。对应等保 2.4.6 数据库安全。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP"},
+                    "port": {"type": "integer", "description": "Memcached 端口，默认 11211"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="mysql_check",
+            description="检查 MySQL 空口令。对应等保 2.4.6 数据库安全。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP"},
+                    "port": {"type": "integer", "description": "MySQL 端口，默认 3306"},
+                    "username": {"type": "string", "description": "用户名，默认 root"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+
+        self.register(Capability(
+            name="database_security_scan",
+            description="执行数据库安全组合检测，包括 Redis、MySQL、MongoDB、Memcached 和 Oracle。对应等保 2.4.6 数据库安全。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP 或域名"},
                 },
                 "required": ["target"]
             },
@@ -177,6 +488,160 @@ class CapabilityRegistry:
                 "type": "object",
                 "properties": {
                     "target": {"type": "string", "description": "目标资产地址"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="tech_assessment",
+            description="等保技术要求测评（10 项检查）：端口扫描、安全基线、漏洞扫描、Web 漏洞、弱口令、SSL、数据库安全 (Redis/MySQL/MongoDB)、网络设备检测。仅安全基线检查需要 SSH 凭据。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标资产地址"},
+                    "ssh_username": {"type": "string", "description": "SSH 用户名（仅用于安全基线检查）"},
+                    "ssh_password": {"type": "string", "description": "SSH 密码（仅用于安全基线检查）"},
+                    "ssh_key_file": {"type": "string", "description": "SSH 私钥路径（仅用于安全基线检查）"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        # ========== SSH 白盒配置核查能力 ==========
+
+        self.register(Capability(
+            name="baseline_check",
+            description="安全基线核查。通过 SSH 登录目标主机后自动识别操作系统；Linux 执行密码策略、SSH配置、审计配置、服务端口、文件权限、SELinux/AppArmor 等检查，非 Linux 返回明确跳过原因。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP 或域名"},
+                    "username": {"type": "string", "description": "SSH 用户名，默认 root"},
+                    "password": {"type": "string", "description": "SSH 密码（与 key_file 二选一）"},
+                    "key_file": {"type": "string", "description": "SSH 私钥文件路径（与 password 二选一）"},
+                    "ssh_username": {"type": "string", "description": "SSH 用户名"},
+                    "ssh_password": {"type": "string", "description": "SSH 密码"},
+                    "ssh_key_file": {"type": "string", "description": "SSH 私钥路径"},
+                    "port": {"type": "integer", "description": "SSH 端口，默认 22"},
+                    "ssh_port": {"type": "integer", "description": "SSH 端口，默认 22"},
+                    "categories": {"type": "array", "items": {"type": "string"}, "description": "检查类别列表，可选: password, ssh, audit, service, file_perm, mac。默认全部"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="linux_baseline",
+            description="Linux 安全基线全量检查。通过 SSH 远程登录目标主机，检查密码策略、SSH配置、审计配置、服务端口、文件权限、SELinux/AppArmor 等。覆盖等保安全计算环境核心要求。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP 或域名"},
+                    "username": {"type": "string", "description": "SSH 用户名，默认 root"},
+                    "password": {"type": "string", "description": "SSH 密码（与 key_file 二选一）"},
+                    "key_file": {"type": "string", "description": "SSH 私钥文件路径（与 password 二选一）"},
+                    "port": {"type": "integer", "description": "SSH 端口，默认 22"},
+                    "categories": {"type": "array", "items": {"type": "string"}, "description": "检查类别列表，可选: password, ssh, audit, service, file_perm, mac。默认全部"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="password_policy_check",
+            description="密码策略检查。通过 SSH 远程检查 Linux 密码复杂度策略、密码过期策略、空口令账户等。对应等保 8.1.4.1 身份鉴别。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP 或域名"},
+                    "username": {"type": "string", "description": "SSH 用户名，默认 root"},
+                    "password": {"type": "string", "description": "SSH 密码"},
+                    "port": {"type": "integer", "description": "SSH 端口，默认 22"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="ssh_config_check",
+            description="SSH 配置检查。通过 SSH 远程检查 sshd_config 配置，包括 root 登录、密码认证、最大尝试次数等。对应等保 8.1.4.1 身份鉴别。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP 或域名"},
+                    "username": {"type": "string", "description": "SSH 用户名，默认 root"},
+                    "password": {"type": "string", "description": "SSH 密码"},
+                    "port": {"type": "integer", "description": "SSH 端口，默认 22"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="audit_config_check",
+            description="审计配置检查。通过 SSH 远程检查 auditd 服务状态、审计规则、rsyslog 配置、远程日志等。对应等保 8.1.4.3 安全审计。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP 或域名"},
+                    "username": {"type": "string", "description": "SSH 用户名，默认 root"},
+                    "password": {"type": "string", "description": "SSH 密码"},
+                    "port": {"type": "integer", "description": "SSH 端口，默认 22"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="service_port_check",
+            description="服务端口检查。通过 SSH 远程检查监听端口列表、高危端口、不必要服务等。对应等保 8.1.4.4 入侵防范。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP 或域名"},
+                    "username": {"type": "string", "description": "SSH 用户名，默认 root"},
+                    "password": {"type": "string", "description": "SSH 密码"},
+                    "port": {"type": "integer", "description": "SSH 端口，默认 22"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="file_permission_check",
+            description="文件权限检查。通过 SSH 远程检查 SUID/SGID 文件、全局可写文件、关键文件权限等。对应等保 8.1.4.2 访问控制。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP 或域名"},
+                    "username": {"type": "string", "description": "SSH 用户名，默认 root"},
+                    "password": {"type": "string", "description": "SSH 密码"},
+                    "port": {"type": "integer", "description": "SSH 端口，默认 22"},
+                },
+                "required": ["target"]
+            },
+            category="scan"
+        ))
+        
+        self.register(Capability(
+            name="mac_check",
+            description="强制访问控制检查。通过 SSH 远程检查 SELinux/AppArmor 状态。对应等保 8.1.4.4 入侵防范。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "目标主机 IP 或域名"},
+                    "username": {"type": "string", "description": "SSH 用户名，默认 root"},
+                    "password": {"type": "string", "description": "SSH 密码"},
+                    "port": {"type": "integer", "description": "SSH 端口，默认 22"},
                 },
                 "required": ["target"]
             },

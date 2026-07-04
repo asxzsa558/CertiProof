@@ -27,9 +27,9 @@ class ContextManager:
     """统一的上下文管理器"""
     
     # 上下文 token 限制
-    MAX_CONVERSATION_TOKENS = 50000  # 对话历史最大 token 数
-    HARD_TOKEN_LIMIT = 100000  # 硬限制，超过则强制归档
-    MAX_ACTION_HISTORY = 50  # 最大操作历史记录数
+    MAX_CONVERSATION_TOKENS = 200000  # 对话历史最大 token 数（增加到 200k）
+    HARD_TOKEN_LIMIT = 500000  # 硬限制，超过则强制归档（增加到 500k）
+    MAX_ACTION_HISTORY = 200  # 最大操作历史记录数（增加到 200）
     MAX_CACHE_ENTRIES = 100  # 最大缓存条目数
     
     def __init__(self, db: AsyncSession, user_id: int, project_id: int = None, thread_id: int = None):
@@ -174,6 +174,10 @@ class ContextManager:
     async def _get_conversation_history(self, limit: int = 20) -> List[Dict]:
         """获取最近的对话历史"""
         query = select(ConversationHistory).where(ConversationHistory.user_id == self.user_id)
+        
+        # 按项目过滤
+        if self.project_id is not None:
+            query = query.where(ConversationHistory.project_id == self.project_id)
         
         # 如果有 thread_id，按线程过滤
         if self.thread_id:
@@ -354,13 +358,18 @@ class ContextManager:
     async def cache_result(self, cache_key: str, result_data: Dict, expires_in: int = 3600):
         """缓存结果"""
         # 检查是否已存在
+        conditions = [
+            ResultCache.user_id == self.user_id,
+            ResultCache.project_id == self.project_id if self.project_id is not None else ResultCache.project_id.is_(None),
+            ResultCache.cache_key == cache_key,
+        ]
         result = await self.db.execute(
-            select(ResultCache).where(
-                ResultCache.user_id == self.user_id,
-                ResultCache.cache_key == cache_key,
-            )
+            select(ResultCache)
+            .where(*conditions)
+            .order_by(ResultCache.created_at.desc())
+            .limit(1)
         )
-        existing = result.scalar_one_or_none()
+        existing = result.scalars().first()
         
         if existing:
             # 更新现有缓存
@@ -381,14 +390,21 @@ class ContextManager:
     
     async def get_cached_result(self, cache_key: str) -> Optional[Dict]:
         """获取缓存的结果"""
+        conditions = [
+            ResultCache.user_id == self.user_id,
+            ResultCache.project_id == self.project_id if self.project_id is not None else ResultCache.project_id.is_(None),
+        ]
+        conditions.extend([
+            ResultCache.cache_key == cache_key,
+            (ResultCache.expires_at > datetime.utcnow()) | (ResultCache.expires_at == None),
+        ])
         result = await self.db.execute(
-            select(ResultCache).where(
-                ResultCache.user_id == self.user_id,
-                ResultCache.cache_key == cache_key,
-                (ResultCache.expires_at > datetime.utcnow()) | (ResultCache.expires_at == None),
-            )
+            select(ResultCache)
+            .where(*conditions)
+            .order_by(ResultCache.created_at.desc())
+            .limit(1)
         )
-        cache = result.scalar_one_or_none()
+        cache = result.scalars().first()
         return cache.result_data if cache else None
     
     async def add_project_memory(self, memory_type: str, content: str, extra_data: Dict = None):
@@ -458,6 +474,7 @@ class ContextManager:
         result = await self.db.execute(
             select(ConversationHistory)
             .where(ConversationHistory.user_id == self.user_id)
+            .where(ConversationHistory.project_id == self.project_id)
             .order_by(ConversationHistory.created_at.desc())
         )
         histories = result.scalars().all()
@@ -575,14 +592,17 @@ class ContextManager:
         conv_count = await self.db.execute(
             select(func.count(ConversationHistory.id))
             .where(ConversationHistory.user_id == self.user_id)
+            .where(ConversationHistory.project_id == self.project_id)
         )
         conv_total = conv_count.scalar() or 0
         
-        if conv_total > 200:
-            excess = conv_total - 200
+        # 增加阈值到 1000 条，避免过度删除
+        if conv_total > 1000:
+            excess = conv_total - 1000
             oldest = await self.db.execute(
                 select(ConversationHistory.id)
                 .where(ConversationHistory.user_id == self.user_id)
+                .where(ConversationHistory.project_id == self.project_id)
                 .order_by(ConversationHistory.created_at.asc())
                 .limit(excess)
             )
@@ -600,8 +620,9 @@ class ContextManager:
         action_count = await self.db.execute(action_query)
         action_total = action_count.scalar() or 0
         
-        if action_total > 100:
-            excess = action_total - 100
+        # 增加阈值到 500 条
+        if action_total > 500:
+            excess = action_total - 500
             oldest_query = select(ActionHistory.id).where(ActionHistory.user_id == self.user_id)
             if self.project_id:
                 oldest_query = oldest_query.where(ActionHistory.project_id == self.project_id)

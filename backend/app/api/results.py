@@ -29,13 +29,9 @@ async def list_scan_tasks(
     current_user: User = Depends(get_current_user),
 ):
     """获取项目的所有扫描任务"""
-    # 验证项目存在且属于当前用户
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    # 验证项目存在且用户有权限访问
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id)
     
     # 获取扫描任务列表
     result = await db.execute(
@@ -64,12 +60,8 @@ async def get_scan_task(
         raise HTTPException(status_code=404, detail="Scan task not found")
     
     # 验证项目属于当前用户
-    result = await db.execute(
-        select(Project).where(Project.id == scan_task.project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=403, detail="Access denied")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, scan_task.project_id, current_user.id)
     
     # 获取 findings
     result = await db.execute(
@@ -100,12 +92,8 @@ async def get_scan_summary(
         raise HTTPException(status_code=404, detail="Scan task not found")
     
     # 验证项目属于当前用户
-    result = await db.execute(
-        select(Project).where(Project.id == scan_task.project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=403, detail="Access denied")
+    from app.api.projects import get_project_for_user
+    project = await get_project_for_user(db, scan_task.project_id, current_user.id)
     
     # 获取 findings
     result = await db.execute(
@@ -145,12 +133,8 @@ async def get_finding(
         raise HTTPException(status_code=404, detail="Finding not found")
     
     # 验证项目属于当前用户
-    result = await db.execute(
-        select(Project).where(Project.id == finding.project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=403, detail="Access denied")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, scan_task.project_id, current_user.id)
     
     # 获取 evidences
     result = await db.execute(
@@ -186,12 +170,8 @@ async def get_evidence(
     )
     finding = result.scalar_one_or_none()
     
-    result = await db.execute(
-        select(Project).where(Project.id == finding.project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=403, detail="Access denied")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, finding.project_id, current_user.id)
     
     return evidence
 
@@ -213,12 +193,8 @@ async def delete_scan_task(
         raise HTTPException(status_code=404, detail="Scan task not found")
     
     # 验证项目属于当前用户
-    result = await db.execute(
-        select(Project).where(Project.id == scan_task.project_id, Project.user_id == current_user.id)
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(status_code=403, detail="Access denied")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, scan_task.project_id, current_user.id)
     
     # 删除关联的 evidences（通过 findings）
     result = await db.execute(

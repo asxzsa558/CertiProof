@@ -8,7 +8,7 @@ import asyncio
 import uuid
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -21,6 +21,41 @@ from app.models.asset import Asset
 from app.orchestrator import orchestrator
 
 router = APIRouter(prefix="/chat", tags=["AI Chat"])
+
+CAPABILITY_DISPLAY_NAMES = {
+    "scan_ports": "端口扫描",
+    "masscan_scan": "高速端口扫描",
+    "fping_scan": "批量存活检测",
+    "scan_ssl": "SSL/TLS 检测",
+    "scan_vulnerabilities": "漏洞扫描",
+    "scan_weak_passwords": "弱口令检测",
+    "baseline_check": "安全基线核查",
+    "linux_baseline": "安全基线核查",
+    "ssh_config_check": "SSH 配置检查",
+    "nikto_scan": "Web 安全扫描",
+    "sqlmap_scan": "SQL 注入检测",
+    "gobuster_scan": "目录爆破",
+    "ffuf_scan": "Web 模糊测试",
+    "web_discovery_scan": "Web 目录发现",
+    "database_security_scan": "数据库安全检测",
+    "redis_check": "Redis 未授权检测",
+    "mysql_check": "MySQL 空口令检测",
+    "mongodb_check": "MongoDB 未授权检测",
+    "oracle_check": "Oracle 检测",
+    "memcached_check": "Memcached 检测",
+    "snmp_walk": "SNMP 检测",
+    "snmp_bruteforce": "SNMP 团体字检测",
+    "snmp_get": "SNMP OID 读取",
+    "network_device_scan": "网络设备检测",
+    "enum4linux_scan": "Windows/AD/SMB 子项",
+    "crackmapexec_scan": "Windows SID 枚举",
+    "smb_enum": "Windows/AD/SMB 子项",
+    "windows_security_scan": "Windows/AD/SMB 检测",
+    "full_compliance_scan": "全量合规扫描",
+    "tech_assessment": "等保技术测评",
+    "ping_host": "Ping 检测",
+    "ping_asset": "Ping 检测",
+}
 
 
 # --- Models ---
@@ -97,29 +132,59 @@ async def chat(
     # 获取项目
     project = None
     if project_id:
-        result = await db.execute(
-            select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-        )
-        project = result.scalar_one_or_none()
-        if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
+        from app.api.projects import get_project_for_user
+        project = await get_project_for_user(db, project_id, current_user.id)
     
     # 如果是多资产扫描，直接构建执行计划，跳过 AI 决策
     if is_multi_asset_scan and multi_asset_data:
         capability = multi_asset_data.get("capability", "scan_ports")
-        assets = multi_asset_data.get("assets", [])
+        raw_assets = multi_asset_data.get("assets", [])
+        assets = []
+        seen_asset_targets = set()
+        for asset_item in raw_assets:
+            if not isinstance(asset_item, dict):
+                continue
+            target = str(asset_item.get("value") or asset_item.get("target") or "").strip()
+            target_key = target.lower()
+            if not target or target_key in seen_asset_targets:
+                continue
+            seen_asset_targets.add(target_key)
+            assets.append({**asset_item, "value": target})
+
+        if not assets:
+            raise HTTPException(status_code=400, detail="未选择有效资产")
+
+        base_parameters = multi_asset_data.get("parameters") or {}
+        ssh_credential = multi_asset_data.get("ssh_credential")  # 默认凭据（向后兼容）
         
         # 构建执行计划
         plan = []
         for asset_item in assets:
+            parameters = {**base_parameters, "target": asset_item.get("value")}
+            
+            # 优先使用资产级凭据，否则使用默认凭据
+            asset_ssh = asset_item.get("ssh_credential") or ssh_credential
+            if asset_ssh:
+                parameters["ssh_username"] = asset_ssh.get("username", "root")
+                if asset_ssh.get("password"):
+                    parameters["ssh_password"] = asset_ssh.get("password")
+                if asset_ssh.get("key_file"):
+                    parameters["ssh_key_file"] = asset_ssh.get("key_file")
+                if asset_ssh.get("port"):
+                    parameters["ssh_port"] = asset_ssh.get("port", 22)
+            
             plan.append({
                 "capability": capability,
-                "parameters": {"target": asset_item.get("value")}
+                "parameters": parameters
             })
         
         # 生成人类可读的响应
         asset_names = [a.get("value") for a in assets]
-        response = f"好的，我将对项目中的 {len(assets)} 个资产执行{capability}：{', '.join(asset_names)}"
+        ssh_info = ""
+        if ssh_credential:
+            ssh_info = f"（SSH 用户: {ssh_credential.get('username', 'root')}）"
+        capability_name = CAPABILITY_DISPLAY_NAMES.get(capability, capability)
+        response = f"好的，我将对项目中的 {len(assets)} 个资产执行{capability_name}{ssh_info}：{', '.join(asset_names)}"
         
         # 生成 task_id
         task_id = str(uuid.uuid4())
@@ -129,7 +194,7 @@ async def chat(
             task_id=task_id,
             plan=plan,
             user_id=current_user.id,
-            project_id=project_id or 0,
+        project_id=project_id,
             db=db,
             context_manager=None,
             ai_response=response,
@@ -156,7 +221,7 @@ async def chat(
     # 使用 Orchestrator 处理
     result = await orchestrator.handle_user_input(
         user_input=message,
-        project_id=project_id or 0,
+        project_id=project_id,
         user_id=current_user.id,
         asset=asset,
         db=db,
@@ -177,8 +242,8 @@ async def chat(
 async def get_task_status(
     current_user: User = Depends(get_current_user),
 ):
-    """获取当前所有任务的状态"""
-    status = orchestrator.get_status()
+    """获取当前用户的任务状态"""
+    status = orchestrator.get_status(user_id=current_user.id)
     return TaskStatusResponse(
         running=status["running"],
         completed=status["completed"],
@@ -195,9 +260,9 @@ async def get_task_result(
     
     前端轮询此接口，直到 status 变为 completed 或 failed
     """
-    # 检查是否已完成
+    # 检查是否已完成（仅返回当前用户的任务）
     for task in orchestrator.completed_tasks:
-        if task["task_id"] == task_id:
+        if task["task_id"] == task_id and task.get("user_id") == current_user.id:
             return TaskResultResponse(
                 task_id=task_id,
                 status="completed",
@@ -234,9 +299,9 @@ async def get_agent_status(
     current_user: User = Depends(get_current_user),
 ):
     """获取特定任务的状态（兼容旧接口）"""
-    # 检查 completed_tasks
+    # 检查 completed_tasks（仅返回当前用户的任务）
     for task in orchestrator.completed_tasks:
-        if task["task_id"] == task_id:
+        if task["task_id"] == task_id and task.get("user_id") == current_user.id:
             return task
     
     # 未找到，可能还在运行中
@@ -245,19 +310,24 @@ async def get_agent_status(
 
 @router.get("/history")
 async def get_chat_history(
-    project_id: Optional[int] = None,
-    limit: int = 50,
+    project_id: Optional[int] = Query(None, description="项目ID"),
+    limit: int = Query(50, description="返回数量限制"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """获取对话历史"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("get_chat_history project_id=%s limit=%d user_id=%d", project_id, limit, current_user.id)
+    
     from app.models.context import ConversationHistory
     
     query = select(ConversationHistory).where(
         ConversationHistory.user_id == current_user.id
     )
     
-    if project_id:
+    # 按项目过滤（仅当明确传入了 project_id 时）
+    if project_id is not None:
         query = query.where(ConversationHistory.project_id == project_id)
     
     query = query.order_by(ConversationHistory.created_at.desc()).limit(limit)
@@ -271,6 +341,7 @@ async def get_chat_history(
             "role": h.role,
             "content": h.content,
             "created_at": h.created_at.isoformat() if h.created_at else None,
+            "context_snapshot": h.context_snapshot,
         }
         for h in reversed(histories)
     ]
@@ -303,12 +374,9 @@ async def clear_project_history(
 ):
     """清理指定项目的对话/操作/缓存"""
     from app.models.context import ConversationHistory, ActionHistory, ResultCache
+    from app.api.projects import get_project_for_user
     
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    await get_project_for_user(db, project_id, current_user.id)
     
     await db.execute(
         delete(ConversationHistory).where(

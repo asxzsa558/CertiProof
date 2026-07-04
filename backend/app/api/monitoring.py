@@ -42,11 +42,8 @@ async def create_scheduled_scan(
 ):
     """Create a new scheduled scan."""
     # Verify project access
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id)
     
     # Verify asset exists
     result = await db.execute(
@@ -83,11 +80,8 @@ async def list_scheduled_scans(
     current_user: User = Depends(get_current_user),
 ):
     """List all scheduled scans for a project."""
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id)
     
     result = await db.execute(
         select(ScheduledScan)
@@ -164,11 +158,8 @@ async def get_scan_history(
     current_user: User = Depends(get_current_user),
 ):
     """Get scan history with change detection."""
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id)
     
     result = await db.execute(
         select(ScanHistory)

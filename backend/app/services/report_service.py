@@ -30,12 +30,12 @@ from app.models.assessment import Assessment, PhaseInstance, TaskInstance
 
 # Register Chinese font
 try:
-    pdfmetrics.registerFont(TTFont('PingFang', '/System/Library/Fonts/PingFang.ttc', subfontIndex=0))
-    CHINESE_FONT = 'PingFang'
+    pdfmetrics.registerFont(TTFont('NotoSansCJK', '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', subfontIndex=0))
+    CHINESE_FONT = 'NotoSansCJK'
 except:
     try:
-        pdfmetrics.registerFont(TTFont('PingFang', '/System/Library/Fonts/STHeiti Light.ttc', subfontIndex=0))
-        CHINESE_FONT = 'PingFang'
+        pdfmetrics.registerFont(TTFont('NotoSansCJK', '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc', subfontIndex=0))
+        CHINESE_FONT = 'NotoSansCJK'
     except:
         CHINESE_FONT = 'Helvetica'
 

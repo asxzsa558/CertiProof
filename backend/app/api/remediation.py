@@ -28,11 +28,8 @@ async def create_remediation_ticket(
 ):
     """Create a new remediation ticket for a finding."""
     # Verify project access
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id)
     
     # Verify finding exists
     result = await db.execute(
@@ -78,11 +75,8 @@ async def list_remediation_tickets(
 ):
     """List all remediation tickets for a project."""
     # Verify project access
-    result = await db.execute(
-        select(Project).where(Project.id == project_id, Project.user_id == current_user.id)
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Project not found")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id)
     
     query = select(RemediationTicket).where(RemediationTicket.project_id == project_id)
     if status_filter:
