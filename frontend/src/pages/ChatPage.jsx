@@ -21,9 +21,9 @@ import {
   DashboardOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../store/authStore'
-import ChatWorkspace from '../components/ChatWorkspace'
 import SystemConfig from '../components/SystemConfig'
 import AssessmentProgress from '../components/AssessmentProgress'
+import ProjectCommandCenter from '../components/ProjectCommandCenter'
 import VeriSureLogo from '../components/VeriSureLogo'
 import api from '../services/api'
 import './ChatPage.css'
@@ -627,11 +627,11 @@ function ChatPage() {
               </div>
             </div>
           ) : (
-            <ChatWorkspace
-              key={selectedProject?.id || 'default'}
-              projectId={selectedProject?.id}
-              projectName={selectedProject?.name}
+            <ProjectCommandCenter
+              project={selectedProject}
+              assets={assets}
               modelId={selectedModel}
+              onOpenResults={() => selectedProject && navigate(`/projects/${selectedProject.id}/results`)}
             />
           )}
         </Content>

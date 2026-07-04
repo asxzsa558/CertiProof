@@ -83,16 +83,16 @@ body::before {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 900px;
-  height: 900px;
-  opacity: 0.15;
+  width: 380px;
+  height: 380px;
+  opacity: 0.028;
   pointer-events: none;
-  z-index: 9999;
+  z-index: 0;
   background-image: url('/verisure-logo.svg');
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
-  filter: drop-shadow(0 0 100px rgba(0, 212, 255, 0.1));
+  filter: drop-shadow(0 0 80px rgba(0, 212, 255, 0.12));
 }
 
 /* Glassmorphism Card - Enhanced */
@@ -477,16 +477,16 @@ body::before {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 900px;
-  height: 900px;
-  opacity: 0.15;
+  width: 700px;
+  height: 700px;
+  opacity: 0.085;
   pointer-events: none;
-  z-index: 9999;
+  z-index: 0;
   background-image: url('/verisure-logo.svg');
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
-  filter: drop-shadow(0 0 100px rgba(0, 212, 255, 0.1));
+  filter: drop-shadow(0 0 70px rgba(0, 212, 255, 0.08));
 }
 
 /* Data Pulse Animation */
