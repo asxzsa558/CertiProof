@@ -27,6 +27,7 @@ import api from '../services/api'
 import VeriSureLogo from './VeriSureLogo'
 import AssetCredentialModal from './AssetCredentialModal'
 import ResultMessageRenderer from './ResultMessageRenderer'
+import { createTaskResultMessage, pollTaskResultUntilDone } from './chatTaskUtils'
 import {
   TOOL_CATALOG,
   SYSTEM_COMMANDS,
@@ -816,18 +817,11 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
               m.taskId === taskId ? { ...m, taskCompleted: true, taskStatus: 'completed' } : m
             ))
 
-            // 检查是否包含多资产结果
-            const hasAssetResults = msg.data?.scan_results?.asset_results && 
-                                  Object.keys(msg.data.scan_results.asset_results).length > 0
-
-            const resultMessage = {
-              role: 'assistant',
-              content: msg.data?.result_description || '任务执行完成',
-              isResult: true,
+            setMessages(prev => [...prev, createTaskResultMessage({
+              resultDescription: msg.data?.result_description,
               scanResults: msg.data?.scan_results || {},
-              isMultiAsset: msg.data?.is_multi_asset || hasAssetResults,
-            }
-            setMessages(prev => [...prev, resultMessage])
+              isMultiAsset: msg.data?.is_multi_asset,
+            })])
           } else if (msg.type === 'failed') {
             ws.close()
             wsRef.current = null
@@ -894,73 +888,13 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       clearTimeout(pollRef.current)
       pollRef.current = null
     }
-    pollTaskResult(taskId)
-  }
-
-  const pollTaskResult = async (taskId) => {
-    const maxAttempts = 120
-    const interval = 2000
-
-    for (let i = 0; i < maxAttempts; i++) {
-      try {
-        const response = await api.get(`/chat/result/${taskId}`)
-        const data = response.data
-
-        if (data.current_step || data.step_progress) {
-          setMessages(prev => prev.map(msg =>
-            msg.taskId === taskId ? {
-              ...msg,
-              currentStep: data.current_step,
-              stepProgress: data.step_progress,
-            } : msg
-          ))
-        }
-
-        if (data.status === 'completed' || data.status === 'failed') {
-          if (completedTaskIdsRef.current.has(taskId)) return
-          completedTaskIdsRef.current.add(taskId)
-          setMessages(prev => prev.map(msg =>
-            msg.taskId === taskId ? {
-              ...msg,
-              taskCompleted: true,
-              taskStatus: data.status,
-            } : msg
-          ))
-          
-          // 检查是否包含多资产结果
-          const hasAssetResults = data.scan_results?.asset_results && 
-                                Object.keys(data.scan_results.asset_results).length > 0
-          
-          const resultMessage = {
-            role: 'assistant',
-            content: data.result_description || '任务执行完成',
-            isResult: true,
-            scanResults: data.scan_results || {},
-            isMultiAsset: hasAssetResults,
-          }
-          setMessages((prev) => [...prev, resultMessage])
-          return
-        }
-
-        await new Promise(resolve => {
-          pollRef.current = setTimeout(resolve, interval)
-        })
-      } catch (error) {
-        console.error('Poll error:', error)
-        await new Promise(resolve => {
-          pollRef.current = setTimeout(resolve, interval)
-        })
-      }
-    }
-
-    setMessages(prev => prev.map(msg =>
-      msg.taskId === taskId ? { ...msg, taskCompleted: true, taskStatus: 'timeout' } : msg
-    ))
-    setMessages((prev) => [...prev, {
-      role: 'assistant',
-      content: '任务执行超时，请稍后再试。',
-      isError: true,
-    }])
+    pollTaskResultUntilDone({
+      api,
+      taskId,
+      setMessages,
+      completedTaskIdsRef,
+      pollRef,
+    })
   }
 
   const filteredCommands = SLASH_COMMANDS.filter(cmd => 
