@@ -4,12 +4,13 @@ Tasks API - 任务控制接口
 """
 
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
+from app.core.config import settings
 from app.core.rbac import get_project_for_user
 from app.core.security import get_current_user
 from app.models.scan_task import ScanTask, ScanTaskStatus
@@ -109,6 +110,11 @@ async def _persist_control_state(
         scan_task.status = scan_status
     if scan_status in (ScanTaskStatus.CANCELLED, ScanTaskStatus.FAILED, ScanTaskStatus.COMPLETED):
         scan_task.completed_at = datetime.utcnow()
+        scan_task.lease_owner = None
+        scan_task.lease_expires_at = None
+    elif status_text == "paused":
+        scan_task.lease_owner = "paused"
+        scan_task.lease_expires_at = datetime.utcnow() + timedelta(days=3650)
     await db.commit()
 
 
@@ -147,7 +153,9 @@ async def pause_task(
     await _require_task_control_access(task_id, db, current_user)
     success = await orchestrator.pause_task(task_id)
     if not success:
-        raise HTTPException(status_code=400, detail="任务无法暂停（可能已完成或已停止）")
+        persisted_task = await _get_persisted_task(task_id, db, current_user, "scan:cancel")
+        if not persisted_task or persisted_task.status not in (ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING):
+            raise HTTPException(status_code=400, detail="任务无法暂停（可能已完成或已停止）")
     await _persist_control_state(task_id, db, current_user, status_text="paused")
     
     return {
@@ -167,8 +175,26 @@ async def resume_task(
     await _require_task_control_access(task_id, db, current_user)
     success = await orchestrator.resume_task(task_id)
     if not success:
-        raise HTTPException(status_code=400, detail="任务无法恢复（可能未暂停）")
-    await _persist_control_state(task_id, db, current_user, status_text="running", scan_status=ScanTaskStatus.RUNNING)
+        persisted_task = await _get_persisted_task(task_id, db, current_user, "scan:cancel")
+        if not persisted_task or (persisted_task.progress or {}).get("status") != "paused":
+            raise HTTPException(status_code=400, detail="任务无法恢复（可能未暂停）")
+        if persisted_task.status == ScanTaskStatus.PENDING:
+            await _persist_control_state(task_id, db, current_user, status_text="running")
+            persisted_task.lease_owner = None
+            persisted_task.lease_expires_at = None
+            await db.commit()
+        else:
+            await _persist_control_state(task_id, db, current_user, status_text="running", scan_status=ScanTaskStatus.RUNNING)
+            persisted_task.lease_owner = "resumed"
+            persisted_task.lease_expires_at = datetime.utcnow() + timedelta(minutes=settings.TASK_LEASE_MINUTES)
+            await db.commit()
+    else:
+        await _persist_control_state(task_id, db, current_user, status_text="running", scan_status=ScanTaskStatus.RUNNING)
+        persisted_task = await _get_persisted_task(task_id, db, current_user, "scan:cancel")
+        if persisted_task:
+            persisted_task.lease_owner = None
+            persisted_task.lease_expires_at = None
+            await db.commit()
     
     return {
         "task_id": task_id,

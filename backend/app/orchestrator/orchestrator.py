@@ -521,7 +521,26 @@ class Orchestrator:
         
         # 创建暂停检查回调（异步等待直到恢复或停止）
         async def wait_if_paused():
+            if scan_task_id:
+                status_result = await async_db.execute(select(ScanTask).where(ScanTask.id == scan_task_id))
+                persisted_task = status_result.scalar_one_or_none()
+                if persisted_task and persisted_task.status == ScanTaskStatus.CANCELLED:
+                    self.task_stop_flags[task_id] = True
+                    self.task_status[task_id] = "stopped"
+                    return True
+                if persisted_task and (persisted_task.progress or {}).get("status") == "paused":
+                    self.task_status[task_id] = "paused"
             while self.task_status.get(task_id) == "paused":
+                if scan_task_id:
+                    status_result = await async_db.execute(select(ScanTask).where(ScanTask.id == scan_task_id))
+                    persisted_task = status_result.scalar_one_or_none()
+                    if persisted_task and persisted_task.status == ScanTaskStatus.CANCELLED:
+                        self.task_stop_flags[task_id] = True
+                        self.task_status[task_id] = "stopped"
+                        return True
+                    if persisted_task and (persisted_task.progress or {}).get("status") != "paused":
+                        self.task_status[task_id] = "running"
+                        return False
                 if self.is_task_stopped(task_id):
                     return True
                 await asyncio.sleep(0.5)

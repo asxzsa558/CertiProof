@@ -77,6 +77,10 @@ def assert_source_guards() -> None:
     worker = (ROOT / "backend/app/worker.py").read_text(encoding="utf-8")
     assert "async def run_worker" in worker
     assert "await orchestrator.recover_incomplete_scan_tasks(db)" in worker
+    tasks_api = (ROOT / "backend/app/api/tasks.py").read_text(encoding="utf-8")
+    assert 'lease_owner = "paused"' in tasks_api
+    assert 'lease_owner = "resumed"' in tasks_api
+    assert "ScanTaskStatus.PENDING" in tasks_api
 
 
 def main() -> int:
