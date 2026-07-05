@@ -165,13 +165,16 @@ class Orchestrator:
         ai_response: str = "",
         user_input: str = "",
         status: ScanTaskStatus = ScanTaskStatus.RUNNING,
+        task_type: ScanTaskType = ScanTaskType.FULL,
+        asset_id: Optional[int] = None,
     ) -> Optional[int]:
         if not db or not project_id or not self._plan_has_scan(plan):
             return None
 
         scan_task = ScanTask(
             project_id=project_id,
-            task_type=ScanTaskType.FULL,
+            asset_id=asset_id,
+            task_type=task_type,
             status=status,
             triggered_by=TriggeredBy.MANUAL,
             parameters={
@@ -208,6 +211,8 @@ class Orchestrator:
         ai_response: str = "",
         user_input: str = "",
         thread_id: int = None,
+        task_type: ScanTaskType = ScanTaskType.FULL,
+        asset_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Create one tracked async execution and return its identifiers."""
         task_id = str(uuid.uuid4())
@@ -222,6 +227,8 @@ class Orchestrator:
             ai_response=ai_response,
             user_input=user_input,
             status=ScanTaskStatus.PENDING if worker_mode else ScanTaskStatus.RUNNING,
+            task_type=task_type,
+            asset_id=asset_id,
         )
         self.task_stop_flags[task_id] = False
         self.task_status[task_id] = "running"
@@ -564,6 +571,8 @@ class Orchestrator:
                         thread_id=thread_id,
                         ai_response=ai_response,
                         user_input=user_input,
+                        task_type=task_type,
+                        asset_id=asset_id,
                     )
                     self._update_task_metadata(task_id, scan_task_id=scan_task_id)
                 

@@ -57,6 +57,10 @@ def assert_source_guards() -> None:
     scan_service = (ROOT / "backend/app/services/scan_service.py").read_text(encoding="utf-8")
     assert "Project.user_id == user_id" not in scan_service
     assert "ScanTask.project_id == project_id" in scan_service
+    assert "user_id = parameters.get(\"user_id\") or project.owner_id or project.user_id" in scan_service
+    scans_api = (ROOT / "backend/app/api/scans.py").read_text(encoding="utf-8")
+    assert "BackgroundTasks" not in scans_api
+    assert "orchestrator.start_async_plan" in scans_api
 
     chat_api = (ROOT / "backend/app/api/chat.py").read_text(encoding="utf-8")
     assert "async def _can_read_task_payload" in chat_api

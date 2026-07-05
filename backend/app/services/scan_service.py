@@ -120,10 +120,13 @@ class ScanService:
             if asset:
                 asset_value = asset.value
         
+        parameters = scan_task.parameters or {}
+        user_id = parameters.get("user_id") or project.owner_id or project.user_id
+
         await orchestrator.handle_user_input(
             user_input="执行等保合规检测",
             project_id=project.id,
-            user_id=project.user_id,
+            user_id=user_id,
             asset=asset_value or "unknown",
             db=db,
         )

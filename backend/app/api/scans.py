@@ -1,61 +1,76 @@
-"""
-Scan API - VeriSure
-API endpoints for scan task management.
-"""
+"""Scan API - VeriSure."""
 
-import asyncio
-import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.scan_task import ScanTaskType
+from app.models.asset import Asset, VerificationStatus
 from app.schemas.scan_task import ScanTaskCreate, ScanTaskResponse, ScanTaskListResponse
 from app.schemas.finding import FindingResponse
 from app.services.scan_service import scan_service
-from app.core.database import AsyncSessionLocal
 from app.api.projects import get_project_for_user
-
-logger = logging.getLogger(__name__)
+from app.orchestrator import orchestrator
 
 router = APIRouter(prefix="/projects/{project_id}/scans", tags=["Scans"])
 
 
-async def execute_scan_background(scan_task_id: int):
-    """Background task to execute scan."""
-    async with AsyncSessionLocal() as db:
-        try:
-            await scan_service.execute_scan_task(db, scan_task_id)
-        except Exception as e:
-            logger.error(f"Background scan {scan_task_id} failed: {e}")
+async def _build_scan_plan(db: AsyncSession, project_id: int, scan_data: ScanTaskCreate) -> tuple[list[dict], Optional[int]]:
+    parameters = dict(scan_data.parameters or {})
+    capability = parameters.pop("capability", None)
+    if not capability:
+        capability = "full_compliance_scan" if scan_data.task_type == ScanTaskType.FULL else "scan_ports"
+
+    query = select(Asset).where(Asset.project_id == project_id)
+    if scan_data.asset_id:
+        query = query.where(Asset.id == scan_data.asset_id)
+    result = await db.execute(query.order_by(Asset.created_at.asc()))
+    assets = result.scalars().all()
+    if scan_data.asset_id and not assets:
+        raise ValueError("Asset not found")
+    if scan_data.asset_id and assets[0].verification_status != VerificationStatus.VERIFIED:
+        raise ValueError("Asset must be verified before scanning")
+    if not assets:
+        raise ValueError("No assets found for this project")
+
+    plan = [
+        {
+            "capability": capability,
+            "parameters": {**parameters, "target": asset.value},
+        }
+        for asset in assets
+    ]
+    return plan, scan_data.asset_id
 
 
 @router.post("/", response_model=ScanTaskResponse, status_code=status.HTTP_201_CREATED)
 async def create_scan(
     project_id: int,
     scan_data: ScanTaskCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Create and start a new scan task."""
     await get_project_for_user(db, project_id, current_user.id, "scan:execute")
     try:
-        scan_task = await scan_service.create_scan_task(
-            db=db,
-            project_id=project_id,
+        plan, asset_id = await _build_scan_plan(db, project_id, scan_data)
+        task_info = await orchestrator.start_async_plan(
+            plan=plan,
             user_id=current_user.id,
-            asset_id=scan_data.asset_id,
+            project_id=project_id,
+            db=db,
+            ai_response="已创建扫描任务，正在排队执行。",
+            user_input="通过扫描 API 创建任务",
             task_type=scan_data.task_type,
-            parameters=scan_data.parameters,
+            asset_id=asset_id,
         )
-        
-        # Start scan in background
-        background_tasks.add_task(execute_scan_background, scan_task.id)
-        
+        scan_task = await scan_service.get_scan_task(db, project_id, task_info["scan_task_id"])
+        if not scan_task:
+            raise ValueError("Scan task was not created")
         return scan_task
     except ValueError as e:
         raise HTTPException(
