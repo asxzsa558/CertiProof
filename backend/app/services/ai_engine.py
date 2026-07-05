@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.llm_service import llm_service
 from app.services.capability_registry import capability_registry
+from app.core.redaction import redact_sensitive
 
 logger = logging.getLogger(__name__)
 
@@ -222,12 +223,12 @@ class AIEngine:
             
             content = response.get("content", "")
             
-            logger.info(f"Raw LLM content: {content[:500]}")
+            logger.info("Raw LLM content received (length=%d)", len(content))
             
             # 解析响应
             plan = self._parse_plan(content)
             
-            logger.info(f"AI decision: {plan}")
+            logger.info(f"AI decision: {redact_sensitive(plan)}")
             
             return plan
             
@@ -531,7 +532,7 @@ class AIEngine:
         """解析 LLM 返回的计划"""
         import re
         
-        logger.info(f"Raw LLM response: {content[:300]}")
+        logger.info("Raw LLM response received for plan parsing (length=%d)", len(content))
         
         # 检查是否泄露系统提示词
         if self._check_prompt_leak(content):
@@ -611,7 +612,7 @@ class AIEngine:
                 pass
         
         # 解析失败，返回默认
-        logger.warning(f"Failed to parse AI plan: {content[:200]}")
+        logger.warning("Failed to parse AI plan (length=%d)", len(content))
         return {
             "plan": [{"capability": "chat", "parameters": {"message": content}}],
             "response": content,
@@ -637,13 +638,101 @@ class AIEngine:
             if isinstance(step, dict) and "capability" in step:
                 capability = self.registry.get(step["capability"])
                 if capability:
-                    valid_plan.append(step)
+                    validated_step = self._validate_step(step, capability)
+                    if validated_step.get("capability") == "chat":
+                        valid_plan = [validated_step]
+                        plan["response"] = validated_step["parameters"]["message"]
+                        break
+                    valid_plan.append(validated_step)
                 else:
                     logger.warning(f"Unknown capability: {step['capability']}")
         
         plan["plan"] = valid_plan
         
         return plan
+
+    def _validate_step(self, step: Dict, capability) -> Dict:
+        """Validate one LLM-generated step against the registered parameter schema."""
+        raw_parameters = step.get("parameters") or {}
+        if not isinstance(raw_parameters, dict):
+            return self._invalid_plan_chat(f"{capability.name} 的参数格式不正确")
+
+        schema = capability.parameters or {}
+        properties = schema.get("properties") or {}
+        required = schema.get("required") or []
+        sanitized = {}
+
+        for name, value in raw_parameters.items():
+            if name not in properties:
+                logger.warning("Dropped unknown parameter for %s: %s", capability.name, name)
+                continue
+            expected = properties[name].get("type")
+            if not self._matches_schema_type(value, expected):
+                coerced = self._coerce_schema_value(value, expected)
+                if coerced is None:
+                    logger.warning("Dropped invalid parameter for %s: %s", capability.name, name)
+                    continue
+                value = coerced
+            sanitized[name] = value
+
+        missing = [name for name in required if name not in sanitized or sanitized[name] in (None, "")]
+        if missing:
+            return self._invalid_plan_chat(f"缺少必要参数：{', '.join(missing)}")
+
+        return {
+            "capability": capability.name,
+            "parameters": sanitized,
+        }
+
+    def _matches_schema_type(self, value: Any, expected: Any) -> bool:
+        if not expected:
+            return True
+        if isinstance(expected, list):
+            return any(self._matches_schema_type(value, item) for item in expected)
+        type_map = {
+            "string": str,
+            "integer": int,
+            "number": (int, float),
+            "boolean": bool,
+            "array": list,
+            "object": dict,
+        }
+        py_type = type_map.get(expected)
+        if py_type is None:
+            return True
+        if expected == "integer" and isinstance(value, bool):
+            return False
+        return isinstance(value, py_type)
+
+    def _coerce_schema_value(self, value: Any, expected: Any) -> Any:
+        if isinstance(expected, list):
+            for item in expected:
+                coerced = self._coerce_schema_value(value, item)
+                if coerced is not None:
+                    return coerced
+            return None
+        try:
+            if expected == "string":
+                return str(value)
+            if expected == "integer" and isinstance(value, str) and value.strip().isdigit():
+                return int(value.strip())
+            if expected == "number" and isinstance(value, str):
+                return float(value.strip())
+            if expected == "boolean" and isinstance(value, str):
+                lower = value.strip().lower()
+                if lower in {"true", "1", "yes", "是"}:
+                    return True
+                if lower in {"false", "0", "no", "否"}:
+                    return False
+        except (TypeError, ValueError):
+            return None
+        return None
+
+    def _invalid_plan_chat(self, message: str) -> Dict:
+        return {
+            "capability": "chat",
+            "parameters": {"message": f"参数不完整或不合法：{message}。请补充后重试。"},
+        }
 
 
 # 全局单例

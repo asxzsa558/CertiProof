@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     # Application
     APP_NAME: str = "VeriSure"
     APP_VERSION: str = "0.1.0"
+    APP_ENV: str = "development"
     DEBUG: bool = True
     API_V1_PREFIX: str = "/api/v1"
     
@@ -47,6 +48,22 @@ class Settings(BaseSettings):
     REPORT_DEFAULT_FORMAT: str = "pdf"  # 默认报告格式
     REPORT_INCLUDE_RAW_SCANS: bool = False  # 报告是否包含原始扫描数据
     REPORT_LANGUAGE: str = "zh"  # 报告语言
+
+    def validate_runtime_security(self) -> None:
+        """Fail fast on unsafe production settings."""
+        if self.APP_ENV.lower() not in {"prod", "production"}:
+            return
+
+        problems = []
+        if self.DEBUG:
+            problems.append("DEBUG must be false in production")
+        if not self.SECRET_KEY or self.SECRET_KEY == "your-secret-key-change-in-production":
+            problems.append("SECRET_KEY must be set to a strong non-default value in production")
+        if "*" in self.CORS_ORIGINS:
+            problems.append("CORS_ORIGINS must not contain '*' in production")
+
+        if problems:
+            raise RuntimeError("Unsafe production configuration: " + "; ".join(problems))
 
     class Config:
         env_file = ".env"

@@ -19,6 +19,7 @@ from app.models.context import (
     ConversationArchive,
     ConversationThread,
 )
+from app.core.redaction import redact_sensitive
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +346,7 @@ class ContextManager:
             user_id=self.user_id,
             project_id=self.project_id,
             action_type=action_type,
-            parameters=parameters,
+            parameters=redact_sensitive(parameters),
             result=result,
             status=status,
             completed_at=datetime.utcnow() if status in ["success", "failed"] else None,

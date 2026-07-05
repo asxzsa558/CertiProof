@@ -14,6 +14,7 @@ from app.models.asset import Asset, VerificationStatus
 from app.models.scan_task import ScanTask, ScanTaskType, ScanTaskStatus, TriggeredBy
 from app.models.finding import Finding
 from app.orchestrator import orchestrator
+from app.core.redaction import redact_sensitive
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ class ScanService:
             task_type=task_type,
             status=ScanTaskStatus.PENDING,
             triggered_by=TriggeredBy.MANUAL,
-            parameters=parameters,
+            parameters=redact_sensitive(parameters),
         )
         db.add(scan_task)
         await db.commit()

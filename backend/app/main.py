@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings.validate_runtime_security()
+
     # Startup: Initialize database
     await init_db()
     

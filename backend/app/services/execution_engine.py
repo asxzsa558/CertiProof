@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.capability_registry import CapabilityRegistry, capability_registry
 from app.services.context_manager import ContextManager
+from app.core.redaction import redact_sensitive
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +336,8 @@ class ExecutionEngine:
                     progress_callback(task_id, i, len(plan), capability_name, "running")
                 
                 # 执行能力
-                logger.info(f"Executing capability: {capability_name} with params: {parameters}")
+                safe_parameters = redact_sensitive(parameters)
+                logger.info(f"Executing capability: {capability_name} with params: {safe_parameters}")
                 
                 # 根据能力类型调用不同的处理器
                 result = await self._execute_capability(capability_name, parameters, user_id, project_id, db)
@@ -352,13 +354,13 @@ class ExecutionEngine:
                 if context_manager:
                     await context_manager.add_action(
                         action_type=capability_name,
-                        parameters=parameters,
+                        parameters=safe_parameters,
                         result=result,
                         status="success"
                     )
                     
                     # 缓存结果
-                    cache_key = f"{capability_name}:{self._generate_cache_key(parameters)}"
+                    cache_key = f"{capability_name}:{self._generate_cache_key(safe_parameters)}"
                     await context_manager.cache_result(cache_key, result)
                 
                 # 通知执行完成
@@ -386,7 +388,7 @@ class ExecutionEngine:
                 if context_manager:
                     await context_manager.add_action(
                         action_type=capability_name,
-                        parameters=parameters,
+                        parameters=redact_sensitive(parameters),
                         result={"error": str(e)},
                         status="failed"
                     )
@@ -2127,6 +2129,7 @@ class ExecutionEngine:
     def _generate_cache_key(self, parameters: Dict) -> str:
         """生成缓存键"""
         import hashlib
+        parameters = redact_sensitive(parameters)
         
         # 简单实现：将参数排序后拼接
         parts = []
