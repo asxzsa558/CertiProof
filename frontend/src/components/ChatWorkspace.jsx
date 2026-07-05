@@ -1144,7 +1144,11 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   const handleCreateArchive = async () => {
     try {
       // 1. 创建归档（立即返回）
-      const response = await api.post('/chat/archives', { title: null })
+      const response = await api.post('/chat/archives', {
+        title: null,
+        project_id: projectId,
+        thread_id: currentThreadId,
+      })
       const archiveId = response.data.archive_id
       
       // 2. 显示"正在生成摘要..."
@@ -1213,7 +1217,8 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       const threadTitle = `接续: ${archive.title}`
       const response = await api.post('/chat/threads', { 
         title: threadTitle, 
-        parent_thread_id: currentThreadId 
+        parent_thread_id: currentThreadId,
+        project_id: projectId,
       })
       setCurrentThreadId(response.data.thread_id)
       
@@ -1256,7 +1261,11 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
 
   const handleCreateThread = async () => {
     try {
-      const response = await api.post('/chat/threads', { title: null, parent_thread_id: currentThreadId })
+      const response = await api.post('/chat/threads', {
+        title: null,
+        parent_thread_id: currentThreadId,
+        project_id: projectId,
+      })
       setCurrentThreadId(response.data.thread_id)
       message.success('新线程已创建')
       // 清空当前对话
@@ -1272,7 +1281,8 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
 
   const loadThreads = async () => {
     try {
-      const response = await api.get('/chat/threads')
+      const params = projectId ? { project_id: projectId } : {}
+      const response = await api.get('/chat/threads', { params })
       setThreads(response.data.threads || [])
     } catch (error) {
       console.error('Failed to load threads:', error)
@@ -1281,7 +1291,8 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
 
   const handleSwitchThread = async (threadId) => {
     try {
-      const response = await api.post(`/chat/threads/${threadId}/continue`)
+      const params = projectId ? { project_id: projectId } : {}
+      const response = await api.post(`/chat/threads/${threadId}/continue`, null, { params })
       setCurrentThreadId(threadId)
       
       // 加载线程的对话历史
@@ -1312,7 +1323,8 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
 
   const handleDeleteThread = async (threadId) => {
     try {
-      await api.delete(`/chat/threads/${threadId}`)
+      const params = projectId ? { project_id: projectId } : {}
+      await api.delete(`/chat/threads/${threadId}`, { params })
       if (currentThreadId === threadId) {
         setCurrentThreadId(null)
       }

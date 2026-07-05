@@ -67,6 +67,8 @@ def assert_source_guards() -> None:
     assert "async def _can_read_task_payload" in chat_api
     assert "await _can_read_task_payload(task, db, current_user)" in chat_api
     assert "await _can_read_task_payload(progress, db, current_user)" in chat_api
+    assert "project_id: Optional[int] = None" in chat_api
+    assert "ContextManager(db, current_user.id, project_id=req.project_id, thread_id=req.thread_id)" in chat_api
 
     orchestrator = (ROOT / "backend/app/orchestrator/orchestrator.py").read_text(encoding="utf-8")
     assert "async def recover_incomplete_scan_tasks" in orchestrator
@@ -94,6 +96,10 @@ def assert_source_guards() -> None:
     assert "changes_detected=changes[\"changes_detected\"]" in monitoring_api
     assert "async def run_due_scheduled_scans" in monitoring_api
     assert "update(ScheduledScan)" in monitoring_api
+
+    context_manager = (ROOT / "backend/app/services/context_manager.py").read_text(encoding="utf-8")
+    assert "ConversationHistory.project_id == self.project_id" in context_manager
+    assert "ConversationThread.project_id == self.project_id" in context_manager
 
 
 def main() -> int:

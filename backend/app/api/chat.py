@@ -382,6 +382,8 @@ async def get_chat_history(
     
     # 按项目过滤（仅当明确传入了 project_id 时）
     if project_id is not None:
+        from app.api.projects import get_project_for_user
+        await get_project_for_user(db, project_id, current_user.id, "project:read")
         query = query.where(ConversationHistory.project_id == project_id)
     
     query = query.order_by(ConversationHistory.created_at.desc()).limit(limit)
@@ -471,6 +473,8 @@ async def scanner_info(current_user: User = Depends(get_current_user)):
 
 class ArchiveRequest(BaseModel):
     title: Optional[str] = None
+    project_id: Optional[int] = None
+    thread_id: Optional[int] = None
 
 
 class ArchiveResponse(BaseModel):
@@ -496,7 +500,11 @@ async def create_archive(
     from app.services.context_manager import ContextManager
     from app.core.database import AsyncSessionLocal
     
-    context_manager = ContextManager(db, current_user.id)
+    if req.project_id is not None:
+        from app.api.projects import get_project_for_user
+        await get_project_for_user(db, req.project_id, current_user.id, "project:read")
+
+    context_manager = ContextManager(db, current_user.id, project_id=req.project_id, thread_id=req.thread_id)
     
     # 1. 立即创建归档占位记录并删除对话历史
     archive_id = await context_manager.create_archive_placeholder(title=req.title)
@@ -579,6 +587,7 @@ async def delete_archive(
 class ThreadRequest(BaseModel):
     title: Optional[str] = None
     parent_thread_id: Optional[int] = None
+    project_id: Optional[int] = None
 
 
 class ThreadResponse(BaseModel):
@@ -595,7 +604,11 @@ async def create_thread(
     """创建新的对话线程"""
     from app.services.context_manager import ContextManager
     
-    context_manager = ContextManager(db, current_user.id)
+    if req.project_id is not None:
+        from app.api.projects import get_project_for_user
+        await get_project_for_user(db, req.project_id, current_user.id, "project:read")
+
+    context_manager = ContextManager(db, current_user.id, project_id=req.project_id)
     thread_id = await context_manager.create_thread(
         title=req.title,
         parent_thread_id=req.parent_thread_id
@@ -609,6 +622,7 @@ async def create_thread(
 
 @router.get("/threads")
 async def list_threads(
+    project_id: Optional[int] = None,
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -616,7 +630,11 @@ async def list_threads(
     """列出对话线程"""
     from app.services.context_manager import ContextManager
     
-    context_manager = ContextManager(db, current_user.id)
+    if project_id is not None:
+        from app.api.projects import get_project_for_user
+        await get_project_for_user(db, project_id, current_user.id, "project:read")
+
+    context_manager = ContextManager(db, current_user.id, project_id=project_id)
     threads = await context_manager.list_threads(limit=limit)
     
     return {"threads": threads, "count": len(threads)}
@@ -625,13 +643,14 @@ async def list_threads(
 @router.get("/threads/{thread_id}")
 async def get_thread(
     thread_id: int,
+    project_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """获取线程详情"""
     from app.services.context_manager import ContextManager
     
-    context_manager = ContextManager(db, current_user.id)
+    context_manager = ContextManager(db, current_user.id, project_id=project_id)
     thread = await context_manager.get_thread(thread_id)
     
     if not thread:
@@ -643,13 +662,14 @@ async def get_thread(
 @router.delete("/threads/{thread_id}")
 async def delete_thread(
     thread_id: int,
+    project_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """删除对话线程"""
     from app.services.context_manager import ContextManager
     
-    context_manager = ContextManager(db, current_user.id)
+    context_manager = ContextManager(db, current_user.id, project_id=project_id)
     success = await context_manager.delete_thread(thread_id)
     
     if not success:
@@ -661,13 +681,14 @@ async def delete_thread(
 @router.post("/threads/{thread_id}/continue")
 async def continue_from_thread(
     thread_id: int,
+    project_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """从指定线程接续上下文"""
     from app.services.context_manager import ContextManager
     
-    context_manager = ContextManager(db, current_user.id)
+    context_manager = ContextManager(db, current_user.id, project_id=project_id)
     result = await context_manager.continue_from_thread(thread_id)
     
     if not result:

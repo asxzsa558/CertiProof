@@ -687,6 +687,8 @@ class ContextManager:
         """
         # 获取当前线程（如果有）的对话历史
         query = select(ConversationHistory).where(ConversationHistory.user_id == self.user_id)
+        if self.project_id is not None:
+            query = query.where(ConversationHistory.project_id == self.project_id)
         if self.thread_id:
             query = query.where(ConversationHistory.thread_id == self.thread_id)
         query = query.order_by(ConversationHistory.created_at.asc())
@@ -1121,9 +1123,11 @@ class ContextManager:
     
     async def list_threads(self, limit: int = 20) -> List[Dict]:
         """列出用户的线程"""
+        query = select(ConversationThread).where(ConversationThread.user_id == self.user_id)
+        if self.project_id is not None:
+            query = query.where(ConversationThread.project_id == self.project_id)
         result = await self.db.execute(
-            select(ConversationThread)
-            .where(ConversationThread.user_id == self.user_id)
+            query
             .order_by(ConversationThread.updated_at.desc())
             .limit(limit)
         )
@@ -1144,12 +1148,14 @@ class ContextManager:
     
     async def get_thread(self, thread_id: int) -> Optional[Dict]:
         """获取线程详情"""
+        query = select(ConversationThread).where(
+            ConversationThread.id == thread_id,
+            ConversationThread.user_id == self.user_id
+        )
+        if self.project_id is not None:
+            query = query.where(ConversationThread.project_id == self.project_id)
         result = await self.db.execute(
-            select(ConversationThread)
-            .where(
-                ConversationThread.id == thread_id,
-                ConversationThread.user_id == self.user_id
-            )
+            query
         )
         thread = result.scalar_one_or_none()
         
@@ -1168,12 +1174,14 @@ class ContextManager:
     
     async def delete_thread(self, thread_id: int) -> bool:
         """删除线程"""
+        query = delete(ConversationThread).where(
+            ConversationThread.id == thread_id,
+            ConversationThread.user_id == self.user_id
+        )
+        if self.project_id is not None:
+            query = query.where(ConversationThread.project_id == self.project_id)
         result = await self.db.execute(
-            delete(ConversationThread)
-            .where(
-                ConversationThread.id == thread_id,
-                ConversationThread.user_id == self.user_id
-            )
+            query
         )
         await self.db.commit()
         return result.rowcount > 0
