@@ -1867,18 +1867,18 @@ class ExecutionEngine:
         if not finding_id:
             return {"message": "请指定发现 ID"}
 
-        result = await db.execute(select(Finding).where(Finding.id == finding_id))
+        result = await db.execute(
+            select(Finding).where(Finding.id == finding_id, Finding.project_id == project_id)
+        )
         finding = result.scalar_one_or_none()
         if not finding:
-            return {"message": "发现不存在"}
-
-        pid = parameters.get("project_id", project_id) or finding.project_id
+            return {"message": "发现不存在或不属于当前项目"}
 
         ticket = RemediationTicket(
             finding_id=finding_id,
-            project_id=pid,
+            project_id=project_id,
             assigned_by=user_id,
-            title=parameters.get("title", f"整改: {finding.check_item}"),
+            title=parameters.get("title", f"整改: {finding.clause_name or finding.clause_id}"),
             description=parameters.get("description"),
             priority=parameters.get("priority", "medium"),
             status=RemediationStatus.OPEN,

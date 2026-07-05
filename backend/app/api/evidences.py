@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.evidence import Evidence, EvidenceType
+from app.models.finding import Finding
 from app.models.questionnaire import QuestionnaireRecord
 from app.services.evidence_service import EvidenceService
 
@@ -69,6 +70,22 @@ async def upload_evidence(
     service = EvidenceService(db)
     from app.api.projects import get_project_for_user
     await get_project_for_user(db, project_id, current_user.id, "evidence:manage")
+
+    if finding_id:
+        finding = await db.get(Finding, finding_id)
+        if not finding or finding.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Finding does not belong to this project",
+            )
+
+    if questionnaire_record_id:
+        record = await db.get(QuestionnaireRecord, questionnaire_record_id)
+        if not record or record.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Questionnaire record does not belong to this project",
+            )
     
     # 读取文件内容
     content = await file.read()
@@ -164,18 +181,21 @@ async def download_evidence(
 ):
     """下载证据文件"""
     service = EvidenceService(db)
+    evidence = await service.get_evidence(evidence_id)
+    if not evidence:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Evidence not found"
+        )
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, evidence.project_id, current_user.id, "assessment:read")
+
     content = await service.download_evidence(evidence_id)
-    
     if not content:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Evidence not found or file missing"
+            detail="Evidence file missing"
         )
-    
-    # 获取文件名
-    evidence = await service.get_evidence(evidence_id)
-    from app.api.projects import get_project_for_user
-    await get_project_for_user(db, evidence.project_id, current_user.id, "assessment:read")
     
     return StreamingResponse(
         io.BytesIO(content),

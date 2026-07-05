@@ -45,6 +45,8 @@ def assert_source_guards() -> None:
     assert "async def _project_for_user_id" in execution_engine
     assert "Project.id == project_id, Project.user_id == user_id" not in execution_engine
     assert "Project.id == pid, Project.user_id == user_id" not in execution_engine
+    assert "Finding.id == finding_id, Finding.project_id == project_id" in execution_engine
+    assert "finding.check_item" not in execution_engine
 
     config = (ROOT / "backend/app/core/config.py").read_text(encoding="utf-8")
     assert "def validate_runtime_security" in config
@@ -89,6 +91,10 @@ def assert_source_guards() -> None:
     assert 'lease_owner = "paused"' in tasks_api
     assert 'lease_owner = "resumed"' in tasks_api
     assert "ScanTaskStatus.PENDING" in tasks_api
+    evidences_api = (ROOT / "backend/app/api/evidences.py").read_text(encoding="utf-8")
+    assert "finding.project_id != project_id" in evidences_api
+    assert "record.project_id != project_id" in evidences_api
+    assert "await get_project_for_user(db, evidence.project_id, current_user.id, \"assessment:read\")" in evidences_api
     monitoring_api = (ROOT / "backend/app/api/monitoring.py").read_text(encoding="utf-8")
     assert "TODO: Generate findings from scan results" not in monitoring_api
     assert "TODO: Implement change detection" not in monitoring_api
