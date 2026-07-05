@@ -22,6 +22,7 @@ from app.models.scan_task import ScanTask, ScanTaskType, ScanTaskStatus, Trigger
 from app.models.finding import Finding
 from app.models.project import Project
 from app.core.database import AsyncSessionLocal
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,7 @@ class Orchestrator:
         thread_id: Optional[int] = None,
         ai_response: str = "",
         user_input: str = "",
+        status: ScanTaskStatus = ScanTaskStatus.RUNNING,
     ) -> Optional[int]:
         if not db or not project_id or not self._plan_has_scan(plan):
             return None
@@ -169,7 +171,7 @@ class Orchestrator:
         scan_task = ScanTask(
             project_id=project_id,
             task_type=ScanTaskType.FULL,
-            status=ScanTaskStatus.RUNNING,
+            status=status,
             triggered_by=TriggeredBy.MANUAL,
             parameters={
                 "plan": plan,
@@ -182,13 +184,13 @@ class Orchestrator:
             orchestrator_task_id=task_id,
             progress={
                 "task_id": task_id,
-                "status": "running",
-                "current_step": "准备执行...",
+                "status": status.value,
+                "current_step": "等待 worker 执行..." if status == ScanTaskStatus.PENDING else "准备执行...",
                 "step_index": 0,
                 "total_steps": len(plan),
                 "steps": [],
             },
-            started_at=datetime.utcnow(),
+            started_at=datetime.utcnow() if status == ScanTaskStatus.RUNNING else None,
         )
         db.add(scan_task)
         await db.commit()
@@ -208,6 +210,7 @@ class Orchestrator:
     ) -> Dict[str, Any]:
         """Create one tracked async execution and return its identifiers."""
         task_id = str(uuid.uuid4())
+        worker_mode = settings.TASK_EXECUTION_MODE == "worker"
         scan_task_id = await self._create_scan_task_record(
             db,
             project_id,
@@ -217,6 +220,7 @@ class Orchestrator:
             thread_id=thread_id,
             ai_response=ai_response,
             user_input=user_input,
+            status=ScanTaskStatus.PENDING if worker_mode else ScanTaskStatus.RUNNING,
         )
         self.task_stop_flags[task_id] = False
         self.task_status[task_id] = "running"
@@ -228,6 +232,10 @@ class Orchestrator:
             status="running",
             created_at=datetime.utcnow().isoformat(),
         )
+
+        if worker_mode and scan_task_id:
+            logger.info("Queued task %s for worker execution", task_id)
+            return {"task_id": task_id, "scan_task_id": scan_task_id}
 
         task = asyncio.create_task(self._execute_plan_async(
             task_id=task_id,
@@ -332,6 +340,8 @@ class Orchestrator:
                 "current_step": "服务重启后恢复执行...",
             })
             scan_task.progress = progress
+            if not scan_task.started_at:
+                scan_task.started_at = datetime.utcnow()
 
             task = asyncio.create_task(self._execute_plan_async(
                 task_id=task_id,

@@ -28,7 +28,8 @@ async def lifespan(app: FastAPI):
     # Initialize default model configuration
     async with AsyncSessionLocal() as db:
         await initialize_default_models(db)
-        await orchestrator.recover_incomplete_scan_tasks(db)
+        if settings.TASK_EXECUTION_MODE == "inline":
+            await orchestrator.recover_incomplete_scan_tasks(db)
     
     yield
     # Shutdown: cleanup

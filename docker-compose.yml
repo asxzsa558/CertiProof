@@ -61,6 +61,35 @@ services:
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
       MCP_GATEWAY_URL: http://mcp-gateway:9000
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TASK_EXECUTION_MODE: ${TASK_EXECUTION_MODE:-worker}
+    volumes:
+      - ./reference:/reference
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mcp-gateway:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # 后台任务 Worker（执行持久化扫描任务）
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: certiproof-worker
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certiproof}:${POSTGRES_PASSWORD:-certiproof}@db:5432/${POSTGRES_DB:-certiproof}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      MCP_GATEWAY_URL: http://mcp-gateway:9000
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TASK_EXECUTION_MODE: worker
+      TASK_WORKER_POLL_SECONDS: ${TASK_WORKER_POLL_SECONDS:-3}
     volumes:
       - ./reference:/reference
     depends_on:

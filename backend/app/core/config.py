@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     ASSESSMENT_AUTO_EXECUTE_TASKS: bool = True  # 是否自动执行扫描类任务
     ASSESSMENT_MAX_CONCURRENT: int = 5  # 多资产扫描最大并发数
 
+    # 任务执行配置
+    TASK_EXECUTION_MODE: str = "inline"  # inline: API 进程执行；worker: 只入库，由 app.worker 执行
+    TASK_WORKER_POLL_SECONDS: int = 3
+
     # 文件上传
     UPLOAD_DIR: str = "/app/uploads"  # 文件上传目录
 
@@ -51,6 +55,9 @@ class Settings(BaseSettings):
 
     def validate_runtime_security(self) -> None:
         """Fail fast on unsafe production settings."""
+        if self.TASK_EXECUTION_MODE not in {"inline", "worker"}:
+            raise RuntimeError("Invalid configuration: TASK_EXECUTION_MODE must be 'inline' or 'worker'")
+
         if self.APP_ENV.lower() not in {"prod", "production"}:
             return
 

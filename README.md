@@ -143,6 +143,8 @@ DATABASE_URL=postgresql+asyncpg://certiproof:certiproof@db:5432/certiproof
 REDIS_URL=redis://redis:6379/0
 SECRET_KEY=your-secret-key
 OPENAI_API_KEY=your-openai-api-key
+TASK_EXECUTION_MODE=worker  # docker-compose 默认：API 入库，worker 执行
+TASK_WORKER_POLL_SECONDS=3
 ```
 
 ## 版本

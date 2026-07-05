@@ -47,6 +47,8 @@ def assert_source_guards() -> None:
     assert "def validate_runtime_security" in config
     assert "SECRET_KEY must be set to a strong non-default value" in config
     assert "DEBUG must be false in production" in config
+    assert 'TASK_EXECUTION_MODE: str = "inline"' in config
+    assert "TASK_WORKER_POLL_SECONDS" in config
 
     scan_service = (ROOT / "backend/app/services/scan_service.py").read_text(encoding="utf-8")
     assert "Project.user_id == user_id" not in scan_service
@@ -61,7 +63,11 @@ def assert_source_guards() -> None:
     assert "async def recover_incomplete_scan_tasks" in orchestrator
     assert "single-process recovery only" in orchestrator
     main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    assert 'settings.TASK_EXECUTION_MODE == "inline"' in main
     assert "await orchestrator.recover_incomplete_scan_tasks(db)" in main
+    worker = (ROOT / "backend/app/worker.py").read_text(encoding="utf-8")
+    assert "async def run_worker" in worker
+    assert "await orchestrator.recover_incomplete_scan_tasks(db)" in worker
 
 
 def main() -> int:
