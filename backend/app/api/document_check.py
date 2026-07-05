@@ -40,6 +40,9 @@ async def upload_document(
     Returns:
         上传结果
     """
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "evidence:manage")
+
     try:
         service = DocumentCheckService(db)
 
@@ -87,6 +90,9 @@ async def check_clause(
     Returns:
         检查结果
     """
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "assessment:read")
+
     try:
         service = DocumentCheckService(db)
         result = await service.check_clause(
@@ -117,6 +123,9 @@ async def generate_report(
     Returns:
         报告数据
     """
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "report:export")
+
     try:
         service = DocumentCheckService(db)
         report = await service.generate_report(
@@ -144,6 +153,9 @@ async def list_document_clauses(
     Returns:
         条款列表及状态
     """
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "assessment:read")
+
     try:
         service = DocumentCheckService(db)
 

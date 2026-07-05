@@ -160,8 +160,8 @@ const formatCopyPart = (value) => {
   return ''
 }
 
-const ToolResultCard = ({ tool, status, summary, details, copyText, children }) => {
-  const [expanded, setExpanded] = useState(false)
+const ToolResultCard = ({ tool, status, summary, details, copyText, defaultExpanded = false, children }) => {
+  const [expanded, setExpanded] = useState(defaultExpanded)
 
   const toolIcon = TOOL_ICONS[tool] || <ToolOutlined />
   const toolName = TOOL_NAMES[tool] || tool
@@ -169,8 +169,9 @@ const ToolResultCard = ({ tool, status, summary, details, copyText, children }) 
   // 状态配置
   const statusConfig = {
     success: { color: 'success', text: '成功', icon: <CheckCircleFilled /> },
-    warning: { color: 'warning', text: '警告', icon: <ExclamationCircleFilled /> },
+    warning: { color: 'warning', text: '警告/未完成', icon: <ExclamationCircleFilled /> },
     failed: { color: 'error', text: '失败', icon: <CloseCircleFilled /> },
+    skipped: { color: 'default', text: '已跳过', icon: <ExclamationCircleFilled /> },
   }
 
   const currentStatus = statusConfig[status] || statusConfig.success

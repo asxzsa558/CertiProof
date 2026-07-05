@@ -62,6 +62,9 @@ async def create_questionnaire(
     current_user: User = Depends(get_current_user),
 ):
     """创建问卷"""
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, req.project_id, current_user.id, "assessment:manage")
+
     engine = QuestionnaireEngine(db)
     
     record = await engine.create_questionnaire_record(
@@ -106,6 +109,8 @@ async def get_questionnaire(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Questionnaire not found"
         )
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, record.project_id, current_user.id, "assessment:read")
     
     return QuestionnaireResponse(
         id=record.id,
@@ -130,7 +135,15 @@ async def submit_answers(
 ):
     """提交问卷答案"""
     engine = QuestionnaireEngine(db)
-    
+    record = await engine.get_questionnaire_record(record_id)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Questionnaire not found"
+        )
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, record.project_id, current_user.id, "assessment:manage")
+
     record = await engine.submit_answers(record_id, req.answers)
     
     if not record:
@@ -161,6 +174,14 @@ async def evaluate_questionnaire(
 ):
     """评估问卷答案"""
     engine = QuestionnaireEngine(db)
+    record = await engine.get_questionnaire_record(record_id)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Questionnaire not found"
+        )
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, record.project_id, current_user.id, "assessment:manage")
     
     evaluation = await engine.evaluate_answers(record_id)
     
@@ -180,6 +201,9 @@ async def list_project_questionnaires(
     current_user: User = Depends(get_current_user),
 ):
     """列出项目的所有问卷"""
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "assessment:read")
+
     engine = QuestionnaireEngine(db)
     records = await engine.list_questionnaire_records(project_id)
     
@@ -207,6 +231,9 @@ async def get_project_summary(
     current_user: User = Depends(get_current_user),
 ):
     """获取项目问卷汇总"""
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "assessment:read")
+
     engine = QuestionnaireEngine(db)
     summary = await engine.get_project_questionnaire_summary(project_id)
     

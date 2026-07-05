@@ -29,7 +29,7 @@ async def create_remediation_ticket(
     """Create a new remediation ticket for a finding."""
     # Verify project access
     from app.api.projects import get_project_for_user
-    await get_project_for_user(db, project_id, current_user.id)
+    await get_project_for_user(db, project_id, current_user.id, "assessment:manage")
     
     # Verify finding exists
     result = await db.execute(
@@ -76,7 +76,7 @@ async def list_remediation_tickets(
     """List all remediation tickets for a project."""
     # Verify project access
     from app.api.projects import get_project_for_user
-    await get_project_for_user(db, project_id, current_user.id)
+    await get_project_for_user(db, project_id, current_user.id, "assessment:read")
     
     query = select(RemediationTicket).where(RemediationTicket.project_id == project_id)
     if status_filter:
@@ -96,6 +96,9 @@ async def get_remediation_ticket(
     current_user: User = Depends(get_current_user),
 ):
     """Get a specific remediation ticket."""
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "assessment:read")
+
     result = await db.execute(
         select(RemediationTicket).where(
             RemediationTicket.id == ticket_id,
@@ -118,6 +121,9 @@ async def update_remediation_ticket(
     current_user: User = Depends(get_current_user),
 ):
     """Update a remediation ticket."""
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "assessment:manage")
+
     result = await db.execute(
         select(RemediationTicket).where(
             RemediationTicket.id == ticket_id,
@@ -157,6 +163,9 @@ async def verify_remediation(
     current_user: User = Depends(get_current_user),
 ):
     """Verify that a remediation has been completed successfully."""
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "assessment:manage")
+
     result = await db.execute(
         select(RemediationTicket).where(
             RemediationTicket.id == ticket_id,

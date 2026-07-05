@@ -31,6 +31,38 @@ from app.services.assessment_templates import LEVEL_2_TEMPLATE, LEVEL_3_TEMPLATE
 router = APIRouter(prefix="/assessments", tags=["Assessments"])
 
 
+async def require_project_permission(db: AsyncSession, project_id: int, user: User, permission: str):
+    from app.api.projects import get_project_for_user
+    return await get_project_for_user(db, project_id, user.id, permission)
+
+
+async def require_assessment_permission(db: AsyncSession, assessment_id: int, user: User, permission: str):
+    engine = get_flow_engine(db)
+    assessment = await engine.get_assessment(assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    await require_project_permission(db, assessment.project_id, user, permission)
+    return assessment
+
+
+async def require_phase_permission(db: AsyncSession, phase_id: int, user: User, permission: str):
+    engine = get_flow_engine(db)
+    phase = await engine.get_phase(phase_id)
+    if not phase:
+        raise HTTPException(status_code=404, detail="Phase not found")
+    assessment = await require_assessment_permission(db, phase.assessment_id, user, permission)
+    return phase, assessment
+
+
+async def require_task_permission(db: AsyncSession, task_id: int, user: User, permission: str):
+    engine = get_flow_engine(db)
+    task = await engine.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    phase, assessment = await require_phase_permission(db, task.phase_id, user, permission)
+    return task, phase, assessment
+
+
 # ========== Request/Response Models ==========
 
 class CreateAssessmentRequest(BaseModel):
@@ -198,6 +230,7 @@ async def create_assessment(
     current_user: User = Depends(get_current_user),
 ):
     """创建测评实例"""
+    await require_project_permission(db, project_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     assessment = await engine.create_assessment(
@@ -231,6 +264,7 @@ async def list_assessments(
     current_user: User = Depends(get_current_user),
 ):
     """列出项目的测评实例"""
+    await require_project_permission(db, project_id, current_user, "assessment:read")
     engine = get_flow_engine(db)
     assessments = await engine.list_assessments(project_id)
     
@@ -261,6 +295,7 @@ async def get_assessment(
     current_user: User = Depends(get_current_user),
 ):
     """获取测评实例详情"""
+    await require_assessment_permission(db, assessment_id, current_user, "assessment:read")
     engine = get_flow_engine(db)
     assessment = await engine.get_assessment(assessment_id)
     
@@ -291,6 +326,7 @@ async def start_assessment(
     current_user: User = Depends(get_current_user),
 ):
     """启动测评"""
+    await require_assessment_permission(db, assessment_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
@@ -322,6 +358,7 @@ async def pause_assessment(
     current_user: User = Depends(get_current_user),
 ):
     """暂停测评"""
+    await require_assessment_permission(db, assessment_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
@@ -339,6 +376,7 @@ async def resume_assessment(
     current_user: User = Depends(get_current_user),
 ):
     """恢复测评"""
+    await require_assessment_permission(db, assessment_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
@@ -358,6 +396,7 @@ async def list_phases(
     current_user: User = Depends(get_current_user),
 ):
     """列出测评的所有阶段"""
+    await require_assessment_permission(db, assessment_id, current_user, "assessment:read")
     engine = get_flow_engine(db)
     phases = await engine.get_phases(assessment_id)
     
@@ -388,6 +427,7 @@ async def get_phase(
     current_user: User = Depends(get_current_user),
 ):
     """获取阶段详情"""
+    await require_phase_permission(db, phase_id, current_user, "assessment:read")
     engine = get_flow_engine(db)
     phase = await engine.get_phase(phase_id)
     
@@ -418,6 +458,7 @@ async def start_phase(
     current_user: User = Depends(get_current_user),
 ):
     """激活阶段"""
+    await require_phase_permission(db, phase_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
@@ -436,6 +477,7 @@ async def complete_phase(
     current_user: User = Depends(get_current_user),
 ):
     """完成阶段"""
+    await require_phase_permission(db, phase_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
@@ -454,6 +496,7 @@ async def skip_phase(
     current_user: User = Depends(get_current_user),
 ):
     """跳过阶段"""
+    await require_phase_permission(db, phase_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
@@ -478,6 +521,7 @@ async def jump_to_phase(
     - 激活目标阶段
     """
     engine = get_flow_engine(db)
+    await require_phase_permission(db, phase_id, current_user, "assessment:manage")
     
     try:
         phase = await engine.jump_to_phase(phase_id, req.reason)
@@ -500,6 +544,7 @@ async def list_tasks(
     current_user: User = Depends(get_current_user),
 ):
     """列出阶段的所有任务"""
+    await require_phase_permission(db, phase_id, current_user, "assessment:read")
     engine = get_flow_engine(db)
     tasks = await engine.get_tasks(phase_id)
     
@@ -529,6 +574,7 @@ async def create_task(
     current_user: User = Depends(get_current_user),
 ):
     """创建任务"""
+    await require_phase_permission(db, phase_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     task = await engine.create_task(
@@ -561,6 +607,7 @@ async def get_task_status(
     current_user: User = Depends(get_current_user),
 ):
     """获取任务状态（用于轮询）"""
+    await require_task_permission(db, task_id, current_user, "assessment:read")
     engine = get_flow_engine(db)
     task = await engine.get_task(task_id)
     
@@ -588,6 +635,7 @@ async def start_task(
     from sqlalchemy import select
     import asyncio
     
+    await require_task_permission(db, task_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
@@ -775,6 +823,7 @@ async def complete_task(
     current_user: User = Depends(get_current_user),
 ):
     """完成任务"""
+    await require_task_permission(db, task_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
@@ -795,6 +844,7 @@ async def execute_task(
     """执行流程任务（调用安全工具）"""
     from app.services.task_executor import get_task_executor
     
+    await require_task_permission(db, task_id, current_user, "scan:execute")
     engine = get_flow_engine(db)
     task = await engine.get_task(task_id)
     
@@ -936,6 +986,7 @@ async def list_events(
     current_user: User = Depends(get_current_user),
 ):
     """获取流程事件"""
+    await require_assessment_permission(db, assessment_id, current_user, "assessment:read")
     engine = get_flow_engine(db)
     events = await engine.get_events(assessment_id, limit)
     
@@ -1019,6 +1070,7 @@ async def upload_task_document(
     - 不一致时任务标记为 failed
     - 一致时任务标记为 completed
     """
+    await require_task_permission(db, task_id, current_user, "evidence:manage")
     engine = get_flow_engine(db)
     task = await engine.get_task(task_id)
     if not task:
@@ -1086,6 +1138,7 @@ async def skip_task(
     - 原因字段选填
     - 任务标记为 cancelled
     """
+    await require_task_permission(db, task_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     task = await engine.get_task(task_id)
     if not task:
@@ -1126,6 +1179,7 @@ async def stop_task(
     - 原因字段选填
     - 任务标记为 failed
     """
+    await require_task_permission(db, task_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     task = await engine.get_task(task_id)
     if not task:
@@ -1158,6 +1212,7 @@ async def reset_task(
     """
     重置任务（将 failed/cancelled 状态的任务重置为 todo）
     """
+    await require_task_permission(db, task_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     task = await engine.get_task(task_id)
     if not task:
@@ -1190,6 +1245,7 @@ async def restart_assessment(
     重新开始测评（将 completed 状态重置为 not_started）
     同时重置所有阶段和任务
     """
+    await require_assessment_permission(db, assessment_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
@@ -1213,6 +1269,7 @@ async def restart_phase(
     重新开始阶段（将 completed/skipped 状态重置为 pending）
     同时重置该阶段下所有任务
     """
+    await require_phase_permission(db, phase_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
@@ -1235,6 +1292,7 @@ async def get_task_project_level(
     """
     获取任务所属项目的等级（用于定级报告上传前提示用户）
     """
+    await require_task_permission(db, task_id, current_user, "assessment:read")
     engine = get_flow_engine(db)
     task = await engine.get_task(task_id)
     if not task:
@@ -1275,6 +1333,7 @@ async def get_assessment_summary(
     current_user: User = Depends(get_current_user),
 ):
     """获取测评完成摘要（用于完成页面展示）"""
+    await require_assessment_permission(db, assessment_id, current_user, "assessment:read")
     engine = get_flow_engine(db)
     assessment = await engine.get_assessment(assessment_id)
     if not assessment:
@@ -1385,6 +1444,7 @@ async def get_assessment_report(
     current_user: User = Depends(get_current_user),
 ):
     """获取测评报告（支持 json 和 pdf 格式）"""
+    await require_assessment_permission(db, assessment_id, current_user, "report:export")
     engine = get_flow_engine(db)
     assessment = await engine.get_assessment(assessment_id)
     if not assessment:

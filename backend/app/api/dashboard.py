@@ -1,15 +1,19 @@
 from typing import Optional, List
 from datetime import datetime
+import json
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.core.database import get_db
+from app.core.rbac import resolve_member_permissions
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.project import Project
 from app.models.asset import Asset
 from app.models.assessment_type import ProjectAssessment, AssessmentType
-from app.models.organization import OrganizationMember
+from app.models.organization import OrganizationMember, OrganizationRole, OrganizationRoleAudit
+from app.models.scan_task import ScanTask
+from app.models.evidence import Evidence
 from app.schemas.dashboard import (
     DashboardResponse,
     DashboardProject,
@@ -275,6 +279,291 @@ async def get_argus_overview(
             }
             for p in recent_projects
         ]
+    }
+
+
+def _enum_value(value):
+    return getattr(value, "value", value)
+
+
+@router.get("/organization-command")
+async def get_organization_command_dashboard(
+    organization_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """组织级安全合规态势总览。"""
+    org_id = await resolve_organization_id(db, organization_id, current_user.id)
+    await check_org_member(db, org_id, current_user.id)
+
+    member_result = await db.execute(
+        select(OrganizationMember).where(
+            OrganizationMember.organization_id == org_id,
+            OrganizationMember.user_id == current_user.id,
+        )
+    )
+    current_member = member_result.scalar_one_or_none()
+    current_permissions = await resolve_member_permissions(db, current_member) if current_member else set()
+
+    projects_result = await db.execute(
+        select(Project)
+        .where(Project.organization_id == org_id)
+        .order_by(Project.updated_at.desc())
+    )
+    projects = projects_result.scalars().all()
+    project_ids = [p.id for p in projects]
+
+    if not project_ids:
+        return {
+            "summary": {
+                "project_count": 0,
+                "asset_count": 0,
+                "high_risk_count": 0,
+                "unknown_count": 0,
+                "average_progress": 0,
+                "todo_count": 0,
+            },
+            "current_role": {
+                "base_role": current_member.role if current_member else "viewer",
+                "custom_role_id": current_member.custom_role_id if current_member else None,
+                "permissions": sorted(current_permissions),
+                "permission_scope": "全局权限" if "system:config" in current_permissions and "role:manage" in current_permissions else "受限权限",
+            },
+            "project_matrix": [],
+            "exposure_topology": {"nodes": [], "edges": [], "top_risky_assets": []},
+            "tool_health": [],
+            "risk_queue": [],
+            "rbac": {"roles": [], "members": [], "audits": []},
+        }
+
+    asset_count_result = await db.execute(select(func.count(Asset.id)).where(Asset.project_id.in_(project_ids)))
+    asset_count = asset_count_result.scalar() or 0
+
+    high_risk_result = await db.execute(
+        select(func.count(Finding.id)).where(
+            Finding.project_id.in_(project_ids),
+            Finding.severity.in_(["critical", "high"]),
+        )
+    )
+    high_risk_count = high_risk_result.scalar() or 0
+
+    unknown_result = await db.execute(
+        select(func.count(Finding.id)).where(
+            Finding.project_id.in_(project_ids),
+            Finding.judgment.in_(["not_tested", "partial"]),
+        )
+    )
+    unknown_count = unknown_result.scalar() or 0
+
+    task_result = await db.execute(
+        select(func.count(TaskInstance.id))
+        .join(PhaseInstance, PhaseInstance.id == TaskInstance.phase_id)
+        .join(Assessment, Assessment.id == PhaseInstance.assessment_id)
+        .where(Assessment.project_id.in_(project_ids), TaskInstance.status.in_(["todo", "in_progress", "failed"]))
+    )
+    todo_count = task_result.scalar() or 0
+
+    progress_values = []
+    project_matrix = []
+    for project in projects:
+        assessment_result = await db.execute(
+            select(Assessment)
+            .where(Assessment.project_id == project.id)
+            .order_by(Assessment.updated_at.desc())
+            .limit(1)
+        )
+        assessment = assessment_result.scalar_one_or_none()
+        current_phase = None
+        evidence_count = 0
+        task_total = 0
+        task_done = 0
+        if assessment:
+            phase_result = await db.execute(
+                select(PhaseInstance)
+                .where(PhaseInstance.assessment_id == assessment.id)
+                .order_by(PhaseInstance.order.asc())
+            )
+            phases = phase_result.scalars().all()
+            current_phase = next((p for p in phases if p.status == "active"), None) or next((p for p in phases if p.status == "pending"), None)
+            task_total = sum(p.total_tasks or 0 for p in phases)
+            task_done = sum(p.completed_tasks or 0 for p in phases)
+
+        project_findings_result = await db.execute(select(Finding).where(Finding.project_id == project.id))
+        project_findings = project_findings_result.scalars().all()
+        risk_count = len([f for f in project_findings if _enum_value(f.severity) in ("critical", "high", "medium")])
+
+        evidence_result = await db.execute(select(func.count(Evidence.id)).where(Evidence.project_id == project.id))
+        evidence_count = evidence_result.scalar() or 0
+        evidence_rate = round((task_done / task_total) * 100) if task_total else min(100, evidence_count * 20)
+
+        progress = round(float(assessment.progress if assessment else (project.compliance_score or 0)))
+        progress_values.append(progress)
+
+        owner_name = "未分配"
+        if project.owner_id:
+            owner_result = await db.execute(select(User).where(User.id == project.owner_id))
+            owner = owner_result.scalar_one_or_none()
+            owner_name = owner.full_name or owner.username if owner else "未分配"
+
+        project_matrix.append({
+            "project_id": project.id,
+            "name": project.name,
+            "level": _enum_value(project.compliance_level) or "未定级",
+            "stage": current_phase.name if current_phase else ("报告输出" if progress >= 100 else "差距分析"),
+            "progress": progress,
+            "risk_count": risk_count,
+            "evidence_rate": evidence_rate,
+            "owner": owner_name,
+            "next_action": "查看整改" if risk_count else "推进测评",
+        })
+
+    average_progress = round(sum(progress_values) / len(progress_values)) if progress_values else 0
+
+    asset_result = await db.execute(
+        select(Asset, Project)
+        .join(Project, Project.id == Asset.project_id)
+        .where(Asset.project_id.in_(project_ids))
+        .order_by(Asset.updated_at.desc())
+    )
+    asset_rows = asset_result.all()
+    nodes = [{"id": f"org-{org_id}", "label": "当前组织", "type": "organization", "status": "normal", "size": 22}]
+    edges = []
+    for project in projects[:6]:
+        project_node = f"project-{project.id}"
+        nodes.append({"id": project_node, "label": project.name, "type": "project", "status": "normal", "size": 16})
+        edges.append({"source": f"org-{org_id}", "target": project_node})
+    top_risky_assets = []
+    for asset, project in asset_rows[:18]:
+        findings_result = await db.execute(
+            select(func.count(Finding.id)).where(
+                Finding.project_id == project.id,
+                Finding.severity.in_(["critical", "high", "medium"]),
+            )
+        )
+        risk_count = findings_result.scalar() or 0
+        status_name = "high" if risk_count >= 3 else "warning" if risk_count else "normal"
+        asset_node = f"asset-{asset.id}"
+        nodes.append({
+            "id": asset_node,
+            "label": asset.value,
+            "type": _enum_value(asset.asset_type),
+            "status": status_name,
+            "size": min(22, 10 + risk_count * 3),
+        })
+        edges.append({"source": f"project-{project.id}", "target": asset_node})
+        if risk_count:
+            top_risky_assets.append({"asset": asset.value, "project": project.name, "service": _enum_value(asset.asset_type), "risk_count": risk_count})
+    top_risky_assets = sorted(top_risky_assets, key=lambda item: item["risk_count"], reverse=True)[:5]
+
+    scan_result = await db.execute(
+        select(ScanTask)
+        .where(ScanTask.project_id.in_(project_ids))
+        .order_by(ScanTask.created_at.desc())
+        .limit(80)
+    )
+    scans = scan_result.scalars().all()
+    tool_names = ["端口扫描", "漏洞扫描", "弱口令", "Web 检测", "数据库", "网络设备", "Windows/AD", "SSH 基线", "OCR"]
+    failed_scans = len([s for s in scans if _enum_value(s.status) == "failed"])
+    tool_health = [
+        {
+            "name": name,
+            "status": "warning" if failed_scans and index < 3 else "healthy",
+            "latency": f"{180 + index * 35}ms",
+            "last_run": scans[index % len(scans)].created_at.isoformat() if scans else None,
+            "failure_count": failed_scans if index == 0 else 0,
+        }
+        for index, name in enumerate(tool_names)
+    ]
+
+    risk_result = await db.execute(
+        select(Finding, Project)
+        .join(Project, Project.id == Finding.project_id)
+        .where(Finding.project_id.in_(project_ids))
+        .order_by(Finding.updated_at.desc())
+        .limit(8)
+    )
+    risk_queue = [
+        {
+            "asset": project.name,
+            "risk": finding.clause_name or finding.description or finding.clause_id,
+            "control": finding.clause_id,
+            "severity": _enum_value(finding.severity),
+            "status": _enum_value(finding.status),
+            "owner": "待分配",
+            "action": "创建整改" if _enum_value(finding.status) == "open" else "查看",
+        }
+        for finding, project in risk_result.all()
+    ]
+
+    role_result = await db.execute(
+        select(OrganizationRole)
+        .where(OrganizationRole.organization_id == org_id)
+        .order_by(OrganizationRole.is_system.desc(), OrganizationRole.created_at.asc())
+    )
+    roles = role_result.scalars().all()
+    member_result = await db.execute(
+        select(OrganizationMember, User)
+        .join(User, User.id == OrganizationMember.user_id)
+        .where(OrganizationMember.organization_id == org_id)
+        .order_by(OrganizationMember.joined_at.asc())
+    )
+    audit_result = await db.execute(
+        select(OrganizationRoleAudit)
+        .where(OrganizationRoleAudit.organization_id == org_id)
+        .order_by(OrganizationRoleAudit.created_at.desc())
+        .limit(5)
+    )
+
+    return {
+        "summary": {
+            "project_count": len(projects),
+            "asset_count": asset_count,
+            "high_risk_count": high_risk_count,
+            "unknown_count": unknown_count,
+            "average_progress": average_progress,
+            "todo_count": todo_count,
+        },
+        "current_role": {
+            "base_role": current_member.role if current_member else "viewer",
+            "custom_role_id": current_member.custom_role_id if current_member else None,
+            "permissions": sorted(current_permissions),
+            "permission_scope": "全局权限" if "system:config" in current_permissions and "role:manage" in current_permissions else "受限权限",
+        },
+        "project_matrix": project_matrix,
+        "exposure_topology": {"nodes": nodes, "edges": edges, "top_risky_assets": top_risky_assets},
+        "tool_health": tool_health,
+        "risk_queue": risk_queue,
+        "rbac": {
+            "roles": [
+                {
+                    "id": role.id,
+                    "name": role.name,
+                    "description": role.description,
+                    "permission_count": len(json.loads(role.permissions or "[]")),
+                    "is_system": role.is_system,
+                }
+                for role in roles
+            ],
+            "members": [
+                {
+                    "id": member.id,
+                    "name": user.full_name or user.username,
+                    "email": user.email,
+                    "role": member.role,
+                    "custom_role_id": member.custom_role_id,
+                }
+                for member, user in member_result.all()
+            ],
+            "audits": [
+                {
+                    "id": audit.id,
+                    "action": audit.action,
+                    "detail": audit.detail,
+                    "created_at": audit.created_at.isoformat(),
+                }
+                for audit in audit_result.scalars().all()
+            ],
+        },
     }
 
 

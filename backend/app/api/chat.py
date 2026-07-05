@@ -18,6 +18,7 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.models.project import Project
 from app.models.asset import Asset
+from app.models.scan_task import ScanTask
 from app.orchestrator import orchestrator
 
 router = APIRouter(prefix="/chat", tags=["AI Chat"])
@@ -133,7 +134,7 @@ async def chat(
     project = None
     if project_id:
         from app.api.projects import get_project_for_user
-        project = await get_project_for_user(db, project_id, current_user.id)
+        project = await get_project_for_user(db, project_id, current_user.id, "scan:execute")
     
     # 如果是多资产扫描，直接构建执行计划，跳过 AI 决策
     if is_multi_asset_scan and multi_asset_data:
@@ -186,20 +187,17 @@ async def chat(
         capability_name = CAPABILITY_DISPLAY_NAMES.get(capability, capability)
         response = f"好的，我将对项目中的 {len(assets)} 个资产执行{capability_name}{ssh_info}：{', '.join(asset_names)}"
         
-        # 生成 task_id
-        task_id = str(uuid.uuid4())
-        
-        # 异步执行计划
-        asyncio.create_task(orchestrator._execute_plan_async(
-            task_id=task_id,
+        task_info = await orchestrator.start_async_plan(
             plan=plan,
             user_id=current_user.id,
-        project_id=project_id,
+            project_id=project_id,
             db=db,
             context_manager=None,
             ai_response=response,
+            user_input=message,
             thread_id=msg.thread_id,
-        ))
+        )
+        task_id = task_info["task_id"]
         
         return ChatResponse(
             response=response,
@@ -207,6 +205,7 @@ async def chat(
             agents=[],
             context={"asset": asset},
             task_id=task_id,
+            scan_task_id=task_info.get("scan_task_id"),
         )
     
     # 如果没有提供 asset，从项目获取第一个资产
@@ -253,6 +252,7 @@ async def get_task_status(
 @router.get("/result/{task_id}", response_model=TaskResultResponse)
 async def get_task_result(
     task_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -273,7 +273,7 @@ async def get_task_result(
     
     # 检查是否有进度信息
     progress = orchestrator.task_progress.get(task_id)
-    if progress:
+    if progress and progress.get("user_id") == current_user.id:
         return TaskResultResponse(
             task_id=task_id,
             status="running",
@@ -282,6 +282,33 @@ async def get_task_result(
                 "step_index": progress.get("step_index", 0),
                 "total_steps": progress.get("total_steps", 0),
                 "steps": progress.get("steps", []),
+            },
+        )
+
+    # 进程内状态丢失或刷新后，从持久化 scan_tasks 恢复最终结果/基础状态
+    result = await db.execute(select(ScanTask).where(ScanTask.orchestrator_task_id == task_id))
+    scan_task = result.scalar_one_or_none()
+    if scan_task:
+        from app.api.projects import get_project_for_user
+        await get_project_for_user(db, scan_task.project_id, current_user.id, "scan:read")
+        if scan_task.status.value in ("completed", "failed", "cancelled"):
+            summary = scan_task.result_summary or {}
+            status_value = "failed" if scan_task.status.value in ("failed", "cancelled") else "completed"
+            return TaskResultResponse(
+                task_id=task_id,
+                status=status_value,
+                result_description=summary.get("result_description") or scan_task.error_message or "任务已结束",
+                scan_results=summary.get("scan_results") or {},
+                completed_at=scan_task.completed_at.isoformat() if scan_task.completed_at else None,
+            )
+        return TaskResultResponse(
+            task_id=task_id,
+            status=(scan_task.progress or {}).get("status") or scan_task.status.value,
+            current_step=(scan_task.progress or {}).get("current_step", "任务执行中..."),
+            step_progress={
+                "step_index": (scan_task.progress or {}).get("step_index", 0),
+                "total_steps": (scan_task.progress or {}).get("total_steps", 0),
+                "steps": (scan_task.progress or {}).get("steps", []),
             },
         )
     
@@ -296,6 +323,7 @@ async def get_task_result(
 @router.get("/status/{task_id}")
 async def get_agent_status(
     task_id: str,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """获取特定任务的状态（兼容旧接口）"""
@@ -303,6 +331,18 @@ async def get_agent_status(
     for task in orchestrator.completed_tasks:
         if task["task_id"] == task_id and task.get("user_id") == current_user.id:
             return task
+
+    result = await db.execute(select(ScanTask).where(ScanTask.orchestrator_task_id == task_id))
+    scan_task = result.scalar_one_or_none()
+    if scan_task:
+        from app.api.projects import get_project_for_user
+        await get_project_for_user(db, scan_task.project_id, current_user.id, "scan:read")
+        return {
+            "task_id": task_id,
+            "status": scan_task.status.value,
+            "progress": scan_task.progress or {},
+            "result_summary": scan_task.result_summary or {},
+        }
     
     # 未找到，可能还在运行中
     return {"task_id": task_id, "status": "running"}
@@ -376,7 +416,7 @@ async def clear_project_history(
     from app.models.context import ConversationHistory, ActionHistory, ResultCache
     from app.api.projects import get_project_for_user
     
-    await get_project_for_user(db, project_id, current_user.id)
+    await get_project_for_user(db, project_id, current_user.id, "project:read")
     
     await db.execute(
         delete(ConversationHistory).where(
@@ -474,6 +514,9 @@ async def list_archives(
 ):
     """列出对话归档"""
     from app.services.context_manager import ContextManager
+    if project_id:
+        from app.api.projects import get_project_for_user
+        await get_project_for_user(db, project_id, current_user.id, "project:read")
     
     context_manager = ContextManager(db, current_user.id, project_id=project_id)
     archives = await context_manager.list_archives(limit=limit)

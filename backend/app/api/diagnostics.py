@@ -5,6 +5,7 @@ Diagnostics API - 诊断和连通性测试
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
+from app.core.rbac import require_any_org_permission
 from app.core.security import get_current_user
 from app.models.user import User
 from app.mcp.gateway_client import MCPGatewayClient
@@ -16,8 +17,10 @@ router = APIRouter(prefix="/diagnostics", tags=["Diagnostics"])
 @router.get("/mcp/health")
 async def test_mcp_health(
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """测试 MCP Gateway 健康状态"""
+    await require_any_org_permission(db, current_user, "tool:diagnose")
     results = {}
     services = {
         "mcp_gateway": "http://mcp-gateway:9000",
@@ -70,8 +73,10 @@ async def test_mcp_health(
 async def test_mcp_tool(
     tool_name: str = "ping_host",
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """测试具体工具是否可用"""
+    await require_any_org_permission(db, current_user, "tool:diagnose")
     client = MCPGatewayClient()
     
     # 根据工具类型使用不同的测试参数

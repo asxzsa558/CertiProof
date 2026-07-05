@@ -183,6 +183,99 @@ async def _migrate_projects_table(conn):
                 pass
 
 
+async def _migrate_organization_members_table(conn):
+    """迁移 organization_members 表，支持自定义角色绑定。"""
+    if "postgresql" in settings.DATABASE_URL:
+        check_table_sql = """
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name = 'organization_members'
+        )
+        """
+    else:
+        check_table_sql = """
+        SELECT EXISTS (
+            SELECT FROM sqlite_master
+            WHERE type='table' AND name='organization_members'
+        )
+        """
+
+    result = await conn.execute(text(check_table_sql))
+    if not result.scalar():
+        return
+
+    if "postgresql" in settings.DATABASE_URL:
+        result = await conn.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.columns
+                WHERE table_schema = 'public'
+                AND table_name = 'organization_members'
+                AND column_name = 'custom_role_id'
+            )
+        """))
+        col_exists = result.scalar()
+    else:
+        result = await conn.execute(text("PRAGMA table_info(organization_members)"))
+        col_exists = any(row[1] == "custom_role_id" for row in result.fetchall())
+
+    if not col_exists:
+        try:
+            await conn.execute(text("ALTER TABLE organization_members ADD COLUMN custom_role_id INTEGER"))
+        except Exception:
+            pass
+
+
+async def _migrate_scan_tasks_table(conn):
+    """迁移 scan_tasks 表，补齐 AI 编排任务持久化字段。"""
+    if "postgresql" in settings.DATABASE_URL:
+        check_table_sql = """
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name = 'scan_tasks'
+        )
+        """
+    else:
+        check_table_sql = """
+        SELECT EXISTS (
+            SELECT FROM sqlite_master
+            WHERE type='table' AND name='scan_tasks'
+        )
+        """
+
+    result = await conn.execute(text(check_table_sql))
+    if not result.scalar():
+        return
+
+    columns_to_add = [
+        ("orchestrator_task_id", "VARCHAR(64)"),
+        ("progress", "JSONB" if "postgresql" in settings.DATABASE_URL else "JSON"),
+        ("result_summary", "JSONB" if "postgresql" in settings.DATABASE_URL else "JSON"),
+    ]
+
+    for col_name, col_type in columns_to_add:
+        if "postgresql" in settings.DATABASE_URL:
+            result = await conn.execute(text(f"""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                    AND table_name = 'scan_tasks'
+                    AND column_name = '{col_name}'
+                )
+            """))
+            col_exists = result.scalar()
+        else:
+            result = await conn.execute(text("PRAGMA table_info(scan_tasks)"))
+            col_exists = any(row[1] == col_name for row in result.fetchall())
+
+        if not col_exists:
+            try:
+                await conn.execute(text(f"ALTER TABLE scan_tasks ADD COLUMN {col_name} {col_type}"))
+            except Exception:
+                pass
+
+
 async def _seed_assessment_types(conn):
     """种子数据：插入 4 个 AssessmentType"""
     from app.models.assessment_type import AssessmentType
@@ -288,6 +381,8 @@ async def init_db():
         await _migrate_evidences_table(conn)
         await _migrate_questionnaire_records_table(conn)
         await _migrate_projects_table(conn)
+        await _migrate_organization_members_table(conn)
+        await _migrate_scan_tasks_table(conn)
         
         # 种子数据
         await _seed_assessment_types(conn)

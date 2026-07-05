@@ -5,6 +5,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from app.core.database import get_db
+from app.core.rbac import require_org_permission_for_user_id
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.project import Project
@@ -28,22 +29,17 @@ from app.services.report_service import generate_report, generate_json_report
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
 
-async def check_org_member(db: AsyncSession, org_id: int, user_id: int) -> None:
+async def check_org_member(db: AsyncSession, org_id: int, user_id: int, permission: str = "project:read") -> None:
     """检查用户是否属于该组织"""
-    result = await db.execute(
-        select(OrganizationMember).where(
-            OrganizationMember.organization_id == org_id,
-            OrganizationMember.user_id == user_id,
-        )
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not a member of this organization",
-        )
+    await require_org_permission_for_user_id(db, org_id, user_id, permission)
 
 
-async def get_project_for_user(db: AsyncSession, project_id: int, user_id: int) -> Project:
+async def get_project_for_user(
+    db: AsyncSession,
+    project_id: int,
+    user_id: int,
+    permission: str = "project:read",
+) -> Project:
     """获取项目并验证用户有权限访问（通过组织成员关系）"""
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
@@ -51,7 +47,7 @@ async def get_project_for_user(db: AsyncSession, project_id: int, user_id: int) 
         raise HTTPException(status_code=404, detail="Project not found")
 
     if project.organization_id:
-        await check_org_member(db, project.organization_id, user_id)
+        await check_org_member(db, project.organization_id, user_id, permission)
     else:
         # Fallback: old projects without org
         if project.user_id != user_id:
@@ -67,7 +63,7 @@ async def create_project(
     current_user: User = Depends(get_current_user),
 ):
     # Verify user is member of organization
-    await check_org_member(db, project_data.organization_id, current_user.id)
+    await check_org_member(db, project_data.organization_id, current_user.id, "project:create")
 
     project = Project(
         user_id=current_user.id,
@@ -121,7 +117,7 @@ async def list_projects(
 ):
     if organization_id:
         # Verify user is member of organization
-        await check_org_member(db, organization_id, current_user.id)
+        await check_org_member(db, organization_id, current_user.id, "project:read")
         result = await db.execute(
             select(Project)
             .where(Project.organization_id == organization_id)
@@ -160,7 +156,7 @@ async def update_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project = await get_project_for_user(db, project_id, current_user.id)
+    project = await get_project_for_user(db, project_id, current_user.id, "project:update")
 
     # Update fields
     if project_data.name is not None:
@@ -183,7 +179,7 @@ async def delete_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project = await get_project_for_user(db, project_id, current_user.id)
+    project = await get_project_for_user(db, project_id, current_user.id, "project:delete")
 
     await db.execute(delete(RemediationTicket).where(RemediationTicket.project_id == project_id))
     await db.execute(delete(Evidence).where(Evidence.project_id == project_id))
@@ -269,7 +265,7 @@ async def download_report(
     current_user: User = Depends(get_current_user),
 ):
     """Generate and download PDF compliance report."""
-    await get_project_for_user(db, project_id, current_user.id)
+    await get_project_for_user(db, project_id, current_user.id, "report:export")
 
     try:
         pdf_buffer = await generate_report(db, project_id)
@@ -300,7 +296,7 @@ async def download_json_report(
     current_user: User = Depends(get_current_user),
 ):
     """Generate and download JSON compliance report."""
-    await get_project_for_user(db, project_id, current_user.id)
+    await get_project_for_user(db, project_id, current_user.id, "report:export")
 
     try:
         report_data = await generate_json_report(db, project_id)

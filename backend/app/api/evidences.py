@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.evidence import Evidence, EvidenceType
+from app.models.questionnaire import QuestionnaireRecord
 from app.services.evidence_service import EvidenceService
 
 router = APIRouter(prefix="/evidences", tags=["Evidences"])
@@ -66,6 +67,8 @@ async def upload_evidence(
     - log: 日志文件
     """
     service = EvidenceService(db)
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "evidence:manage")
     
     # 读取文件内容
     content = await file.read()
@@ -134,6 +137,8 @@ async def get_evidence(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Evidence not found"
         )
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, evidence.project_id, current_user.id, "assessment:read")
     
     return EvidenceResponse(
         id=evidence.id,
@@ -169,6 +174,8 @@ async def download_evidence(
     
     # 获取文件名
     evidence = await service.get_evidence(evidence_id)
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, evidence.project_id, current_user.id, "assessment:read")
     
     return StreamingResponse(
         io.BytesIO(content),
@@ -187,6 +194,15 @@ async def delete_evidence(
 ):
     """删除证据"""
     service = EvidenceService(db)
+    evidence = await service.get_evidence(evidence_id)
+    if not evidence:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Evidence not found"
+        )
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, evidence.project_id, current_user.id, "evidence:manage")
+
     success = await service.delete_evidence(evidence_id)
     
     if not success:
@@ -206,6 +222,12 @@ async def list_questionnaire_evidences(
 ):
     """列出问卷关联的所有证据"""
     service = EvidenceService(db)
+    record = await db.get(QuestionnaireRecord, questionnaire_record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Questionnaire record not found")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, record.project_id, current_user.id, "assessment:read")
+
     evidences = await service.list_evidences_by_questionnaire(questionnaire_record_id)
     
     return [
@@ -235,6 +257,12 @@ async def check_completeness(
 ):
     """检查问卷证据完整性"""
     service = EvidenceService(db)
+    record = await db.get(QuestionnaireRecord, questionnaire_record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Questionnaire record not found")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, record.project_id, current_user.id, "assessment:read")
+
     result = await service.check_questionnaire_documents_complete(questionnaire_record_id)
     
     return result
@@ -249,6 +277,9 @@ async def list_project_evidences(
 ):
     """列出项目关联的所有证据"""
     service = EvidenceService(db)
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "assessment:read")
+
     evidences = await service.list_evidences_by_project(project_id, clause_id)
     
     return [

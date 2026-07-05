@@ -1,5 +1,5 @@
 from app.models.user import User, UserRole, SubscriptionTier
-from app.models.organization import Organization, OrganizationMember, OrgRole
+from app.models.organization import Organization, OrganizationMember, OrganizationRole, OrganizationRoleAudit, OrgRole
 from app.models.assessment_type import AssessmentType, ProjectAssessment
 from app.models.project import Project, ComplianceLevel, ProjectStatus
 from app.models.asset import Asset, AssetType, VerificationStatus, VerificationMethod
@@ -25,6 +25,8 @@ __all__ = [
     "SubscriptionTier",
     "Organization",
     "OrganizationMember",
+    "OrganizationRole",
+    "OrganizationRoleAudit",
     "OrgRole",
     "AssessmentType",
     "ProjectAssessment",

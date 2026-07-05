@@ -17,6 +17,7 @@ from app.schemas.scan_task import ScanTaskCreate, ScanTaskResponse, ScanTaskList
 from app.schemas.finding import FindingResponse
 from app.services.scan_service import scan_service
 from app.core.database import AsyncSessionLocal
+from app.api.projects import get_project_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ async def create_scan(
     current_user: User = Depends(get_current_user),
 ):
     """Create and start a new scan task."""
+    await get_project_for_user(db, project_id, current_user.id, "scan:execute")
     try:
         scan_task = await scan_service.create_scan_task(
             db=db,
@@ -71,6 +73,7 @@ async def list_scans(
     current_user: User = Depends(get_current_user),
 ):
     """List scan tasks for a project."""
+    await get_project_for_user(db, project_id, current_user.id, "scan:read")
     try:
         scans = await scan_service.list_scan_tasks(
             db=db,
@@ -95,6 +98,7 @@ async def get_scan(
     current_user: User = Depends(get_current_user),
 ):
     """Get scan task details."""
+    await get_project_for_user(db, project_id, current_user.id, "scan:read")
     scan_task = await scan_service.get_scan_task(db, scan_id, current_user.id)
     if not scan_task:
         raise HTTPException(
@@ -112,6 +116,7 @@ async def get_scan_findings(
     current_user: User = Depends(get_current_user),
 ):
     """Get findings for a scan task."""
+    await get_project_for_user(db, project_id, current_user.id, "scan:read")
     try:
         findings = await scan_service.get_scan_findings(db, scan_id, current_user.id)
         return findings
@@ -130,6 +135,7 @@ async def cancel_scan(
     current_user: User = Depends(get_current_user),
 ):
     """Cancel a pending or running scan task."""
+    await get_project_for_user(db, project_id, current_user.id, "scan:cancel")
     try:
         scan_task = await scan_service.cancel_scan_task(db, scan_id, current_user.id)
         return scan_task

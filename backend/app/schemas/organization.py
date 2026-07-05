@@ -42,6 +42,8 @@ class OrganizationMemberResponse(BaseModel):
     organization_id: int
     user_id: int
     role: str
+    custom_role_id: Optional[int] = None
+    custom_role_name: Optional[str] = None
     joined_at: datetime
     username: Optional[str] = None
     email: Optional[str] = None
@@ -53,7 +55,45 @@ class OrganizationMemberResponse(BaseModel):
 class OrganizationMemberCreate(BaseModel):
     user_email: str
     role: str = "member"
+    custom_role_id: Optional[int] = None
 
 
 class OrganizationMemberUpdate(BaseModel):
     role: str
+    custom_role_id: Optional[int] = None
+
+
+class OrganizationRoleCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    description: Optional[str] = None
+    permissions: List[str] = []
+
+
+class OrganizationRoleUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=80)
+    description: Optional[str] = None
+    permissions: Optional[List[str]] = None
+
+
+class OrganizationRoleResponse(BaseModel):
+    id: int
+    organization_id: int
+    name: str
+    description: Optional[str] = None
+    permissions: List[str]
+    is_system: bool
+    member_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class OrganizationRoleAuditResponse(BaseModel):
+    id: int
+    action: str
+    target_type: str
+    target_id: Optional[int] = None
+    detail: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Form, Input, Button, message } from 'antd'
+import { Form, Input, Button, Checkbox, message } from 'antd'
 import { LockOutlined, MailOutlined } from '@ant-design/icons'
 import api from '../services/api'
 import { useAuthStore } from '../store/authStore'
@@ -44,37 +44,23 @@ function Login() {
           </div>
           
           <div className="brand-content">
-            <h1 className="brand-title">
-              智能合规<br/>
-              <span className="brand-accent">精准验证</span>
-            </h1>
+            <h1 className="brand-title">智能合规验证平台</h1>
             <p className="brand-description">
-              以 AI 驱动的智能验证引擎，为企业构建全链路合规保障体系
+              面向等保测评、资产检测与整改闭环的 AI 指挥中心。
             </p>
             
-            <div className="brand-metrics">
-              <div className="metric">
-                <div className="metric-value">99.9%</div>
-                <div className="metric-label">检测准确率</div>
-              </div>
-              <div className="metric-divider"></div>
-              <div className="metric">
-                <div className="metric-value">10x</div>
-                <div className="metric-label">效率提升</div>
-              </div>
-              <div className="metric-divider"></div>
-              <div className="metric">
-                <div className="metric-value">24/7</div>
-                <div className="metric-label">持续监控</div>
-              </div>
+            <div className="brand-signal-grid">
+              <div><span>01</span><strong>等保测评推进</strong></div>
+              <div><span>02</span><strong>多资产安全检测</strong></div>
+              <div><span>03</span><strong>整改证据闭环</strong></div>
             </div>
           </div>
 
           <div className="brand-footer">
             <div className="trust-badges">
-              <span>🔒 企业级安全</span>
-              <span>⚡ 实时检测</span>
-              <span>📊 智能分析</span>
+              <span>本地部署</span>
+              <span>工具链可观测</span>
+              <span>多资产检测</span>
             </div>
           </div>
         </div>
@@ -83,7 +69,7 @@ function Login() {
           <div className="form-wrapper">
             <div className="form-header">
               <h2>欢迎回来</h2>
-              <p>登录您的账户以继续</p>
+              <p>登录组织安全合规工作台</p>
             </div>
 
             <Form
@@ -119,6 +105,13 @@ function Login() {
                   size="large"
                 />
               </Form.Item>
+
+              <div className="login-options">
+                <Form.Item name="remember" valuePropName="checked" noStyle>
+                  <Checkbox>记住我</Checkbox>
+                </Form.Item>
+                <a>忘记密码</a>
+              </div>
 
               <Form.Item>
                 <Button

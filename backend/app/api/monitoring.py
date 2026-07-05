@@ -43,7 +43,7 @@ async def create_scheduled_scan(
     """Create a new scheduled scan."""
     # Verify project access
     from app.api.projects import get_project_for_user
-    await get_project_for_user(db, project_id, current_user.id)
+    await get_project_for_user(db, project_id, current_user.id, "scan:execute")
     
     # Verify asset exists
     result = await db.execute(
@@ -81,7 +81,7 @@ async def list_scheduled_scans(
 ):
     """List all scheduled scans for a project."""
     from app.api.projects import get_project_for_user
-    await get_project_for_user(db, project_id, current_user.id)
+    await get_project_for_user(db, project_id, current_user.id, "scan:read")
     
     result = await db.execute(
         select(ScheduledScan)
@@ -100,6 +100,9 @@ async def update_scheduled_scan(
     current_user: User = Depends(get_current_user),
 ):
     """Update a scheduled scan."""
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "scan:execute")
+
     result = await db.execute(
         select(ScheduledScan).where(
             ScheduledScan.id == scan_id,
@@ -136,6 +139,9 @@ async def delete_scheduled_scan(
     current_user: User = Depends(get_current_user),
 ):
     """Delete a scheduled scan."""
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "scan:execute")
+
     result = await db.execute(
         select(ScheduledScan).where(
             ScheduledScan.id == scan_id,
@@ -159,7 +165,7 @@ async def get_scan_history(
 ):
     """Get scan history with change detection."""
     from app.api.projects import get_project_for_user
-    await get_project_for_user(db, project_id, current_user.id)
+    await get_project_for_user(db, project_id, current_user.id, "scan:read")
     
     result = await db.execute(
         select(ScanHistory)
@@ -179,6 +185,9 @@ async def run_scheduled_scan_now(
     current_user: User = Depends(get_current_user),
 ):
     """Manually trigger a scheduled scan."""
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "scan:execute")
+
     result = await db.execute(
         select(ScheduledScan).where(
             ScheduledScan.id == scan_id,

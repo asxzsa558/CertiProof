@@ -40,6 +40,9 @@ class ScanTask(Base):
     
     # Task parameters
     parameters = Column(JSON, nullable=True)  # Scan configuration
+    orchestrator_task_id = Column(String(64), nullable=True, index=True)
+    progress = Column(JSON, nullable=True)
+    result_summary = Column(JSON, nullable=True)
     
     # Results summary
     findings_count = Column(Integer, default=0)

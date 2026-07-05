@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from typing import Any, Dict
 
 from app.core.database import get_db
+from app.core.rbac import require_any_org_permission
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.config_service import ConfigService, get_config_service
@@ -24,6 +25,7 @@ async def get_all_config(
     current_user: User = Depends(get_current_user),
 ):
     """获取所有配置（按 category 分组）"""
+    await require_any_org_permission(db, current_user, "system:config")
     service = get_config_service(db)
     await service.init_defaults()
     return await service.get_all()
@@ -35,6 +37,7 @@ async def get_config_meta(
     current_user: User = Depends(get_current_user),
 ):
     """获取配置的元信息（描述、默认值等）"""
+    await require_any_org_permission(db, current_user, "system:config")
     service = get_config_service(db)
     return await service.get_meta()
 
@@ -46,6 +49,7 @@ async def update_config(
     current_user: User = Depends(get_current_user),
 ):
     """批量更新配置"""
+    await require_any_org_permission(db, current_user, "system:config")
     service = get_config_service(db)
     try:
         count = await service.update_batch(req.updates)
@@ -61,6 +65,7 @@ async def get_config_by_key(
     current_user: User = Depends(get_current_user),
 ):
     """获取单个配置"""
+    await require_any_org_permission(db, current_user, "system:config")
     service = get_config_service(db)
     value = await service.get(key)
     return {"key": key, "value": value}

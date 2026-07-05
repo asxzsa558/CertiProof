@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.rbac import require_any_org_permission
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.project import Project, ComplianceLevel, ProjectStatus
@@ -34,6 +35,8 @@ async def seed_test_data(
     - 每个阶段的任务都有模拟结果
     - 所有阶段标记为已完成
     """
+    await require_any_org_permission(db, current_user, "system:config")
+
     from app.services.flow_engine import get_flow_engine
     from app.services.assessment_templates import LEVEL_3_TEMPLATE
 

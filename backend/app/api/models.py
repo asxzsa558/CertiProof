@@ -9,6 +9,7 @@ from sqlalchemy import select, func
 from typing import List
 
 from app.core.database import get_db
+from app.core.rbac import require_any_org_permission
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.model_config import ModelProvider, ModelConfig, ModelUsage
@@ -38,6 +39,7 @@ async def create_provider(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new model provider"""
+    await require_any_org_permission(db, current_user, "system:config")
     provider = ModelProvider(
         name=provider_data.name,
         provider_type=provider_data.provider_type,
@@ -57,6 +59,7 @@ async def list_providers(
     current_user: User = Depends(get_current_user),
 ):
     """List all model providers"""
+    await require_any_org_permission(db, current_user, "system:config")
     result = await db.execute(
         select(ModelProvider).order_by(ModelProvider.created_at.desc())
     )
@@ -71,6 +74,7 @@ async def update_provider(
     current_user: User = Depends(get_current_user),
 ):
     """Update a model provider"""
+    await require_any_org_permission(db, current_user, "system:config")
     result = await db.execute(
         select(ModelProvider).where(ModelProvider.id == provider_id)
     )
@@ -99,6 +103,7 @@ async def delete_provider(
     current_user: User = Depends(get_current_user),
 ):
     """Delete a model provider"""
+    await require_any_org_permission(db, current_user, "system:config")
     result = await db.execute(
         select(ModelProvider).where(ModelProvider.id == provider_id)
     )
@@ -120,6 +125,7 @@ async def create_model_config(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new model configuration"""
+    await require_any_org_permission(db, current_user, "system:config")
     # Verify provider exists
     result = await db.execute(
         select(ModelProvider).where(ModelProvider.id == config_data.provider_id)
@@ -160,6 +166,7 @@ async def list_model_configs(
     current_user: User = Depends(get_current_user),
 ):
     """List all model configurations with provider info"""
+    await require_any_org_permission(db, current_user, "system:config")
     result = await db.execute(
         select(ModelConfig)
         .order_by(ModelConfig.priority, ModelConfig.created_at.desc())
@@ -188,6 +195,7 @@ async def update_model_config(
     current_user: User = Depends(get_current_user),
 ):
     """Update a model configuration"""
+    await require_any_org_permission(db, current_user, "system:config")
     result = await db.execute(
         select(ModelConfig).where(ModelConfig.id == config_id)
     )
@@ -231,6 +239,7 @@ async def delete_model_config(
     current_user: User = Depends(get_current_user),
 ):
     """Delete a model configuration"""
+    await require_any_org_permission(db, current_user, "system:config")
     result = await db.execute(
         select(ModelConfig).where(ModelConfig.id == config_id)
     )
@@ -250,6 +259,7 @@ async def test_model_config(
     current_user: User = Depends(get_current_user),
 ):
     """Test if a model configuration is accessible"""
+    await require_any_org_permission(db, current_user, "system:config")
     result = await llm_service.test_model(db, config_id)
     return result
 
@@ -263,6 +273,7 @@ async def get_available_models(
     current_user: User = Depends(get_current_user),
 ):
     """Get list of available models for selection"""
+    await require_any_org_permission(db, current_user, "system:config")
     models = await llm_service.get_available_models(db, task_type)
     
     response = []
@@ -292,6 +303,7 @@ async def get_usage_summary(
     current_user: User = Depends(get_current_user),
 ):
     """Get usage statistics grouped by model"""
+    await require_any_org_permission(db, current_user, "system:config")
     result = await db.execute(
         select(
             ModelConfig.model_name,

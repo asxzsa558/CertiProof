@@ -23,7 +23,7 @@ async def create_asset(
 ):
     # Verify project exists and user has access
     from app.api.projects import get_project_for_user
-    project = await get_project_for_user(db, project_id, current_user.id)
+    project = await get_project_for_user(db, project_id, current_user.id, "asset:create")
     
     # Generate verification token
     verification_token = secrets.token_urlsafe(32)
@@ -51,7 +51,7 @@ async def list_assets(
 ):
     # Verify project exists and user has access
     from app.api.projects import get_project_for_user
-    project = await get_project_for_user(db, project_id, current_user.id)
+    project = await get_project_for_user(db, project_id, current_user.id, "asset:read")
     
     result = await db.execute(
         select(Asset).where(Asset.project_id == project_id).order_by(Asset.created_at.desc())
@@ -69,7 +69,7 @@ async def get_asset(
 ):
     # Verify project exists and user has access
     from app.api.projects import get_project_for_user
-    project = await get_project_for_user(db, project_id, current_user.id)
+    project = await get_project_for_user(db, project_id, current_user.id, "asset:read")
     
     result = await db.execute(
         select(Asset).where(Asset.id == asset_id, Asset.project_id == project_id)
@@ -95,7 +95,7 @@ async def verify_asset(
 ):
     # Verify project exists and user has access
     from app.api.projects import get_project_for_user
-    project = await get_project_for_user(db, project_id, current_user.id)
+    project = await get_project_for_user(db, project_id, current_user.id, "asset:update")
     
     result = await db.execute(
         select(Asset).where(Asset.id == asset_id, Asset.project_id == project_id)
@@ -166,7 +166,7 @@ async def delete_asset(
 ):
     # Verify project exists and user has access
     from app.api.projects import get_project_for_user
-    project = await get_project_for_user(db, project_id, current_user.id)
+    project = await get_project_for_user(db, project_id, current_user.id, "asset:delete")
     
     result = await db.execute(
         select(Asset).where(Asset.id == asset_id, Asset.project_id == project_id)
