@@ -252,6 +252,8 @@ async def _migrate_scan_tasks_table(conn):
         ("orchestrator_task_id", "VARCHAR(64)"),
         ("progress", "JSONB" if "postgresql" in settings.DATABASE_URL else "JSON"),
         ("result_summary", "JSONB" if "postgresql" in settings.DATABASE_URL else "JSON"),
+        ("lease_owner", "VARCHAR(128)"),
+        ("lease_expires_at", "TIMESTAMP"),
     ]
 
     for col_name, col_type in columns_to_add:

@@ -52,6 +52,7 @@ def assert_source_guards() -> None:
     assert "DEBUG must be false in production" in config
     assert 'TASK_EXECUTION_MODE: str = "inline"' in config
     assert "TASK_WORKER_POLL_SECONDS" in config
+    assert "TASK_LEASE_MINUTES" in config
 
     scan_service = (ROOT / "backend/app/services/scan_service.py").read_text(encoding="utf-8")
     assert "Project.user_id == user_id" not in scan_service
@@ -64,7 +65,12 @@ def assert_source_guards() -> None:
 
     orchestrator = (ROOT / "backend/app/orchestrator/orchestrator.py").read_text(encoding="utf-8")
     assert "async def recover_incomplete_scan_tasks" in orchestrator
-    assert "single-process recovery only" in orchestrator
+    assert "update(ScanTask)" in orchestrator
+    assert "lease_owner=self.worker_id" in orchestrator
+    assert "lease_expires_at=now + timedelta(minutes=settings.TASK_LEASE_MINUTES)" in orchestrator
+    scan_task_model = (ROOT / "backend/app/models/scan_task.py").read_text(encoding="utf-8")
+    assert "lease_owner" in scan_task_model
+    assert "lease_expires_at" in scan_task_model
     main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
     assert 'settings.TASK_EXECUTION_MODE == "inline"' in main
     assert "await orchestrator.recover_incomplete_scan_tasks(db)" in main

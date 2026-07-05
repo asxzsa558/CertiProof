@@ -6,10 +6,11 @@ Orchestrator - 调度中枢（包工头）
 import asyncio
 import uuid
 import logging
+import socket
 from typing import Dict, List, Optional, Callable, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update, or_
 
 from app.orchestrator.agent import Agent
 from app.orchestrator.skill_loader import SkillLoader
@@ -59,8 +60,8 @@ class Orchestrator:
         self.task_stop_flags: Dict[str, bool] = {}  # 停止标志
         self.task_status: Dict[str, str] = {}  # running/paused/stopped
         self.active_tasks: Dict[str, asyncio.Task] = {}  # asyncio Task 引用
-        # ponytail: 当前任务控制是进程内能力；如果任务要跨重启恢复，再迁移到数据库表。
         self.task_metadata: Dict[str, Dict[str, Any]] = {}
+        self.worker_id = f"{socket.gethostname()}:{uuid.uuid4().hex[:8]}"
     
     async def pause_task(self, task_id: str) -> bool:
         """暂停任务"""
@@ -279,16 +280,20 @@ class Orchestrator:
             scan_task.error_message = error_message
         if completed_at is not None:
             scan_task.completed_at = completed_at
+        if status in (ScanTaskStatus.COMPLETED, ScanTaskStatus.FAILED, ScanTaskStatus.CANCELLED):
+            scan_task.lease_owner = None
+            scan_task.lease_expires_at = None
         await db.commit()
 
     async def recover_incomplete_scan_tasks(self, db: AsyncSession, limit: int = 20) -> int:
         """Restart persisted orchestrator tasks left running by a process restart."""
-        # ponytail: single-process recovery only; add a DB lease before running multiple API workers.
+        now = datetime.utcnow()
         result = await db.execute(
             select(ScanTask)
             .where(
                 ScanTask.orchestrator_task_id.is_not(None),
                 ScanTask.status.in_([ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING]),
+                or_(ScanTask.lease_expires_at.is_(None), ScanTask.lease_expires_at < now),
             )
             .order_by(ScanTask.created_at.asc())
             .limit(limit)
@@ -298,6 +303,22 @@ class Orchestrator:
             task_id = scan_task.orchestrator_task_id
             if not task_id or task_id in self.active_tasks:
                 continue
+            claim_result = await db.execute(
+                update(ScanTask)
+                .where(
+                    ScanTask.id == scan_task.id,
+                    ScanTask.status.in_([ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING]),
+                    or_(ScanTask.lease_expires_at.is_(None), ScanTask.lease_expires_at < now),
+                )
+                .values(
+                    lease_owner=self.worker_id,
+                    lease_expires_at=now + timedelta(minutes=settings.TASK_LEASE_MINUTES),
+                )
+            )
+            if claim_result.rowcount != 1:
+                continue
+            await db.commit()
+            await db.refresh(scan_task)
 
             parameters = scan_task.parameters or {}
             plan = parameters.get("plan") or []

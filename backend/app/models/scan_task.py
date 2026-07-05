@@ -43,6 +43,8 @@ class ScanTask(Base):
     orchestrator_task_id = Column(String(64), nullable=True, index=True)
     progress = Column(JSON, nullable=True)
     result_summary = Column(JSON, nullable=True)
+    lease_owner = Column(String(128), nullable=True, index=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     
     # Results summary
     findings_count = Column(Integer, default=0)
