@@ -676,7 +676,6 @@ async def start_task(
                 targets=targets,
                 project_id=assessment.project_id,
                 user_id=current_user.id,
-                db=db
             ))
         else:
             # 没有资产，标记为需要手动执行
@@ -691,45 +690,45 @@ async def _execute_task_async(
     target: str,
     project_id: int,
     user_id: int,
-    db: AsyncSession
 ):
     """异步执行任务"""
+    from app.core.database import AsyncSessionLocal
     from app.services.task_executor import get_task_executor
     from app.services.flow_engine import get_flow_engine
-    
-    engine = get_flow_engine(db)
-    
-    try:
-        # 确保任务状态为 in_progress（防止状态机错误）
-        task = await engine.get_task(task_id)
-        if task.status == "todo":
-            await engine.start_task(task_id)
-        
-        executor = get_task_executor(db)
-        result = await executor.execute_task(
-            task_type=task_type,
-            target=target,
-            project_id=project_id,
-            user_id=user_id,
-        )
-        
-        # 更新任务状态
-        if result["status"] in ["completed", "partial"]:
-            await engine.complete_task(task_id, result)
-        elif result["status"] == "failed":
-            task = await engine.get_task(task_id)
-            task.status = "failed"
-            task.result = result
-            await db.commit()
-    except Exception as e:
-        logger.error(f"Task {task_id} execution failed: {e}")
+
+    async with AsyncSessionLocal() as task_db:
+        engine = get_flow_engine(task_db)
         try:
+            # 确保任务状态为 in_progress（防止状态机错误）
             task = await engine.get_task(task_id)
-            task.status = "failed"
-            task.result = {"error": str(e)}
-            await db.commit()
-        except Exception as e2:
-            logger.error(f"Failed to update task status: {e2}")
+            if task.status == "todo":
+                await engine.start_task(task_id)
+
+            executor = get_task_executor(task_db)
+            result = await executor.execute_task(
+                task_type=task_type,
+                target=target,
+                project_id=project_id,
+                user_id=user_id,
+            )
+
+            # 更新任务状态
+            if result["status"] in ["completed", "partial"]:
+                await engine.complete_task(task_id, result)
+            elif result["status"] == "failed":
+                task = await engine.get_task(task_id)
+                task.status = "failed"
+                task.result = result
+                await task_db.commit()
+        except Exception as e:
+            logger.error(f"Task {task_id} execution failed: {e}")
+            try:
+                task = await engine.get_task(task_id)
+                task.status = "failed"
+                task.result = {"error": str(e)}
+                await task_db.commit()
+            except Exception as e2:
+                logger.error(f"Failed to update task status: {e2}")
 
 
 async def _execute_task_async_multi(
@@ -738,81 +737,81 @@ async def _execute_task_async_multi(
     targets: list,
     project_id: int,
     user_id: int,
-    db: AsyncSession
 ):
     """异步执行任务（支持多目标）"""
+    from app.core.database import AsyncSessionLocal
     from app.services.task_executor import get_task_executor
     from app.services.flow_engine import get_flow_engine
     import asyncio
-    
-    engine = get_flow_engine(db)
-    
-    try:
-        # 确保任务状态为 in_progress
-        task = await engine.get_task(task_id)
-        if task.status == "todo":
-            await engine.start_task(task_id)
-        
-        executor = get_task_executor(db)
-        
-        # 并发执行所有目标
-        tasks_list = []
-        for target in targets:
-            tasks_list.append(
-                executor.execute_task(
-                    task_type=task_type,
-                    target=target,
-                    project_id=project_id,
-                    user_id=user_id,
-                )
-            )
-        results = await asyncio.gather(*tasks_list, return_exceptions=True)
-        
-        # 汇总结果
-        asset_results = {}
-        all_failed = []
-        all_completed = []
-        
-        for i, result in enumerate(results):
-            target = targets[i]
-            if isinstance(result, Exception):
-                asset_results[target] = {
-                    "status": "failed",
-                    "error": str(result),
-                }
-                all_failed.append({"target": target, "error": str(result)})
-            else:
-                asset_results[target] = result
-                if result["status"] == "failed":
-                    all_failed.append({"target": target, **result})
-                else:
-                    all_completed.append({"target": target, **result})
-        
-        final_result = {
-            "status": "completed" if not all_failed else ("partial" if all_completed else "failed"),
-            "task_type": task_type,
-            "asset_results": asset_results,
-            "completed": all_completed,
-            "failed": all_failed,
-        }
-        
-        # 更新任务状态
-        if final_result["status"] in ["completed", "partial"]:
-            await engine.complete_task(task_id, final_result)
-        elif final_result["status"] == "failed":
-            task = await engine.get_task(task_id)
-            task.status = "failed"
-            task.result = final_result
-            await db.commit()
-    except Exception as e:
-        logger.error(f"Task {task_id} execution failed: {e}")
+
+    async with AsyncSessionLocal() as task_db:
+        engine = get_flow_engine(task_db)
         try:
+            # 确保任务状态为 in_progress
             task = await engine.get_task(task_id)
-            task.status = "failed"
-            task.result = {"error": str(e)}
-            await db.commit()
-        except Exception as e2:
-            logger.error(f"Failed to update task status: {e2}")
+            if task.status == "todo":
+                await engine.start_task(task_id)
+
+            executor = get_task_executor(task_db)
+
+            # 并发执行所有目标
+            tasks_list = []
+            for target in targets:
+                tasks_list.append(
+                    executor.execute_task(
+                        task_type=task_type,
+                        target=target,
+                        project_id=project_id,
+                        user_id=user_id,
+                    )
+                )
+            results = await asyncio.gather(*tasks_list, return_exceptions=True)
+
+            # 汇总结果
+            asset_results = {}
+            all_failed = []
+            all_completed = []
+
+            for i, result in enumerate(results):
+                target = targets[i]
+                if isinstance(result, Exception):
+                    asset_results[target] = {
+                        "status": "failed",
+                        "error": str(result),
+                    }
+                    all_failed.append({"target": target, "error": str(result)})
+                else:
+                    asset_results[target] = result
+                    if result["status"] == "failed":
+                        all_failed.append({"target": target, **result})
+                    else:
+                        all_completed.append({"target": target, **result})
+
+            final_result = {
+                "status": "completed" if not all_failed else ("partial" if all_completed else "failed"),
+                "task_type": task_type,
+                "asset_results": asset_results,
+                "completed": all_completed,
+                "failed": all_failed,
+            }
+
+            # 更新任务状态
+            if final_result["status"] in ["completed", "partial"]:
+                await engine.complete_task(task_id, final_result)
+            elif final_result["status"] == "failed":
+                task = await engine.get_task(task_id)
+                task.status = "failed"
+                task.result = final_result
+                await task_db.commit()
+        except Exception as e:
+            logger.error(f"Task {task_id} execution failed: {e}")
+            try:
+                task = await engine.get_task(task_id)
+                task.status = "failed"
+                task.result = {"error": str(e)}
+                await task_db.commit()
+            except Exception as e2:
+                logger.error(f"Failed to update task status: {e2}")
 
 
 @router.post("/tasks/{task_id}/complete")
