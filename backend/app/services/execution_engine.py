@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.capability_registry import CapabilityRegistry, capability_registry
 from app.services.context_manager import ContextManager
+from app.core.rbac import require_org_permission_for_user_id
 from app.core.redaction import redact_sensitive
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,29 @@ class ExecutionEngine:
             "linux_baseline": "baseline_check",
         }
         return aliases.get(capability_name, capability_name)
+
+    async def _project_for_user_id(
+        self,
+        db: AsyncSession,
+        project_id: int,
+        user_id: int,
+        permission: str,
+    ):
+        from app.models.project import Project
+        from sqlalchemy import select
+
+        result = await db.execute(select(Project).where(Project.id == project_id))
+        project = result.scalar_one_or_none()
+        if not project:
+            return None
+        if project.organization_id:
+            try:
+                await require_org_permission_for_user_id(db, project.organization_id, user_id, permission)
+            except Exception:
+                return None
+        elif project.user_id != user_id and project.owner_id != user_id:
+            return None
+        return project
 
     def _ssh_params(self, parameters: Dict) -> Dict:
         params = {
@@ -1576,12 +1600,37 @@ class ExecutionEngine:
     async def _create_project(self, parameters: Dict, user_id: int, db: AsyncSession) -> Dict:
         """创建项目"""
         from app.models.project import Project, ComplianceLevel
+        from app.models.organization import OrganizationMember
+        from sqlalchemy import select
         
         compliance_level = parameters.get("compliance_level", "三级")
         level_enum = ComplianceLevel.LEVEL_3 if compliance_level == "三级" else ComplianceLevel.LEVEL_2
+        organization_id = parameters.get("organization_id")
+
+        if organization_id:
+            try:
+                await require_org_permission_for_user_id(db, int(organization_id), user_id, "project:create")
+            except Exception:
+                return {"message": "组织不存在或无权创建项目"}
+        else:
+            result = await db.execute(
+                select(OrganizationMember).where(OrganizationMember.user_id == user_id)
+            )
+            memberships = result.scalars().all()
+            for member in memberships:
+                try:
+                    await require_org_permission_for_user_id(db, member.organization_id, user_id, "project:create")
+                    organization_id = member.organization_id
+                    break
+                except Exception:
+                    continue
+            if memberships and not organization_id:
+                return {"message": "无权在当前组织创建项目"}
         
         project = Project(
             user_id=user_id,
+            owner_id=user_id,
+            organization_id=organization_id,
             name=parameters["name"],
             description=parameters.get("description"),
             compliance_level=level_enum,
@@ -1601,10 +1650,15 @@ class ExecutionEngine:
     async def _list_projects(self, user_id: int, db: AsyncSession) -> Dict:
         """列出项目"""
         from app.models.project import Project
-        from sqlalchemy import select
+        from app.models.organization import OrganizationMember
+        from sqlalchemy import select, or_
         
         result = await db.execute(
-            select(Project).where(Project.user_id == user_id)
+            select(Project)
+            .outerjoin(OrganizationMember, Project.organization_id == OrganizationMember.organization_id)
+            .where(or_(Project.user_id == user_id, Project.owner_id == user_id, OrganizationMember.user_id == user_id))
+            .distinct()
+            .order_by(Project.created_at.desc())
         )
         projects = result.scalars().all()
         
@@ -1624,15 +1678,9 @@ class ExecutionEngine:
     
     async def _update_project(self, parameters: Dict, user_id: int, db: AsyncSession) -> Dict:
         """更新项目"""
-        from app.models.project import Project
-        from sqlalchemy import select
-        
         project_id = parameters.get("project_id")
         
-        result = await db.execute(
-            select(Project).where(Project.id == project_id, Project.user_id == user_id)
-        )
-        project = result.scalar_one_or_none()
+        project = await self._project_for_user_id(db, project_id, user_id, "project:update")
         
         if not project:
             return {"message": "项目不存在或无权访问"}
@@ -1652,14 +1700,11 @@ class ExecutionEngine:
     async def _delete_project(self, parameters: Dict, user_id: int, db: AsyncSession) -> Dict:
         """删除项目"""
         from app.models.project import Project
-        from sqlalchemy import select, delete
+        from sqlalchemy import delete
         
         project_id = parameters.get("project_id")
         
-        result = await db.execute(
-            select(Project).where(Project.id == project_id, Project.user_id == user_id)
-        )
-        project = result.scalar_one_or_none()
+        project = await self._project_for_user_id(db, project_id, user_id, "project:delete")
         
         if not project:
             return {"message": "项目不存在或无权访问"}
@@ -1674,17 +1719,12 @@ class ExecutionEngine:
     async def _add_asset(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """添加资产"""
         from app.models.asset import Asset, AssetType
-        from app.models.project import Project
-        from sqlalchemy import select
         
         pid = parameters.get("project_id", project_id)
         if not pid:
             return {"message": "请指定项目"}
         
-        result = await db.execute(
-            select(Project).where(Project.id == pid, Project.user_id == user_id)
-        )
-        if not result.scalar_one_or_none():
+        if not await self._project_for_user_id(db, pid, user_id, "asset:create"):
             return {"message": "项目不存在或无权访问"}
         
         asset_type_str = parameters.get("asset_type", "ip").lower()
@@ -1717,17 +1757,13 @@ class ExecutionEngine:
     async def _list_assets(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """列出项目资产"""
         from app.models.asset import Asset
-        from app.models.project import Project
         from sqlalchemy import select
         
         pid = parameters.get("project_id", project_id)
         if not pid:
             return {"message": "请指定项目", "assets": []}
         
-        result = await db.execute(
-            select(Project).where(Project.id == pid, Project.user_id == user_id)
-        )
-        if not result.scalar_one_or_none():
+        if not await self._project_for_user_id(db, pid, user_id, "asset:read"):
             return {"message": "项目不存在或无权访问", "assets": []}
         
         result = await db.execute(
@@ -1754,7 +1790,6 @@ class ExecutionEngine:
         """验证资产所有权"""
         import uuid as uuid_mod
         from app.models.asset import Asset, VerificationStatus
-        from app.models.project import Project
         from sqlalchemy import select
         
         pid = parameters.get("project_id", project_id)
@@ -1771,12 +1806,9 @@ class ExecutionEngine:
         if not asset:
             return {"message": "资产不存在"}
         
-        if pid:
-            result = await db.execute(
-                select(Project).where(Project.id == pid, Project.user_id == user_id)
-            )
-            if not result.scalar_one_or_none():
-                return {"message": "项目不存在或无权访问"}
+        pid = pid or asset.project_id
+        if not await self._project_for_user_id(db, pid, user_id, "asset:update"):
+            return {"message": "项目不存在或无权访问"}
         
         token = f"verisure-{uuid_mod.uuid4().hex[:16]}"
         asset.verification_token = token

@@ -42,6 +42,9 @@ def assert_source_guards() -> None:
     execution_engine = (ROOT / "backend/app/services/execution_engine.py").read_text(encoding="utf-8")
     assert "safe_parameters = redact_sensitive(parameters)" in execution_engine
     assert "parameters=redact_sensitive(parameters)" in execution_engine
+    assert "async def _project_for_user_id" in execution_engine
+    assert "Project.id == project_id, Project.user_id == user_id" not in execution_engine
+    assert "Project.id == pid, Project.user_id == user_id" not in execution_engine
 
     config = (ROOT / "backend/app/core/config.py").read_text(encoding="utf-8")
     assert "def validate_runtime_security" in config
