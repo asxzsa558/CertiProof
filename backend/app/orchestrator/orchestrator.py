@@ -157,6 +157,11 @@ class Orchestrator:
         project_id: int,
         plan: List[Dict],
         task_id: str,
+        *,
+        user_id: Optional[int] = None,
+        thread_id: Optional[int] = None,
+        ai_response: str = "",
+        user_input: str = "",
     ) -> Optional[int]:
         if not db or not project_id or not self._plan_has_scan(plan):
             return None
@@ -166,7 +171,14 @@ class Orchestrator:
             task_type=ScanTaskType.FULL,
             status=ScanTaskStatus.RUNNING,
             triggered_by=TriggeredBy.MANUAL,
-            parameters={"plan": plan, "orchestrator_task_id": task_id},
+            parameters={
+                "plan": plan,
+                "orchestrator_task_id": task_id,
+                "user_id": user_id,
+                "thread_id": thread_id,
+                "ai_response": ai_response,
+                "user_input": user_input,
+            },
             orchestrator_task_id=task_id,
             progress={
                 "task_id": task_id,
@@ -196,7 +208,16 @@ class Orchestrator:
     ) -> Dict[str, Any]:
         """Create one tracked async execution and return its identifiers."""
         task_id = str(uuid.uuid4())
-        scan_task_id = await self._create_scan_task_record(db, project_id, plan, task_id)
+        scan_task_id = await self._create_scan_task_record(
+            db,
+            project_id,
+            plan,
+            task_id,
+            user_id=user_id,
+            thread_id=thread_id,
+            ai_response=ai_response,
+            user_input=user_input,
+        )
         self.task_stop_flags[task_id] = False
         self.task_status[task_id] = "running"
         self._update_task_metadata(
@@ -251,6 +272,86 @@ class Orchestrator:
         if completed_at is not None:
             scan_task.completed_at = completed_at
         await db.commit()
+
+    async def recover_incomplete_scan_tasks(self, db: AsyncSession, limit: int = 20) -> int:
+        """Restart persisted orchestrator tasks left running by a process restart."""
+        # ponytail: single-process recovery only; add a DB lease before running multiple API workers.
+        result = await db.execute(
+            select(ScanTask)
+            .where(
+                ScanTask.orchestrator_task_id.is_not(None),
+                ScanTask.status.in_([ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING]),
+            )
+            .order_by(ScanTask.created_at.asc())
+            .limit(limit)
+        )
+        recovered = 0
+        for scan_task in result.scalars().all():
+            task_id = scan_task.orchestrator_task_id
+            if not task_id or task_id in self.active_tasks:
+                continue
+
+            parameters = scan_task.parameters or {}
+            plan = parameters.get("plan") or []
+            if not isinstance(plan, list) or not plan:
+                scan_task.status = ScanTaskStatus.FAILED
+                scan_task.error_message = "任务缺少可恢复的执行计划"
+                scan_task.completed_at = datetime.utcnow()
+                continue
+
+            project_result = await db.execute(select(Project).where(Project.id == scan_task.project_id))
+            project = project_result.scalar_one_or_none()
+            if not project:
+                scan_task.status = ScanTaskStatus.FAILED
+                scan_task.error_message = "任务所属项目不存在，无法恢复"
+                scan_task.completed_at = datetime.utcnow()
+                continue
+
+            user_id = parameters.get("user_id") or project.owner_id or project.user_id
+            thread_id = parameters.get("thread_id")
+            ai_response = parameters.get("ai_response") or "任务已从持久化队列恢复执行"
+            user_input = parameters.get("user_input") or "恢复执行未完成的安全检测任务"
+
+            self.task_stop_flags[task_id] = False
+            self.task_status[task_id] = "running"
+            self._update_task_metadata(
+                task_id,
+                user_id=user_id,
+                project_id=scan_task.project_id,
+                scan_task_id=scan_task.id,
+                status="running",
+                recovered=True,
+            )
+            scan_task.status = ScanTaskStatus.RUNNING
+            progress = dict(scan_task.progress or {})
+            progress.update({
+                "task_id": task_id,
+                "user_id": user_id,
+                "project_id": scan_task.project_id,
+                "status": "running",
+                "current_step": "服务重启后恢复执行...",
+            })
+            scan_task.progress = progress
+
+            task = asyncio.create_task(self._execute_plan_async(
+                task_id=task_id,
+                plan=plan,
+                user_id=int(user_id),
+                project_id=scan_task.project_id,
+                db=db,
+                context_manager=None,
+                ai_response=ai_response,
+                user_input=user_input,
+                thread_id=thread_id,
+                scan_task_id=scan_task.id,
+            ))
+            self.active_tasks[task_id] = task
+            recovered += 1
+
+        await db.commit()
+        if recovered:
+            logger.info("Recovered %d persisted scan task(s)", recovered)
+        return recovered
     
     async def handle_user_input(
         self,
@@ -404,7 +505,16 @@ class Orchestrator:
                 has_scan = self._plan_has_scan(plan)
                 
                 if not scan_task_id and has_scan and project_id:
-                    scan_task_id = await self._create_scan_task_record(async_db, project_id, plan, task_id)
+                    scan_task_id = await self._create_scan_task_record(
+                        async_db,
+                        project_id,
+                        plan,
+                        task_id,
+                        user_id=user_id,
+                        thread_id=thread_id,
+                        ai_response=ai_response,
+                        user_input=user_input,
+                    )
                     self._update_task_metadata(task_id, scan_task_id=scan_task_id)
                 
                 # 初始化任务进度

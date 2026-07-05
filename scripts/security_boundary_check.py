@@ -57,6 +57,12 @@ def assert_source_guards() -> None:
     assert "await _can_read_task_payload(task, db, current_user)" in chat_api
     assert "await _can_read_task_payload(progress, db, current_user)" in chat_api
 
+    orchestrator = (ROOT / "backend/app/orchestrator/orchestrator.py").read_text(encoding="utf-8")
+    assert "async def recover_incomplete_scan_tasks" in orchestrator
+    assert "single-process recovery only" in orchestrator
+    main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    assert "await orchestrator.recover_incomplete_scan_tasks(db)" in main
+
 
 def main() -> int:
     assert_redaction()

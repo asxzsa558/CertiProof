@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.database import init_db, AsyncSessionLocal
 from app.core.initialization import initialize_default_models
 from app.api import api_router
+from app.orchestrator import orchestrator
 
 # Configure logging
 logging.basicConfig(
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
     # Initialize default model configuration
     async with AsyncSessionLocal() as db:
         await initialize_default_models(db)
+        await orchestrator.recover_incomplete_scan_tasks(db)
     
     yield
     # Shutdown: cleanup
