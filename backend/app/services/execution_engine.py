@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class ExecutionEngine:
     """执行引擎"""
-    
+
     def __init__(self, registry: CapabilityRegistry = None):
         self.registry = registry or capability_registry
 
@@ -273,7 +273,7 @@ class ExecutionEngine:
         if require_fuzz and "FUZZ" not in url:
             url = url.rstrip("/") + "/FUZZ"
         return url
-    
+
     async def execute_plan(
         self,
         plan: List[Dict],
@@ -288,7 +288,7 @@ class ExecutionEngine:
     ) -> Dict:
         """
         执行计划中的每个步骤
-        
+
         Args:
             plan: 执行计划，每个步骤包含 capability 和 parameters
             user_id: 用户 ID
@@ -297,7 +297,7 @@ class ExecutionEngine:
             context_manager: 上下文管理器（可选）
             task_id: 任务 ID（可选，用于进度回调）
             progress_callback: 进度回调函数（可选）
-        
+
         Returns:
             {
                 "results": [...],  # 每个步骤的结果
@@ -310,7 +310,7 @@ class ExecutionEngine:
         action_ids = []
         success_count = 0
         failed_count = 0
-        
+
         for i, step in enumerate(plan):
             if check_stop and check_stop():
                 logger.info(f"Task stopped before step {i}")
@@ -322,7 +322,7 @@ class ExecutionEngine:
                     })
                     failed_count += 1
                 break
-            
+
             if wait_if_paused:
                 stopped = await wait_if_paused()
                 if stopped:
@@ -335,13 +335,13 @@ class ExecutionEngine:
                         })
                         failed_count += 1
                     break
-            
+
             capability_name = self._normalize_capability_name(step.get("capability"))
             parameters = step.get("parameters", {})
-            
+
             # 获取能力
             capability = self.registry.get(capability_name)
-            
+
             if not capability:
                 logger.warning(f"Unknown capability: {capability_name}")
                 results.append({
@@ -353,19 +353,19 @@ class ExecutionEngine:
                 if progress_callback and task_id:
                     progress_callback(task_id, i, len(plan), capability_name, "failed")
                 continue
-            
+
             try:
                 # 通知开始执行
                 if progress_callback and task_id:
                     progress_callback(task_id, i, len(plan), capability_name, "running")
-                
+
                 # 执行能力
                 safe_parameters = redact_sensitive(parameters)
                 logger.info(f"Executing capability: {capability_name} with params: {safe_parameters}")
-                
+
                 # 根据能力类型调用不同的处理器
                 result = await self._execute_capability(capability_name, parameters, user_id, project_id, db)
-                
+
                 results.append({
                     "capability": capability_name,
                     "status": "success",
@@ -373,7 +373,7 @@ class ExecutionEngine:
                     "result": result,
                 })
                 success_count += 1
-                
+
                 # 记录操作历史
                 if context_manager:
                     await context_manager.add_action(
@@ -382,20 +382,20 @@ class ExecutionEngine:
                         result=result,
                         status="success"
                     )
-                    
+
                     # 缓存结果
                     cache_key = f"{capability_name}:{self._generate_cache_key(safe_parameters)}"
                     await context_manager.cache_result(cache_key, result)
-                
+
                 # 通知执行完成
                 if progress_callback and task_id:
                     progress_callback(task_id, i, len(plan), capability_name, "completed")
-                
+
                 logger.info(f"Capability {capability_name} executed successfully")
-                
+
             except Exception as e:
                 logger.error(f"Capability {capability_name} failed: {e}", exc_info=True)
-                
+
                 results.append({
                     "capability": capability_name,
                     "status": "failed",
@@ -403,11 +403,11 @@ class ExecutionEngine:
                     "error": str(e),
                 })
                 failed_count += 1
-                
+
                 # 通知执行失败
                 if progress_callback and task_id:
                     progress_callback(task_id, i, len(plan), capability_name, "failed")
-                
+
                 # 记录失败的操作
                 if context_manager:
                     await context_manager.add_action(
@@ -416,14 +416,14 @@ class ExecutionEngine:
                         result={"error": str(e)},
                         status="failed"
                     )
-        
+
         return {
             "results": results,
             "action_ids": action_ids,
             "success_count": success_count,
             "failed_count": failed_count,
         }
-    
+
     async def execute_plan_concurrent(
         self,
         plan: List[Dict],
@@ -440,13 +440,13 @@ class ExecutionEngine:
     ) -> Dict:
         """
         并发执行计划（多资产场景）
-        
+
         Args:
             plan: 执行计划，每个步骤包含 capability 和 parameters
             max_concurrent: 最大并发数（默认 5）
             max_retries: 最大重试次数（默认 3）
             check_stop: 检查是否被停止的回调函数
-        
+
         Returns:
             {
                 "results": [...],  # 每个步骤的结果
@@ -457,9 +457,9 @@ class ExecutionEngine:
         """
         semaphore = asyncio.Semaphore(max_concurrent)
         total_steps = len(plan)
-        
+
         logger.info(f"Starting concurrent execution with {total_steps} tasks, max_concurrent={max_concurrent}")
-        
+
         # 创建并发任务
         tasks = []
         for i, step in enumerate(plan):
@@ -480,14 +480,14 @@ class ExecutionEngine:
                 wait_if_paused=wait_if_paused,
             )
             tasks.append(task)
-        
+
         logger.info(f"Starting asyncio.gather with {len(tasks)} tasks")
-        
+
         # 并发执行所有任务
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         logger.info(f"asyncio.gather completed with {len(results)} results")
-        
+
         # 处理异常结果
         processed_results = []
         for i, result in enumerate(results):
@@ -514,12 +514,12 @@ class ExecutionEngine:
                     })
             else:
                 processed_results.append(result)
-        
+
         # 统计结果
         success_count = sum(1 for r in processed_results if r.get("status") == "success")
         failed_count = sum(1 for r in processed_results if r.get("status") in ("failed", "cancelled"))
         cancelled_count = sum(1 for r in processed_results if r.get("status") == "cancelled")
-        
+
         # 按资产分组汇总
         asset_results = {}
         for result in processed_results:
@@ -527,7 +527,7 @@ class ExecutionEngine:
             if target not in asset_results:
                 asset_results[target] = []
             asset_results[target].append(result)
-        
+
         return {
             "results": processed_results,
             "success_count": success_count,
@@ -537,22 +537,22 @@ class ExecutionEngine:
             "total_assets": total_steps,
             "was_stopped": cancelled_count > 0,
         }
-    
+
     async def _execute_with_retry(
-        self, 
-        capability_name: str, 
-        parameters: Dict, 
-        user_id: int, 
-        project_id: int, 
+        self,
+        capability_name: str,
+        parameters: Dict,
+        user_id: int,
+        project_id: int,
         db: AsyncSession,
         max_retries: int = 3
     ) -> Dict:
         """带重试的执行"""
         last_error = None
         target = parameters.get("target", "unknown")
-        
+
         logger.info(f"_execute_with_retry starting for {capability_name}({target}), max_retries={max_retries}")
-        
+
         for attempt in range(max_retries):
             try:
                 logger.info(f"Attempt {attempt + 1}/{max_retries} for {capability_name}({target})")
@@ -575,19 +575,19 @@ class ExecutionEngine:
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt  # 1s, 2s, 4s
                     await asyncio.sleep(wait_time)
-        
+
         logger.error(
             f"All {max_retries} attempts failed for {capability_name}({target}): {last_error}",
             exc_info=last_error
         )
         error_detail = self._error_detail(last_error, capability_name)
         return {
-            "status": "failed", 
+            "status": "failed",
             "error": error_detail["raw_error"],
             "error_detail": error_detail,
             "attempts": max_retries
         }
-    
+
     async def _execute_asset_task(
         self,
         semaphore: asyncio.Semaphore,
@@ -705,7 +705,7 @@ class ExecutionEngine:
                 "error_detail": result.get("error_detail"),
                 "attempts": result.get("attempts", 1),
             }
-    
+
     async def _execute_capability(
         self,
         capability_name: str,
@@ -716,7 +716,7 @@ class ExecutionEngine:
     ) -> Dict:
         """
         执行单个能力
-        
+
         根据能力类型调用不同的处理器
         """
         capability_name = self._normalize_capability_name(capability_name)
@@ -726,203 +726,203 @@ class ExecutionEngine:
             target = parameters["target"]
             if target in ["localhost", "127.0.0.1", "本机", "本地"]:
                 parameters["target"] = "host.docker.internal"
-        
+
         # 扫描类能力
         if capability_name == "scan_ports":
             return await self._scan_ports(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "masscan_scan":
             return await self._masscan_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "fping_scan":
             return await self._fping_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "nikto_scan":
             return await self._nikto_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "sqlmap_scan":
             return await self._sqlmap_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "gobuster_scan":
             return await self._gobuster_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "ffuf_scan":
             return await self._ffuf_scan(parameters, user_id, project_id, db)
 
         elif capability_name == "web_discovery_scan":
             return await self._web_discovery_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "snmp_walk":
             return await self._snmp_walk(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "snmp_bruteforce":
             return await self._snmp_bruteforce(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "snmp_get":
             return await self._snmp_get(parameters, user_id, project_id, db)
 
         elif capability_name == "network_device_scan":
             return await self._network_device_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "enum4linux_scan":
             return await self._enum4linux_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "crackmapexec_scan":
             return await self._crackmapexec_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "smb_enum":
             return await self._smb_enum(parameters, user_id, project_id, db)
 
         elif capability_name == "windows_security_scan":
             return await self._windows_security_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "redis_check":
             return await self._redis_check(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "oracle_check":
             return await self._oracle_check(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "mongodb_check":
             return await self._mongodb_check(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "memcached_check":
             return await self._memcached_check(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "mysql_check":
             return await self._mysql_check(parameters, user_id, project_id, db)
 
         elif capability_name == "database_security_scan":
             return await self._database_security_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "scan_ssl":
             return await self._scan_ssl(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "scan_vulnerabilities":
             return await self._scan_vulnerabilities(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "scan_weak_passwords":
             return await self._scan_weak_passwords(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "full_compliance_scan":
             return await self._full_compliance_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "tech_assessment":
             return await self._tech_assessment(parameters, user_id, project_id, db)
-        
+
         # SSH 白盒配置核查能力
         elif capability_name == "baseline_check":
             return await self._baseline_check(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "password_policy_check":
             return await self._password_policy_check(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "ssh_config_check":
             return await self._ssh_config_check(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "audit_config_check":
             return await self._audit_config_check(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "service_port_check":
             return await self._service_port_check(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "file_permission_check":
             return await self._file_permission_check(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "mac_check":
             return await self._mac_check(parameters, user_id, project_id, db)
-        
+
         # 查询类能力
         elif capability_name == "view_scan_results":
             return await self._view_scan_results(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "view_open_ports":
             return await self._view_open_ports(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "view_vulnerabilities":
             return await self._view_vulnerabilities(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "view_findings":
             return await self._view_findings(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "view_compliance_score":
             return await self._view_compliance_score(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "view_scan_history":
             return await self._view_scan_history(parameters, user_id, project_id, db)
-        
+
         # 项目管理类能力
         elif capability_name == "create_project":
             return await self._create_project(parameters, user_id, db)
-        
+
         elif capability_name == "list_projects":
             return await self._list_projects(user_id, db)
-        
+
         elif capability_name == "update_project":
             return await self._update_project(parameters, user_id, db)
-        
+
         elif capability_name == "delete_project":
             return await self._delete_project(parameters, user_id, db)
-        
+
         # 资产管理类能力
         elif capability_name == "add_asset":
             return await self._add_asset(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "list_assets":
             return await self._list_assets(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "verify_asset":
             return await self._verify_asset(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "ping_asset":
             return await self._ping_asset(parameters, user_id, project_id, db)
-        
+
         # 整改管理类能力
         elif capability_name == "create_remediation_ticket":
             return await self._create_remediation_ticket(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "list_remediation_tickets":
             return await self._list_remediation_tickets(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "update_ticket_status":
             return await self._update_ticket_status(parameters, user_id, project_id, db)
-        
+
         # 报告生成类能力
         elif capability_name == "generate_pdf_report":
             return await self._generate_pdf_report(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "generate_json_report":
             return await self._generate_json_report(parameters, user_id, project_id, db)
-        
+
         # 监控管理类能力
         elif capability_name == "create_scheduled_scan":
             return await self._create_scheduled_scan(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "list_scheduled_scans":
             return await self._list_scheduled_scans(parameters, user_id, project_id, db)
-        
+
         elif capability_name == "trigger_scheduled_scan":
             return await self._trigger_scheduled_scan(parameters, user_id, project_id, db)
-        
+
         # 系统类能力
         elif capability_name == "chat":
             return {"message": parameters.get("message", "")}
-        
+
         elif capability_name == "help":
             return await self._show_help()
-        
+
         else:
             raise ValueError(f"未实现的能力: {capability_name}")
-    
+
     async def _scan_ports(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """端口扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
-        
+
         # 使用 call_with_progress 避免长时间阻塞
         def on_progress(progress):
             logger.info(f"Scan progress: {progress}")
-        
+
         result = await client.call_with_progress(
             "nmap_scan",
             {
@@ -932,13 +932,13 @@ class ExecutionEngine:
             on_progress=on_progress,
             poll_interval=2.0
         )
-        
+
         data = result.get("data", {})
-        
+
         # 如果主机不可达，抛出异常（会被重试机制捕获并标记为失败）
         if data.get("host_status") == "down":
             raise ValueError(f"主机 {data.get('target')} 不可达")
-        
+
         # 包含 metadata 以便后续检查端口范围
         return {
             **data,
@@ -961,11 +961,11 @@ class ExecutionEngine:
         if tool_status == "failed" and not allow_tool_failed:
             raise ValueError(tool_error or "工具执行失败")
         return payload
-    
+
     async def _masscan_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """masscan 超高速端口扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {
             "target": parameters["target"],
@@ -975,16 +975,16 @@ class ExecutionEngine:
             params["rate"] = parameters["rate"]
         if "banner_grab" in parameters:
             params["banner_grab"] = parameters["banner_grab"]
-        
+
         result = await client.call("masscan_scan", params)
-        
+
         data = result.get("data", {})
         return self._gateway_payload(result)
-    
+
     async def _fping_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """fping 批量存活检测"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {}
         if "network" in parameters:
@@ -994,14 +994,14 @@ class ExecutionEngine:
             params["network"] = parameters["target"]
         if "targets" in parameters:
             params["targets"] = parameters["targets"]
-        
+
         result = await client.call("fping_scan", params)
         return self._gateway_payload(result)
-    
+
     async def _nikto_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """nikto Web 服务器扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         # 标准化目标：移除 scheme 前缀（如果用户传了完整 URL）
         target = parameters["target"]
@@ -1009,20 +1009,20 @@ class ExecutionEngine:
             target = target[7:]  # 去掉 "http://"
         elif target.startswith("https://"):
             target = target[8:]  # 去掉 "https://"
-        
+
         params = {"target": target}
         if "port" in parameters:
             params["port"] = parameters["port"]
         if "ssl" in parameters:
             params["ssl"] = parameters["ssl"]
-        
+
         result = await client.call("nikto_scan", params)
         return self._gateway_payload(result)
-    
+
     async def _sqlmap_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """sqlmap SQL 注入检测"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"url": self._url_param(parameters)}
         if "data" in parameters:
@@ -1031,17 +1031,17 @@ class ExecutionEngine:
             params["level"] = parameters["level"]
         if "risk" in parameters:
             params["risk"] = parameters["risk"]
-        
+
         result = await client.call("sqlmap_scan", params)
         return self._gateway_payload(result)
-    
+
     async def _gobuster_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """gobuster 目录/文件爆破"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         url = self._url_param(parameters)
-        
+
         params = {"url": url}
         if "wordlist" in parameters:
             params["wordlist"] = parameters["wordlist"]
@@ -1049,23 +1049,23 @@ class ExecutionEngine:
             params["extensions"] = parameters["extensions"]
         if "threads" in parameters:
             params["threads"] = parameters["threads"]
-        
+
         result = await client.call("gobuster_scan", params)
         return self._gateway_payload(result)
-    
+
     async def _ffuf_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """ffuf Web 模糊测试"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         url = self._url_param(parameters, require_fuzz=True)
-        
+
         params = {"url": url}
         if "wordlist" in parameters:
             params["wordlist"] = parameters["wordlist"]
         if "method" in parameters:
             params["method"] = parameters["method"]
-        
+
         result = await client.call("ffuf_scan", params)
         return self._gateway_payload(result)
 
@@ -1081,11 +1081,11 @@ class ExecutionEngine:
             "sub_results": sub_results,
             "summary": self._summarize_subtools(sub_results),
         }
-    
+
     async def _snmp_walk(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """snmpwalk 获取 SNMP 信息"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"]}
         if "community" in parameters:
@@ -1094,33 +1094,33 @@ class ExecutionEngine:
             params["version"] = parameters["version"]
         if "oid" in parameters:
             params["oid"] = parameters["oid"]
-        
+
         result = await client.call("snmp_walk", params)
         return self._gateway_payload(result, allow_tool_failed=True)
-    
+
     async def _snmp_bruteforce(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """SNMP 团体字爆破"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"]}
         if "wordlist" in parameters:
             params["wordlist"] = parameters["wordlist"]
-        
+
         result = await client.call("snmp_bruteforce", params)
         return self._gateway_payload(result, allow_tool_failed=True)
-    
+
     async def _snmp_get(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """snmpget 获取单个 OID 值"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"], "oid": parameters["oid"]}
         if "community" in parameters:
             params["community"] = parameters["community"]
         if "version" in parameters:
             params["version"] = parameters["version"]
-        
+
         result = await client.call("snmp_get", params)
         return self._gateway_payload(result, allow_tool_failed=True)
 
@@ -1136,11 +1136,11 @@ class ExecutionEngine:
             "sub_results": sub_results,
             "summary": self._summarize_subtools(sub_results),
         }
-    
+
     async def _enum4linux_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """enum4linux Windows 信息枚举"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"]}
         if "username" in parameters:
@@ -1149,14 +1149,14 @@ class ExecutionEngine:
             params["password"] = parameters["password"]
         if "scan_type" in parameters:
             params["scan_type"] = parameters["scan_type"]
-        
+
         result = await client.call("enum4linux_scan", params)
         return self._gateway_payload(result, allow_tool_failed=True)
-    
+
     async def _crackmapexec_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """crackmapexec SMB/Windows 枚举"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"]}
         if "username" in parameters:
@@ -1165,21 +1165,21 @@ class ExecutionEngine:
             params["password"] = parameters["password"]
         if "scan_type" in parameters:
             params["scan_type"] = parameters["scan_type"]
-        
+
         result = await client.call("crackmapexec_scan", params)
         return self._gateway_payload(result, allow_tool_failed=True)
-    
+
     async def _smb_enum(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """SMB 共享枚举"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"]}
         if "username" in parameters:
             params["username"] = parameters["username"]
         if "password" in parameters:
             params["password"] = parameters["password"]
-        
+
         result = await client.call("smb_enum", params)
         return self._gateway_payload(result, allow_tool_failed=True)
 
@@ -1201,66 +1201,66 @@ class ExecutionEngine:
             "sub_results": sub_results,
             "summary": self._summarize_subtools(sub_results),
         }
-    
+
     async def _redis_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """Redis 未授权访问检查"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"]}
         if "port" in parameters:
             params["port"] = parameters["port"]
-        
+
         result = await client.call("redis_check", params)
         return self._gateway_payload(result)
-    
+
     async def _oracle_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """Oracle TNS 版本信息检查"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"]}
         if "port" in parameters:
             params["port"] = parameters["port"]
-        
+
         result = await client.call("oracle_check", params)
         return self._gateway_payload(result)
-    
+
     async def _mongodb_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """MongoDB 未授权访问检查"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"]}
         if "port" in parameters:
             params["port"] = parameters["port"]
-        
+
         result = await client.call("mongodb_check", params)
         return self._gateway_payload(result)
-    
+
     async def _memcached_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """Memcached 未授权访问检查"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"]}
         if "port" in parameters:
             params["port"] = parameters["port"]
-        
+
         result = await client.call("memcached_check", params)
         return self._gateway_payload(result)
-    
+
     async def _mysql_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """MySQL 空口令检查"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"]}
         if "port" in parameters:
             params["port"] = parameters["port"]
         if "username" in parameters:
             params["username"] = parameters["username"]
-        
+
         result = await client.call("mysql_check", params)
         return self._gateway_payload(result, allow_tool_failed=True)
 
@@ -1284,47 +1284,47 @@ class ExecutionEngine:
             "sub_results": sub_results,
             "summary": self._summarize_subtools(sub_results),
         }
-    
+
     async def _scan_ssl(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """SSL 扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         result = await client.call("testssl_scan", {
             "target": parameters["target"],
             "port": parameters.get("port", 443),
         })
-        
+
         return self._gateway_payload(result)
-    
+
     async def _scan_vulnerabilities(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """漏洞扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         params = {"target": parameters["target"]}
-        
+
         if "templates" in parameters:
             params["templates"] = parameters["templates"]
         if "severity" in parameters:
             params["severity"] = parameters["severity"]
-        
+
         result = await client.call("nuclei_scan", params)
         return self._gateway_payload(result)
-    
+
     async def _scan_weak_passwords(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """弱口令扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         client = MCPGatewayClient()
         result = await client.call("hydra_bruteforce", {
             "target": parameters["target"],
             "service": parameters.get("service", "ssh"),
             "port": parameters.get("port", 22),
         })
-        
+
         return self._gateway_payload(result)
-    
+
     async def _full_compliance_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """全量合规扫描"""
         target = parameters["target"]
@@ -1344,15 +1344,15 @@ class ExecutionEngine:
             "sub_results": sub_results,
             "summary": self._summarize_subtools(sub_results),
         }
-    
+
     async def _tech_assessment(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """等保技术要求测评（10项检查）"""
         target = parameters["target"]
-        
+
         # 构建 SSH 凭据参数
         ssh_params = self._ssh_params(parameters)
         has_ssh_credential = bool(ssh_params.get("password") or ssh_params.get("key_file"))
-        
+
         sub_coroutines = [
             self._run_subtool("scan_ports", {"target": target}, user_id, project_id, db, "端口扫描"),
             self._run_subtool("scan_vulnerabilities", {"target": target}, user_id, project_id, db, "漏洞扫描"),
@@ -1391,43 +1391,43 @@ class ExecutionEngine:
             "sub_results": sub_results,
             "summary": self._summarize_subtools(sub_results),
         }
-    
+
     # ========== SSH 白盒配置核查方法 ==========
-    
+
     async def _baseline_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """安全基线核查：由工具侧自动识别操作系统。"""
         return await self._call_ssh_checker("linux_baseline", parameters)
-    
+
     async def _password_policy_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """密码策略检查"""
         return await self._call_ssh_checker("password_policy_check", parameters)
-    
+
     async def _ssh_config_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """SSH 配置检查"""
         return await self._call_ssh_checker("ssh_config_check", parameters)
-    
+
     async def _audit_config_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """审计配置检查"""
         return await self._call_ssh_checker("audit_config_check", parameters)
-    
+
     async def _service_port_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """服务端口检查"""
         return await self._call_ssh_checker("service_port_check", parameters)
-    
+
     async def _file_permission_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """文件权限检查"""
         return await self._call_ssh_checker("file_permission_check", parameters)
-    
+
     async def _mac_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """强制访问控制检查"""
         return await self._call_ssh_checker("mac_check", parameters)
-    
+
     async def _view_scan_results(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """查看扫描结果"""
         # 从缓存或数据库获取最近的扫描结果
         from app.models.context import ResultCache
         from sqlalchemy import select
-        
+
         result = await db.execute(
             select(ResultCache)
             .where(ResultCache.user_id == user_id)
@@ -1436,7 +1436,7 @@ class ExecutionEngine:
             .limit(5)
         )
         caches = result.scalars().all()
-        
+
         return {
             "recent_scans": [
                 {
@@ -1447,12 +1447,12 @@ class ExecutionEngine:
                 for c in caches
             ]
         }
-    
+
     async def _view_open_ports(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """查看开放端口 - 如果没有缓存则自动触发全端口扫描"""
         from app.models.context import ResultCache
         from sqlalchemy import select
-        
+
         result = await db.execute(
             select(ResultCache)
             .where(
@@ -1464,17 +1464,17 @@ class ExecutionEngine:
             .limit(1)
         )
         cache = result.scalar_one_or_none()
-        
+
         if cache:
             result_data = cache.result_data
             # 检查是否是全端口扫描结果
             metadata = result_data.get("metadata", {})
             port_range = metadata.get("port_range", "")
-            
+
             # 如果没有 metadata（旧缓存）或端口范围是 1-65535，视为全端口扫描
             if not port_range or port_range == "1-65535":
                 return result_data
-            
+
             # 部分端口扫描，提示需要重新扫描
             return {
                 "message": f"最近的扫描只覆盖了端口范围 {port_range}，不是全端口扫描。建议重新执行全端口扫描以获取完整结果。",
@@ -1482,12 +1482,12 @@ class ExecutionEngine:
                 "current_port_range": port_range,
                 "data": result_data.get("data", result_data),
             }
-        
+
         # 没有缓存，自动触发全端口扫描
         target = parameters.get("target", "host.docker.internal")
         if target in ["localhost", "127.0.0.1", "本机", "本地"]:
             target = "host.docker.internal"
-        
+
         # 执行全端口扫描
         scan_result = await self._scan_ports({"target": target}, user_id, project_id, db)
         return {
@@ -1495,13 +1495,13 @@ class ExecutionEngine:
             "auto_scanned": True,
             "message": "没有找到之前的扫描结果，已自动执行全端口扫描。",
         }
-    
+
     async def _view_vulnerabilities(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """查看漏洞"""
         # 从缓存获取最近的漏洞扫描结果
         from app.models.context import ResultCache
         from sqlalchemy import select
-        
+
         result = await db.execute(
             select(ResultCache)
             .where(
@@ -1513,25 +1513,25 @@ class ExecutionEngine:
             .limit(1)
         )
         cache = result.scalar_one_or_none()
-        
+
         if cache:
             return cache.result_data
         else:
             return {"message": "没有找到漏洞扫描结果，请先执行漏洞扫描"}
-    
+
     async def _view_findings(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """查看发现"""
         from app.models.finding import Finding
         from sqlalchemy import select
-        
+
         query = select(Finding).where(Finding.project_id == project_id)
-        
+
         if "status" in parameters:
             query = query.where(Finding.status == parameters["status"])
-        
+
         result = await db.execute(query.limit(20))
         findings = result.scalars().all()
-        
+
         return {
             "findings": [
                 {
@@ -1546,19 +1546,19 @@ class ExecutionEngine:
             ],
             "total": len(findings),
         }
-    
+
     async def _view_compliance_score(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """查看合规评分"""
         from app.models.project import Project
         from sqlalchemy import select
-        
+
         pid = parameters.get("project_id", project_id)
-        
+
         result = await db.execute(
             select(Project).where(Project.id == pid)
         )
         project = result.scalar_one_or_none()
-        
+
         if project:
             return {
                 "project_id": project.id,
@@ -1568,20 +1568,20 @@ class ExecutionEngine:
             }
         else:
             return {"message": "项目不存在"}
-    
+
     async def _view_scan_history(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """查看扫描历史"""
         from app.models.scan_task import ScanTask
         from sqlalchemy import select
-        
+
         limit = parameters.get("limit", 10)
-        
+
         query = select(ScanTask).where(ScanTask.project_id == project_id)
         result = await db.execute(
             query.order_by(ScanTask.created_at.desc()).limit(limit)
         )
         tasks = result.scalars().all()
-        
+
         return {
             "scan_history": [
                 {
@@ -1596,13 +1596,13 @@ class ExecutionEngine:
             ],
             "total": len(tasks),
         }
-    
+
     async def _create_project(self, parameters: Dict, user_id: int, db: AsyncSession) -> Dict:
         """创建项目"""
         from app.models.project import Project, ComplianceLevel
         from app.models.organization import OrganizationMember
         from sqlalchemy import select
-        
+
         compliance_level = parameters.get("compliance_level", "三级")
         level_enum = ComplianceLevel.LEVEL_3 if compliance_level == "三级" else ComplianceLevel.LEVEL_2
         organization_id = parameters.get("organization_id")
@@ -1626,7 +1626,7 @@ class ExecutionEngine:
                     continue
             if memberships and not organization_id:
                 return {"message": "无权在当前组织创建项目"}
-        
+
         project = Project(
             user_id=user_id,
             owner_id=user_id,
@@ -1635,24 +1635,24 @@ class ExecutionEngine:
             description=parameters.get("description"),
             compliance_level=level_enum,
         )
-        
+
         db.add(project)
         await db.flush()
         await db.refresh(project)
-        
+
         return {
             "project_id": project.id,
             "name": project.name,
             "compliance_level": compliance_level,
             "message": f"项目 '{project.name}' 创建成功",
         }
-    
+
     async def _list_projects(self, user_id: int, db: AsyncSession) -> Dict:
         """列出项目"""
         from app.models.project import Project
         from app.models.organization import OrganizationMember
         from sqlalchemy import select, or_
-        
+
         result = await db.execute(
             select(Project)
             .outerjoin(OrganizationMember, Project.organization_id == OrganizationMember.organization_id)
@@ -1661,7 +1661,7 @@ class ExecutionEngine:
             .order_by(Project.created_at.desc())
         )
         projects = result.scalars().all()
-        
+
         return {
             "projects": [
                 {
@@ -1675,68 +1675,68 @@ class ExecutionEngine:
             ],
             "total": len(projects),
         }
-    
+
     async def _update_project(self, parameters: Dict, user_id: int, db: AsyncSession) -> Dict:
         """更新项目"""
         project_id = parameters.get("project_id")
-        
+
         project = await self._project_for_user_id(db, project_id, user_id, "project:update")
-        
+
         if not project:
             return {"message": "项目不存在或无权访问"}
-        
+
         if "name" in parameters:
             project.name = parameters["name"]
         if "description" in parameters:
             project.description = parameters["description"]
-        
+
         await db.flush()
-        
+
         return {
             "project_id": project.id,
             "message": "项目更新成功",
         }
-    
+
     async def _delete_project(self, parameters: Dict, user_id: int, db: AsyncSession) -> Dict:
         """删除项目"""
         from app.models.project import Project
         from sqlalchemy import delete
-        
+
         project_id = parameters.get("project_id")
-        
+
         project = await self._project_for_user_id(db, project_id, user_id, "project:delete")
-        
+
         if not project:
             return {"message": "项目不存在或无权访问"}
-        
+
         await db.execute(delete(Project).where(Project.id == project_id))
         await db.flush()
-        
+
         return {
             "message": f"项目 '{project.name}' 已删除",
         }
-    
+
     async def _add_asset(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """添加资产"""
         from app.models.asset import Asset, AssetType
-        
+
         pid = parameters.get("project_id", project_id)
         if not pid:
             return {"message": "请指定项目"}
-        
+
         if not await self._project_for_user_id(db, pid, user_id, "asset:create"):
             return {"message": "项目不存在或无权访问"}
-        
+
         asset_type_str = parameters.get("asset_type", "ip").lower()
         try:
             asset_type = AssetType(asset_type_str)
         except ValueError:
             asset_type = AssetType.IP
-        
+
         value = parameters.get("value", "").strip()
         if not value:
             return {"message": "资产地址不能为空"}
-        
+
         asset = Asset(
             project_id=pid,
             asset_type=asset_type,
@@ -1746,31 +1746,31 @@ class ExecutionEngine:
         db.add(asset)
         await db.flush()
         await db.refresh(asset)
-        
+
         return {
             "message": f"已添加资产: {value} ({asset_type.value})",
             "asset_id": asset.id,
             "asset_type": asset_type.value,
             "value": value,
         }
-    
+
     async def _list_assets(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """列出项目资产"""
         from app.models.asset import Asset
         from sqlalchemy import select
-        
+
         pid = parameters.get("project_id", project_id)
         if not pid:
             return {"message": "请指定项目", "assets": []}
-        
+
         if not await self._project_for_user_id(db, pid, user_id, "asset:read"):
             return {"message": "项目不存在或无权访问", "assets": []}
-        
+
         result = await db.execute(
             select(Asset).where(Asset.project_id == pid).order_by(Asset.created_at.desc())
         )
         assets = result.scalars().all()
-        
+
         return {
             "message": f"项目共有 {len(assets)} 个资产",
             "assets": [
@@ -1785,60 +1785,60 @@ class ExecutionEngine:
                 for a in assets
             ],
         }
-    
+
     async def _verify_asset(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """验证资产所有权"""
         import uuid as uuid_mod
         from app.models.asset import Asset, VerificationStatus
         from sqlalchemy import select
-        
+
         pid = parameters.get("project_id", project_id)
         asset_id = parameters.get("asset_id")
-        
+
         if not asset_id:
             return {"message": "请指定资产 ID"}
-        
+
         result = await db.execute(
             select(Asset).where(Asset.id == asset_id)
         )
         asset = result.scalar_one_or_none()
-        
+
         if not asset:
             return {"message": "资产不存在"}
-        
+
         pid = pid or asset.project_id
         if not await self._project_for_user_id(db, pid, user_id, "asset:update"):
             return {"message": "项目不存在或无权访问"}
-        
+
         token = f"verisure-{uuid_mod.uuid4().hex[:16]}"
         asset.verification_token = token
         asset.verification_status = VerificationStatus.PENDING
         await db.flush()
-        
+
         return {
             "message": f"请在 DNS TXT 记录中添加: {token}",
             "asset_id": asset.id,
             "verification_token": token,
             "verification_method": "dns_txt",
         }
-    
+
     async def _ping_asset(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """Ping 资产检测可达性"""
         from app.mcp.gateway_client import MCPGatewayClient
-        
+
         target = parameters.get("target")
         if not target:
             return {"message": "请指定目标地址"}
-        
+
         client = MCPGatewayClient()
         result = await client.call("ping_host", {
             "target": target,
             "count": parameters.get("count", 3),
         })
-        
+
         data = result.get("data", {})
         reachable = data.get("reachable", False)
-        
+
         if reachable:
             latency = data.get("avg_latency_ms")
             latency_str = f"，平均延迟 {latency:.1f}ms" if latency else ""
@@ -1856,24 +1856,24 @@ class ExecutionEngine:
                 "reachable": False,
                 "packet_loss": data.get("packet_loss", 100),
             }
-    
+
     async def _create_remediation_ticket(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """创建整改工单"""
         from app.models.remediation import RemediationTicket, RemediationStatus
         from app.models.finding import Finding
         from sqlalchemy import select
-        
+
         finding_id = parameters.get("finding_id")
         if not finding_id:
             return {"message": "请指定发现 ID"}
-        
+
         result = await db.execute(select(Finding).where(Finding.id == finding_id))
         finding = result.scalar_one_or_none()
         if not finding:
             return {"message": "发现不存在"}
-        
+
         pid = parameters.get("project_id", project_id) or finding.project_id
-        
+
         ticket = RemediationTicket(
             finding_id=finding_id,
             project_id=pid,
@@ -1886,25 +1886,25 @@ class ExecutionEngine:
         db.add(ticket)
         await db.flush()
         await db.refresh(ticket)
-        
+
         return {
             "message": f"整改工单已创建: {ticket.title}",
             "ticket_id": ticket.id,
             "status": ticket.status.value,
             "priority": ticket.priority,
         }
-    
+
     async def _list_remediation_tickets(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """列出整改工单"""
         from app.models.remediation import RemediationTicket
         from sqlalchemy import select
-        
+
         query = select(RemediationTicket)
-        
+
         pid = parameters.get("project_id", project_id)
         if pid:
             query = query.where(RemediationTicket.project_id == pid)
-        
+
         status_filter = parameters.get("status")
         if status_filter:
             from app.models.remediation import RemediationStatus
@@ -1912,10 +1912,10 @@ class ExecutionEngine:
                 query = query.where(RemediationTicket.status == RemediationStatus(status_filter))
             except ValueError:
                 pass
-        
+
         result = await db.execute(query.order_by(RemediationTicket.created_at.desc()).limit(50))
         tickets = result.scalars().all()
-        
+
         return {
             "message": f"共 {len(tickets)} 个整改工单",
             "tickets": [
@@ -1930,53 +1930,53 @@ class ExecutionEngine:
                 for t in tickets
             ],
         }
-    
+
     async def _update_ticket_status(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """更新工单状态"""
         from app.models.remediation import RemediationTicket, RemediationStatus
         from sqlalchemy import select
-        
+
         ticket_id = parameters.get("ticket_id")
         if not ticket_id:
             return {"message": "请指定工单 ID"}
-        
+
         result = await db.execute(select(RemediationTicket).where(RemediationTicket.id == ticket_id))
         ticket = result.scalar_one_or_none()
         if not ticket:
             return {"message": "工单不存在"}
-        
+
         new_status = parameters.get("status")
         if not new_status:
             return {"message": "请指定新状态"}
-        
+
         try:
             ticket.status = RemediationStatus(new_status)
         except ValueError:
             return {"message": f"无效状态: {new_status}"}
-        
+
         if parameters.get("resolution_notes"):
             ticket.resolution_notes = parameters["resolution_notes"]
-        
+
         if new_status in ("resolved", "verified", "closed"):
             from datetime import datetime
             ticket.resolved_at = datetime.utcnow()
-        
+
         await db.flush()
-        
+
         return {
             "message": f"工单 #{ticket.id} 状态已更新为 {new_status}",
             "ticket_id": ticket.id,
             "status": new_status,
         }
-    
+
     async def _generate_pdf_report(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """生成 PDF 报告"""
         from app.services.report_service import generate_report
-        
+
         pid = parameters.get("project_id", project_id)
         if not pid:
             return {"message": "请指定项目 ID"}
-        
+
         try:
             pdf_buffer = await generate_report(db, pid)
             return {
@@ -1987,15 +1987,15 @@ class ExecutionEngine:
             }
         except Exception as e:
             return {"message": f"报告生成失败: {str(e)}"}
-    
+
     async def _generate_json_report(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """生成 JSON 报告"""
         from app.services.report_service import generate_json_report
-        
+
         pid = parameters.get("project_id", project_id)
         if not pid:
             return {"message": "请指定项目 ID"}
-        
+
         try:
             report_data = await generate_json_report(db, pid)
             return {
@@ -2006,62 +2006,76 @@ class ExecutionEngine:
             }
         except Exception as e:
             return {"message": f"报告生成失败: {str(e)}"}
-    
+
     async def _create_scheduled_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """创建定时扫描"""
         from app.models.monitoring import ScheduledScan, ScheduleFrequency
         from app.models.asset import Asset
         from sqlalchemy import select
-        
+
         pid = parameters.get("project_id", project_id)
         if not pid:
             return {"message": "请指定项目 ID"}
-        
+        if not await self._project_for_user_id(db, pid, user_id, "scan:execute"):
+            return {"message": "项目不存在或无权创建监控任务"}
+
         asset_id = parameters.get("asset_id")
         if not asset_id:
             return {"message": "请指定资产 ID"}
-        
+
         result = await db.execute(select(Asset).where(Asset.id == asset_id, Asset.project_id == pid))
         if not result.scalar_one_or_none():
             return {"message": "资产不存在或不属于该项目"}
-        
+
         frequency_str = parameters.get("frequency", "weekly")
         try:
             frequency = ScheduleFrequency(frequency_str)
         except ValueError:
             frequency = ScheduleFrequency.WEEKLY
-        
+
         scan = ScheduledScan(
             project_id=pid,
             asset_id=asset_id,
             name=parameters.get("name", f"定时扫描 - {frequency_str}"),
             frequency=frequency,
             is_active=True,
+            next_run_at=datetime.utcnow(),
+            scan_parameters=parameters.get("scan_parameters"),
+            notify_on_change=parameters.get("notify_on_change", True),
         )
         db.add(scan)
         await db.flush()
         await db.refresh(scan)
-        
+
         return {
             "message": f"定时扫描已创建: {scan.name}",
             "scan_id": scan.id,
             "frequency": frequency.value,
         }
-    
+
     async def _list_scheduled_scans(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """列出定时扫描"""
         from app.models.monitoring import ScheduledScan
+        from app.models.project import Project
+        from app.models.organization import OrganizationMember
         from sqlalchemy import select
-        
-        query = select(ScheduledScan)
-        
+
         pid = parameters.get("project_id", project_id)
         if pid:
-            query = query.where(ScheduledScan.project_id == pid)
-        
+            if not await self._project_for_user_id(db, pid, user_id, "scan:read"):
+                return {"message": "项目不存在或无权访问", "scans": []}
+            query = select(ScheduledScan).where(ScheduledScan.project_id == pid)
+        else:
+            query = (
+                select(ScheduledScan)
+                .join(Project, Project.id == ScheduledScan.project_id)
+                .outerjoin(OrganizationMember, Project.organization_id == OrganizationMember.organization_id)
+                .where((Project.user_id == user_id) | (Project.owner_id == user_id) | (OrganizationMember.user_id == user_id))
+            )
+
         result = await db.execute(query.order_by(ScheduledScan.created_at.desc()).limit(50))
         scans = result.scalars().all()
-        
+
         return {
             "message": f"共 {len(scans)} 个定时扫描任务",
             "scans": [
@@ -2077,45 +2091,36 @@ class ExecutionEngine:
                 for s in scans
             ],
         }
-    
+
     async def _trigger_scheduled_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """触发定时扫描"""
         from app.models.monitoring import ScheduledScan
-        from app.models.asset import Asset
         from sqlalchemy import select
-        
+
         scan_id = parameters.get("scan_id")
         if not scan_id:
             return {"message": "请指定定时扫描 ID"}
-        
+
         result = await db.execute(select(ScheduledScan).where(ScheduledScan.id == scan_id))
         scan = result.scalar_one_or_none()
         if not scan:
             return {"message": "定时扫描任务不存在"}
-        
-        result = await db.execute(select(Asset).where(Asset.id == scan.asset_id))
-        asset = result.scalar_one_or_none()
-        
-        target = asset.value if asset else "unknown"
-        
-        from app.mcp.gateway_client import MCPGatewayClient
-        client = MCPGatewayClient()
-        scan_result = await client.call("nmap_scan", {
-            "target": target,
-            "port_range": "1-65535",
-        })
-        
-        from datetime import datetime
-        scan.last_run_at = datetime.utcnow()
-        await db.flush()
-        
+        if not await self._project_for_user_id(db, scan.project_id, user_id, "scan:execute"):
+            return {"message": "无权触发该定时扫描"}
+
+        from app.api.monitoring import run_scheduled_scan_now
+        from app.models.user import User
+        user_result = await db.execute(select(User).where(User.id == user_id))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            return {"message": "用户不存在"}
+        result = await run_scheduled_scan_now(scan.project_id, scan.id, db, user)
         return {
-            "message": f"定时扫描 '{scan.name}' 已触发，目标: {target}",
+            "message": f"定时扫描 '{scan.name}' 已触发",
             "scan_id": scan.id,
-            "target": target,
-            "result": scan_result.get("data", {}),
+            "result": result,
         }
-    
+
     async def _show_help(self) -> Dict:
         """显示帮助"""
         return {
@@ -2157,12 +2162,12 @@ class ExecutionEngine:
 
 有什么可以帮你的？"""
         }
-    
+
     def _generate_cache_key(self, parameters: Dict) -> str:
         """生成缓存键"""
         import hashlib
         parameters = redact_sensitive(parameters)
-        
+
         # 简单实现：将参数排序后拼接
         parts = []
         for key in sorted(parameters.keys()):
@@ -2171,12 +2176,12 @@ class ExecutionEngine:
             if len(value) > 100:
                 value = hashlib.md5(value.encode()).hexdigest()[:32]
             parts.append(f"{key}={value}")
-        
+
         cache_key = "&".join(parts)
         # 确保不超过 255 字符
         if len(cache_key) > 250:
             cache_key = hashlib.md5(cache_key.encode()).hexdigest()
-        
+
         return cache_key
 
 
