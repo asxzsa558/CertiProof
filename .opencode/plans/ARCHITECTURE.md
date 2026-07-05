@@ -1,7 +1,7 @@
 # VeriSure 技术架构文档
 
-> 本文档描述 VeriSure 的当前技术架构、核心模块设计、数据流和调用链。
-> 产品路线图和执行计划请参见 [ROADMAP.md](./ROADMAP.md)
+> 本文档描述 VeriSure 当前实现架构、核心模块职责、数据流、安全边界和已知限制。
+> 产品路线图和执行计划请参见 [ROADMAP.md](./ROADMAP.md)。
 
 ---
 
@@ -9,473 +9,346 @@
 
 ### 1.1 核心设计理念
 
-**对话式 AI 驱动**：用户用自然语言描述需求，LLM 自主理解意图、规划执行路径、调度能力、生成结果描述。
+VeriSure 是一个面向等保测评和安全验证的对话式 SaaS 系统。当前实现采用“对话入口 + AI 计划 + 任务编排 + MCP 工具执行 + 结构化结果展示”的架构。
 
-| 维度 | 传统方式 | VeriSure 方式 |
-|------|----------|-----------------|
-| 意图识别 | 硬编码意图分类器 | LLM 自主理解语义 |
-| 能力调度 | if-else 分支 | LLM 生成执行计划 |
-| 上下文理解 | 无状态或简单 session | 多层记忆系统 |
-| 能力扩展 | 改代码 + 改路由 | 注册即可用 |
-| 结果展示 | 模板渲染 | LLM 生成自然语言描述 |
+| 维度 | 当前实现 |
+|------|----------|
+| 意图识别 | LLM 生成 plan，快捷按钮和 `/` 命令走同一工具目录 |
+| 能力调度 | Capability Registry 注册能力，Execution Engine 执行能力 |
+| 上下文理解 | Conversation / Action / Cache / Project Memory / User Memory / Archive / Assessment State |
+| 工具执行 | MCP Gateway 路由到安全、Web、数据库、网络、Windows、SSH 等工具服务 |
+| 结果展示 | 后端归一化结果，前端按单资产/多资产聚合展示 |
+| 权限控制 | JWT + Organization RBAC + 项目级权限检查 |
+| 安全边界 | AI plan 参数 schema 校验、敏感参数脱敏、生产配置启动校验 |
 
-### 1.2 架构图
+### 1.2 当前架构图
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         用户层 (Frontend)                        │
-│  React + Ant Design + Zustand                                    │
-│  ChatPage + ChatWorkspace + AgentStatusCard                      │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      API 网关层 (FastAPI)                        │
-│  Auth API | Chat API | Scan API | Project API | Model API        │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    编排层 (Orchestrator)                          │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Orchestrator: 接收用户输入 → AI 决策 → 任务调度 → 结果汇总  │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                   │
-│              ┌───────────────┼───────────────┐                  │
-│              ▼               ▼               ▼                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │  AI Engine   │  │   Context    │  │  Execution   │          │
-│  │ (LLM 决策)   │  │   Manager    │  │   Engine     │          │
-│  │              │  │ (上下文管理)  │  │ (工具执行)    │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    MCP 工具层 (Tool Servers)                     │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  MCP Gateway: 路由分发 + 健康检查 + 异步任务管理            │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                   │
-│              ┌───────────────┼───────────────┐                  │
-│              ▼               ▼               ▼                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │Security Tools│  │  OCR Server  │  │  (可扩展)     │          │
-│  │ nmap/testssl │  │  截图分析     │  │              │          │
-│  │ nuclei/hydra │  │              │  │              │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      数据层 (Storage)                            │
-│  PostgreSQL | Redis | 文件存储 | 日志                            │
-└─────────────────────────────────────────────────────────────────┘
+```text
+Frontend (React + Ant Design)
+  Dashboard / Login / Project Chat Workspace / Result Cards
+          |
+          v
+FastAPI API Layer
+  Auth | Projects | Assets | Chat | Tasks | Dashboard | Assessments | RBAC
+          |
+          v
+Orchestrator Layer
+  Orchestrator
+    - 创建/恢复 ScanTask
+    - 进度广播和轮询恢复
+    - 单资产/多资产执行分流
+    - 结果提取、记忆写入、AI 结果描述
+  AI Engine
+    - LLM 决策
+    - plan JSON 解析
+    - capability 和参数 schema 校验
+  Context Manager
+    - 对话、操作、缓存、项目/用户记忆、归档、测评状态
+  Execution Engine
+    - 工具参数标准化
+    - 串行/并发执行
+    - 错误归一化
+    - 组合工具矩阵
+          |
+          v
+MCP Gateway / Tool Servers
+  security-tools: nmap/testssl/nuclei/hydra/ping
+  fast-scanner: masscan
+  web-tools: nikto/sqlmap/gobuster/ffuf
+  db-tools: Redis/MySQL/MongoDB/Memcached/Oracle
+  network-tools: SNMP walk/get/bruteforce
+  windows-tools: enum4linux/smb/crackmapexec
+  ssh-checker: baseline/password/ssh/audit/service/file/mac checks
+          |
+          v
+Storage
+  SQL database | file uploads | in-process task state | persisted scan_tasks
 ```
 
 ---
 
-## 二、核心模块详解
+## 二、核心模块
 
-### 2.1 Orchestrator（调度中枢）
+### 2.1 Orchestrator
 
 **文件**: `backend/app/orchestrator/orchestrator.py`
 
-**核心职责**：
-1. 接收用户输入
-2. 构建上下文 → AI 决策 → 生成分流
-3. 纯对话 → 直接返回（无 task_id）
-4. 有执行计划 → 异步执行 → 返回 task_id
-5. 异步任务完成后，AI 生成结果描述
+职责：
+- 接收 Chat API 传入的用户输入和项目上下文。
+- 调用 `ContextManager.build_context()` 构造上下文。
+- 调用 `AIEngine.decide()` 得到执行 plan。
+- 将 `项目资产` 占位符扩展成具体资产。
+- 对扫描类 plan 创建 `ScanTask` 持久化记录。
+- 通过 `ExecutionEngine` 串行或并发执行工具。
+- 维护进程内任务状态：running / paused / stopped / completed。
+- 将完成结果写入 `completed_tasks` 和 `scan_tasks.result_summary`。
+- 广播 WebSocket 进度，并支持前端轮询恢复。
+- 生成 AI 结果描述；安全工具结果优先使用结构化摘要，避免只有一句“完成”。
 
-**关键方法**：
-```python
-async def handle_user_input(user_input, project_id, user_id, db) -> dict:
-    # 1. 构建上下文
-    context = await context_manager.build_context()
-    
-    # 2. AI 决策
-    plan_result = await ai_engine.decide(user_input, context, db)
-    
-    # 3. 分流判断
-    if all_non_async(plan):
-        return {"message": response}  # 无 task_id
-    
-    # 4. 异步执行
-    task_id = uuid4()
-    asyncio.create_task(_execute_plan_async(task_id, plan, ...))
-    return {"message": response, "task_id": task_id}
-```
+当前注意点：
+- `active_tasks`、暂停/恢复控制仍是进程内能力；重启后只能恢复 ScanTask 的最终结果或基础状态，不能恢复正在运行的 asyncio task。
+- 多实例部署时需要引入独立 worker 和队列，否则任务控制会不一致。
 
-**任务控制**：
-- `pause_task()`: 暂停任务，广播状态变化
-- `resume_task()`: 恢复任务
-- `stop_task()`: 停止任务，取消 asyncio Task
-
-### 2.2 AI Engine（AI 决策引擎）
+### 2.2 AI Engine
 
 **文件**: `backend/app/services/ai_engine.py`
 
-**设计原则**：不预定义意图类型，LLM 自主理解语义。
+职责：
+- 构造稳定 system prompt + 动态上下文 prompt。
+- 注入 Capability Registry 能力列表。
+- 注入项目资产、归档摘要、测评状态、当前阶段工具建议。
+- 调用 LLM，要求返回 JSON plan。
+- 解析直接 JSON、markdown JSON block、普通 code block 中的 JSON。
+- 检测提示词泄露倾向并降级为安全回复。
+- 按 Capability Registry 做 plan 校验：
+  - 未注册 capability 丢弃。
+  - 未知参数丢弃。
+  - 基础类型不匹配时尝试安全转换。
+  - 缺必填参数时降级为 chat 提示补参。
+- AI plan 日志会脱敏，不记录完整原始 LLM 内容。
 
-**决策流程**：
-```
-用户输入 → 构建 System Prompt → LLM 返回 JSON → 解析 plan + response
-```
+设计取舍：
+- 仍以 LLM 自主理解为主，但 `/` 命令和快捷按钮在 prompt 中有强规则。
+- 参数 schema 校验是轻量实现，没有引入 jsonschema 依赖。
 
-**Prompt 结构**：
-```
-你是 VeriSure 等保合规智能助手。
-
-## 能力列表
-{capabilities}  # 动态注入所有能力描述
-
-## 上下文
-- 项目: {current_project}
-- 资产: {project_assets}
-- 归档上下文: {archive_context}  # 如果有归档
-
-## 规则
-1. 回顾性词语 → 用 view_* 查缓存
-2. 缺少必填参数 → 用 chat 询问
-3. 扫描目标 → 优先使用项目资产
-4. 纯对话 → 用 chat 直接回复
-
-## 输出格式
-返回 JSON：{"plan": [...], "response": "..."}
-```
-
-**超时控制**：
-- AI 决策：60 秒超时
-- 结果描述：45 秒超时
-
-### 2.3 Context Manager（上下文管理器）
+### 2.3 Context Manager
 
 **文件**: `backend/app/services/context_manager.py`
 
-**5 层记忆系统**（参考 Claude Code）：
+当前上下文来源：
+- `conversation_history`: 最近对话历史。
+- `recent_messages`: 供 LLM 使用的最近 N 轮对话。
+- `action_history`: 操作历史。
+- `result_cache`: 结果缓存，默认最多 100 条，过期清理。
+- `project_memory`: 项目长期记忆。
+- `user_memory`: 用户偏好记忆。
+- `project_archives_summary`: 项目归档摘要。
+- `assessment_state`: 当前项目等保测评流程状态。
+- `project_assets`: 当前项目资产。
 
-| 层级 | 名称 | 说明 | 限制 |
-|------|------|------|------|
-| Layer 1 | 对话历史 | 最近 20 条对话 | 50000 tokens |
-| Layer 2 | 操作历史 | 最近 50 条操作 | 按项目隔离 |
-| Layer 3 | 结果缓存 | 最多 100 条缓存 | 1 小时过期 |
-| Layer 4 | 项目记忆 | 每个项目最多 20 条 | 长期记忆 |
-| Layer 5 | 用户记忆 | 每个用户最多 20 条 | 偏好记忆 |
+当前限制：
+- `MAX_CONVERSATION_TOKENS=200000`，`HARD_TOKEN_LIMIT=500000`，比早期设计更大。上下文能力更强，但 LLM 成本和隐私面也更大。
+- ContextManager 本身假设调用方已做项目授权；API 入口必须先通过 `get_project_for_user()` 或 RBAC 检查。
+- ActionHistory 参数已脱敏，避免 SSH 密码/API token 等进入历史。
 
-**上下文压缩**：
-- 当对话历史超过 50000 tokens 时触发
-- LLM 生成摘要，存入 ProjectMemory
-- 超时：30 秒
-
-**归档功能**：
-- 归档当前对话，生成结构化交接摘要
-- 异步生成摘要，避免阻塞主流程
-- 新线程可接续归档上下文
-
-### 2.4 Capability Registry（能力注册表）
+### 2.4 Capability Registry
 
 **文件**: `backend/app/services/capability_registry.py`
 
-**设计原则**：新增能力只需注册，不需要修改任何代码。
+职责：
+- 注册所有可被 AI 调用的能力。
+- 为 prompt 提供精简能力说明。
+- 为 AI plan 校验提供参数 schema。
 
-**当前注册的能力（29 个）**：
+当前能力覆盖：
+- 端口扫描：`scan_ports`、`masscan_scan`、`fping_scan`
+- TLS/漏洞/弱口令：`scan_ssl`、`scan_vulnerabilities`、`scan_weak_passwords`
+- Web：`nikto_scan`、`sqlmap_scan`、`gobuster_scan`、`ffuf_scan`、`web_discovery_scan`
+- 数据库：`redis_check`、`mysql_check`、`mongodb_check`、`memcached_check`、`oracle_check`、`database_security_scan`
+- 网络设备：`snmp_walk`、`snmp_get`、`snmp_bruteforce`、`network_device_scan`
+- Windows/AD/SMB：`enum4linux_scan`、`crackmapexec_scan`、`smb_enum`、`windows_security_scan`
+- 白盒/基线：`baseline_check`、`linux_baseline`、`ssh_config_check`、`password_policy_check`、`audit_config_check`、`service_port_check`、`file_permission_check`、`mac_check`
+- 组合：`full_compliance_scan`、`tech_assessment`
+- 查询、项目、资产、整改、报告、监控、系统能力。
 
-| 类别 | 能力 | 说明 |
-|------|------|------|
-| **扫描类** (5) | scan_ports | 端口扫描（nmap） |
-| | scan_ssl | SSL/TLS 检测（testssl） |
-| | scan_vulnerabilities | 漏洞扫描（nuclei） |
-| | scan_weak_passwords | 弱口令检测（hydra） |
-| | full_compliance_scan | 全量合规扫描 |
-| **查询类** (6) | view_scan_results | 查看扫描结果 |
-| | view_open_ports | 查看开放端口 |
-| | view_vulnerabilities | 查看漏洞 |
-| | view_findings | 查看合规发现 |
-| | view_compliance_score | 查看合规评分 |
-| | view_scan_history | 查看扫描历史 |
-| **项目类** (4) | create/list/update/delete_project | 项目管理 |
-| **资产类** (3) | add/list/verify_asset | 资产管理 |
-| **整改类** (3) | create/list/update_remediation | 整改管理 |
-| **报告类** (2) | generate_pdf/json_report | 报告生成 |
-| **监控类** (3) | create/list/trigger_scheduled_scan | 定时扫描 |
-| **系统类** (2) | help/chat | 帮助和对话 |
+扩展方式：
+1. 在 `CapabilityRegistry` 注册能力和参数 schema。
+2. 在 `ExecutionEngine._execute_capability()` 添加执行分支。
+3. 如需外部工具，添加 MCP server 工具并更新 Gateway 路由。
+4. 同步 `scripts/tool_matrix_check.py` 覆盖前后端工具矩阵。
 
-**扩展方式**：
-1. 注册能力：`self.register(Capability(...))`
-2. 实现执行逻辑：`ExecutionEngine._execute_capability()` 添加分支
-3. 完成：LLM 自动发现新能力
-
-### 2.5 Execution Engine（执行引擎）
+### 2.5 Execution Engine
 
 **文件**: `backend/app/services/execution_engine.py`
 
-**执行流程**：
-```
-plan = [{"capability": "scan_ports", "parameters": {"target": "127.0.0.1"}}]
-    │
-    ▼
-for step in plan:
-    1. 标准化目标地址（localhost → host.docker.internal）
-    2. 检查暂停/停止状态
-    3. 回调 progress_callback（状态: running）
-    4. 调用 _execute_capability()
-    5. 记录操作历史
-    6. 缓存结果
-    7. 回调 progress_callback（状态: completed/failed）
-```
+职责：
+- 标准化 capability alias，例如 `nmap_scan -> scan_ports`。
+- 标准化 SSH 参数和 URL 参数。
+- 执行单步能力或多资产并发能力。
+- 多资产执行时，每个资产使用独立 DB session，避免共享 session 并发冲突。
+- 对 MCP Gateway 错误做结构化归一化：timeout、filtered、auth failed、missing parameter、tool dependency missing 等。
+- 组合工具返回子任务矩阵，允许单个子工具失败/跳过，整体仍可返回完整结果。
+- 日志、ActionHistory、ScanTask parameters 和 cache key 对敏感字段脱敏。
 
-**并发执行**（多资产场景）：
-- `execute_plan_concurrent()`: 支持并发执行，最大并发数 5
-- 重试机制：最多 3 次，指数退避（1s, 2s, 4s）
-- 暂停/停止支持：每个 step 前检查状态
+并发策略：
+- 早期文档写最大并发 5；当前 Orchestrator 会按资产数量动态调整，大致为 5/8/10/12。
+- 并发越大越容易触发目标限速或误判，生产建议做组织级/项目级并发配置。
 
-**结果判断逻辑**：
-```python
-if len(open_ports) > 0:
-    display_status = "success"  # 有开放端口 → 主机可达
-else:
-    display_status = "warning"  # 无开放端口 → 可能不可达
-```
+### 2.6 MCP Gateway 和 Tool Servers
 
-### 2.6 MCP Gateway（MCP 网关）
+**Gateway 文件**: `mcp-servers/gateway/server.py`
 
-**文件**: `mcp-servers/gateway/server.py`
+职责：
+- 接收统一 `/call` 或异步调用。
+- 将工具名路由到对应 tool server。
+- 提供 `/health`、`/tools`、依赖诊断基础能力。
 
-**核心功能**：
-1. 路由分发：根据 tool_name 路由到对应的 MCP Server
-2. 健康检查：检查各 MCP Server 状态
-3. 异步任务管理：支持长时任务异步执行
+当前 Tool Servers：
+- `security-tools`: nmap、testssl、nuclei、hydra、ping。
+- `fast-scanner`: masscan。
+- `web-tools`: nikto、sqlmap、gobuster、ffuf。
+- `db-tools`: Redis、MySQL、MongoDB、Memcached、Oracle。
+- `network-tools`: SNMP walk/get/bruteforce。
+- `windows-tools`: enum4linux、smbclient、crackmapexec/SMB SID。
+- `ssh-checker`: 自动识别 OS 的基线/SSH/审计/服务/文件权限/MAC 检查。
 
-**路由表**：
-```python
-TOOL_ROUTES = {
-    "nmap_scan": "http://security-tools:8010",
-    "testssl_scan": "http://security-tools:8010",
-    "nuclei_scan": "http://security-tools:8010",
-    "hydra_bruteforce": "http://security-tools:8010",
-    "ping_host": "http://security-tools:8010",
-    "ocr_analyze": "http://ocr-server:8005",
-}
-```
+### 2.7 前端结果渲染
 
-### 2.7 MCP Tool Servers
+核心文件：
+- `frontend/src/components/ChatWorkspace.jsx`: 聊天工作区、命令入口、任务轮询、资产/凭据交互。
+- `frontend/src/components/toolCatalog.js`: 快捷按钮、斜杠菜单、结果展示共用工具目录。
+- `frontend/src/components/ResultMessageRenderer.jsx`: 结果分发入口。
+- `frontend/src/components/SingleResultMessage.jsx`: 单资产结果展示。
+- `frontend/src/components/MultiAssetResultMessage.jsx`: 多资产审计矩阵。
+- `frontend/src/components/AssetResultSections.jsx`: 单个资产摘要和详情。
+- `frontend/src/components/ToolResultCard.jsx`: 统一结果卡片、复制结果。
 
-#### Security Tools（统一安全工具服务）
-
-**文件**: `mcp-servers/security-tools/server.py`
-
-**包含工具**：
-- `nmap_scan`: 端口扫描（--min-rate 10000，全端口 ~26 秒）
-- `testssl_scan`: SSL/TLS 检测
-- `nuclei_scan`: 漏洞扫描
-- `hydra_bruteforce`: 弱口令检测（⚠️ 当前未真正实现）
-- `ping_host`: Ping 检测
-
-#### OCR Server（截图分析服务）
-
-**文件**: `mcp-servers/ocr-server/server.py`
-
-**包含工具**：
-- `ocr_analyze`: 截图 OCR 分析
-- `screenshot_analyze`: 截图分析（别名）
+原则：
+- 快捷按钮、`/` 命令、聊天指令共用同一工具目录，避免入口漂移。
+- 多资产结果聚合为一个结果卡，按资产/IP 展示状态、风险、工具、摘要和折叠详情。
+- filtered/no-response 不能当作开放端口；错误详情要区分 timeout、connection refused、filtered、auth failed 等。
 
 ---
 
-## 三、数据流与调用链
+## 三、请求和任务数据流
 
-### 3.1 完整请求流程
+### 3.1 Chat 请求流程
 
-```
-1. 用户输入: "扫描 127.0.0.1 端口"
-   │
-   ▼
-2. ChatWorkspace → POST /api/v1/chat/
-   │
-   ▼
-3. chat.py → orchestrator.handle_user_input()
-   │
-   ▼
-4. ContextManager.build_context()
-   │  查询 5 层记忆 → 构建完整上下文
-   │
-   ▼
-5. AIEngine.decide(user_input, context)
-   │  构建 prompt → 调用 LLM → 解析 JSON
-   │  返回: plan=[{scan_ports, target=127.0.0.1}]
-   │        response="好的，我来扫描端口"
-   │
-   ▼
-6. 分流判断: scan_ports 不是纯对话 → 创建 task_id
-   │
-   ▼
-7. asyncio.create_task(_execute_plan_async)
-   │  立即返回: {message: "好的...", task_id: "xxx"}
-   │
-   ▼
-8. 前端收到响应:
-   │  显示 AI 回复气泡
-   │  显示进度卡片
-   │  开始轮询 GET /chat/result/{task_id}
-   │
-   ▼
-9. 异步任务执行:
-   │  新数据库会话 (AsyncSessionLocal)
-   │  ExecutionEngine.execute_plan()
-   │    → 标准化目标: 127.0.0.1 → host.docker.internal
-   │    → 回调: "正在执行: 端口扫描..."
-   │    → MCPGatewayClient → security-tools 容器
-   │    → nmap -sS -T5 --min-rate 10000 -p 1-65535 host.docker.internal
-   │    → 回调: "已完成: 端口扫描"
-   │    → 记录操作历史 + 缓存结果
-   │
-   ▼
-10. AI 生成结果描述:
-    │  提取执行结果（13 个开放端口）
-    │  构建 prompt → LLM 生成自然语言描述
-    │  "本机共开放 13 个端口，具体包括..."
-    │
-    ▼
-11. 记录到 completed_tasks + 清理 task_progress
-    │
-    ▼
-12. 前端轮询到 status=completed:
-    │  标记消息 taskCompleted=true → 进度卡片消失
-    │  添加结果消息（AI 描述 + 统计卡片 + 端口表格）
-    │
-    ▼
-13. 用户看到完整结果
+```text
+用户输入或快捷按钮
+  -> POST /api/v1/chat/
+  -> 项目/RBAC 权限校验
+  -> 多资产 JSON 快捷路径 或 Orchestrator.handle_user_input()
+  -> ContextManager.build_context()
+  -> AIEngine.decide()
+  -> AI plan schema 校验
+  -> Orchestrator.start_async_plan()
+  -> 创建 ScanTask + 进程内 task metadata
+  -> 前端立即显示运行态
+  -> ExecutionEngine 执行工具
+  -> WebSocket 广播 + 轮询 /chat/result/{task_id}
+  -> 提取 scan_results + AI/结构化结果描述
+  -> 持久化 ScanTask.result_summary
+  -> 前端恢复/展示结果卡
 ```
 
-### 3.2 容器间通信
+### 3.2 多资产扫描流程
 
+```text
+前端选择多个资产
+  -> 构造 type=multi_asset_scan JSON
+  -> Chat API 去重资产并注入资产级 SSH 凭据
+  -> 每个资产生成一个 plan step
+  -> Orchestrator 判断为多资产扫描
+  -> ExecutionEngine.execute_plan_concurrent()
+  -> 每个资产独立执行、独立 DB session
+  -> 汇总 asset_results
+  -> MultiAssetResultMessage 聚合展示
 ```
-frontend (3000)
-    │  HTTP/WebSocket
-    ▼
-backend (8000)
-    │  HTTP
-    ▼
-mcp-gateway (9000)
-    │  HTTP
-    ▼
-security-tools (8010)
-    │  执行 nmap/testssl/nuclei/hydra
-    ▼
-目标主机 (host.docker.internal)
-```
+
+### 3.3 任务恢复
+
+- 运行中进度优先来自 Orchestrator 进程内 `task_progress`。
+- 完成/失败结果优先来自 `completed_tasks`。
+- 刷新或进程状态丢失时，从 `scan_tasks.orchestrator_task_id` 恢复基础状态和最终结果。
+- 重启后不能恢复正在执行的 asyncio task，这是当前生产化限制。
 
 ---
 
-## 四、数据库设计
+## 四、权限与安全边界
 
-### 4.1 核心数据模型
+### 4.1 认证与 RBAC
 
-| 模型 | 表名 | 说明 |
-|------|------|------|
-| User | users | 用户信息 |
-| Project | projects | 项目信息 |
-| Asset | assets | 资产信息 |
-| ScanTask | scan_tasks | 扫描任务 |
-| Finding | findings | 合规发现 |
-| Evidence | evidences | 证据 |
+- 认证：JWT access token + refresh token。
+- 组织权限：`backend/app/core/rbac.py`。
+- 项目访问：`get_project_for_user()` 根据组织成员权限或项目所有者校验。
+- 典型权限：`project:read`、`scan:execute`、`scan:read`、`scan:cancel`、`assessment:manage`、`role:manage`。
+
+### 4.2 敏感信息处理
+
+- 公共脱敏工具：`backend/app/core/redaction.py`。
+- 脱敏字段包含 password、token、api_key、key_file、secret、credential 等。
+- 当前脱敏位置：
+  - ExecutionEngine 日志。
+  - AI plan 日志。
+  - ActionHistory parameters。
+  - ScanTask parameters。
+  - ResultCache cache key。
+- 注意：扫描发现的弱口令结果属于审计证据，当前不会自动脱敏；报告导出或共享时应按场景决定是否隐藏。
+
+### 4.3 AI 安全边界
+
+- Prompt 中要求不得泄露系统提示词。
+- `_check_prompt_leak()` 对疑似泄露做降级回复。
+- `_validate_plan()` 只允许注册能力进入执行层。
+- `_validate_step()` 按 CapabilityRegistry schema 做参数白名单和基础类型校验。
+- 原始 LLM 响应不再截断写入日志，只记录长度。
+
+### 4.4 生产启动校验
+
+`settings.validate_runtime_security()` 在 FastAPI lifespan 启动阶段执行：
+- `APP_ENV=production/prod` 时，`DEBUG=True` 会拒绝启动。
+- 默认 `SECRET_KEY` 会拒绝启动。
+- `CORS_ORIGINS` 包含 `*` 会拒绝启动。
+
+---
+
+## 五、数据库模型
+
+核心模型：
+
+| 模型 | 表 | 用途 |
+|------|----|------|
+| User | users | 用户、角色、登录信息 |
+| Organization / Member / Role | organizations 等 | 多租户与 RBAC |
+| Project | projects | 测评项目 |
+| Asset | assets | 项目资产 |
+| ScanTask | scan_tasks | 扫描任务、进度、结果摘要 |
+| Finding | findings | 风险/合规发现 |
+| Evidence | evidences | 证据材料 |
 | RemediationTicket | remediation_tickets | 整改工单 |
+| Assessment / Phase / Task | assessments 等 | 等保测评流程 |
 | ConversationHistory | conversation_history | 对话历史 |
 | ActionHistory | action_history | 操作历史 |
 | ResultCache | result_cache | 结果缓存 |
-| ProjectMemory | project_memory | 项目记忆 |
-| UserMemory | user_memory | 用户记忆 |
-| ConversationArchive | conversation_archives | 对话归档 |
-| ConversationThread | conversation_threads | 对话线程 |
+| ProjectMemory / UserMemory | project_memory / user_memory | 长期记忆 |
+| ConversationArchive / Thread | conversation_archives / conversation_threads | 归档和线程 |
 
-### 4.2 数据库迁移
-
-使用 Alembic 管理数据库迁移：
-- 迁移文件：`backend/migrations/versions/`
-- 当前版本：003（head）
+当前项目仍使用自动补表/轻量迁移逻辑，文档中早期 Alembic “003 head” 描述不再准确。生产化应恢复正式迁移管理。
 
 ---
 
-## 五、前端架构
+## 六、验证脚本
 
-### 5.1 技术栈
-
-- React 18
-- Ant Design 5
-- Zustand（状态管理）
-- Vite 5（构建工具）
-
-### 5.2 核心组件
-
-| 组件 | 文件 | 说明 |
-|------|------|------|
-| ChatPage | `pages/ChatPage.jsx` | 主页面，包含侧边栏和聊天区 |
-| ChatWorkspace | `components/ChatWorkspace.jsx` | 聊天工作区，核心交互组件 |
-| AgentStatusCard | `components/AgentStatusCard.jsx` | Agent 执行状态卡片 |
-| ResultsPage | `pages/ResultsPage.jsx` | 扫描结果列表页 |
-
-### 5.3 状态管理
-
-```javascript
-// Zustand store
-const useStore = create((set) => ({
-  user: null,
-  token: null,
-  currentProjectId: null,
-  // ...
-}))
-```
+| 脚本/命令 | 用途 |
+|-----------|------|
+| `python3 scripts/tool_matrix_check.py` | 校验前端工具目录、后端显示名、Orchestrator 扫描能力矩阵 |
+| `python3 scripts/security_boundary_check.py` | 校验脱敏、AI plan guard、生产配置 guard 没被改丢 |
+| `python3 -m compileall -q backend/app mcp-servers scripts` | Python 编译检查 |
+| `npm run build` in `frontend/` | 前端生产构建 |
 
 ---
 
-## 六、性能优化
+## 七、当前限制与后续方向
 
-### 6.1 nmap 扫描优化
-
-| 优化项 | 之前 | 之后 |
-|--------|------|------|
-| 扫描方式 | TCP connect (-sT) | SYN scan (-sS) |
-| 速度等级 | 默认 | -T5（最激进） |
-| 发包速率 | 默认 | --min-rate 10000 |
-| 全端口扫描耗时 | ~38 分钟 | **~26 秒** |
-
-### 6.2 LLM 超时控制
-
-| 调用点 | 超时时间 | Fallback |
-|--------|----------|----------|
-| AI 决策 | 60s | 降级为 chat |
-| 结果描述 | 45s | 硬编码描述 |
-| 归档摘要 | 30s | 简单截取 |
-| 对话压缩 | 30s | 简单截断 |
-
-### 6.3 缓存策略
-
-| 缓存类型 | 过期时间 | 用途 |
-|----------|----------|------|
-| 扫描结果 | 1 小时 | 避免重复扫描 |
-| 对话历史 | 不过期 | 上下文连续性 |
-| 操作历史 | 不过期 | 审计追溯 |
-
----
-
-## 七、已知问题与限制
-
-### 7.1 当前问题
-
-| 问题 | 说明 | 影响 |
-|------|------|------|
-| hydra 未真正实现 | 硬编码返回空结果 | 弱口令检测无效 |
-| 只有黑盒检测 | 没有白盒配置核查 | 等保覆盖率低 |
-| 容器网络限制 | Docker 内无法准确判断主机可达性 | 误判主机状态 |
-| 访谈管理缺失 | 没有访谈记录功能 | 无法满足等保三维验证 |
-
-### 7.2 技术限制
+### 7.1 当前限制
 
 | 限制 | 说明 |
 |------|------|
-| 容器部署 | 无法直接访问宿主机网络，需要 host.docker.internal |
-| LLM 依赖 | 依赖外部 LLM 服务（MiniMax） |
-| 并发限制 | 多资产扫描最大并发 5 |
+| 任务控制仍部分进程内 | pause/resume/active asyncio task 不支持多实例/重启恢复 |
+| ContextManager 依赖调用方授权 | 构建上下文前必须由 API 层完成项目/RBAC 校验 |
+| AI 参数校验是轻量实现 | 只做白名单和基础类型；尚未做 IP/URL/端口范围和 SSRF 策略校验 |
+| 工具执行受容器网络影响 | Docker 内扫描云主机时会遇到安全组、防火墙、出口 IP 限制 |
+| ChatWorkspace 仍偏大 | 结果渲染已拆，但命令解析、任务轮询、诊断展示还在主组件 |
+| 数据库迁移体系不完整 | 当前仍有运行时补表逻辑，生产应统一迁移工具 |
+
+### 7.2 建议优先级
+
+1. 将 Orchestrator 任务执行迁移为 DB-backed worker/queue。
+2. 拆分 ChatWorkspace 的命令解析、任务轮询、诊断渲染。
+3. 为 AI plan 增加 IP/URL/端口范围安全策略。
+4. 增加组织/项目级扫描并发、目标范围和高危工具确认策略。
+5. 完善 `.env.example`、生产 Docker profile、迁移管理和日志策略。
 
 ---
 
@@ -483,29 +356,22 @@ const useStore = create((set) => ({
 
 ### 8.1 添加新能力
 
-1. 注册能力：`capability_registry.py` 添加 `Capability`
-2. 实现执行：`execution_engine.py` 添加 `_execute_xxx` 方法
-3. 添加 MCP 工具（如需要）：`security-tools/server.py`
-4. 更新 Gateway 路由（如需要）：`gateway/server.py`
+1. 在 `capability_registry.py` 注册 `Capability` 和参数 schema。
+2. 在 `execution_engine.py` 实现执行分支。
+3. 如果依赖外部工具，在对应 MCP server 暴露 `/execute` 工具。
+4. 更新 MCP Gateway 路由。
+5. 更新前端 `toolCatalog.js`。
+6. 运行 `scripts/tool_matrix_check.py`。
 
-### 8.2 添加新 MCP Server
+### 8.2 添加新工具结果展示
 
-1. 创建 `mcp-servers/xxx-server/` 目录
-2. 实现 `server.py`，暴露 `/execute` 端点
-3. 编写 `Dockerfile`
-4. 更新 `docker-compose.yml`
-5. 更新 Gateway 路由
-
----
-
-## 九、参考文档
-
-- [产品路线图](./ROADMAP.md)
-- [等保测评 skill 参考](https://github.com/openocta/openocta_skills)
-- [GB/T 22239-2019 等保基本要求](https://www.tc260.org.cn/front/bzzqyj.html)
+1. 后端统一返回 `{status, target, capability, data, metadata, error}` 或可归一化结构。
+2. Orchestrator `_extract_scan_results_from_execution()` 提取摘要字段。
+3. 前端在 `AssetResultSections.jsx` 增加摘要和详情展示。
+4. 确认复制文本不是 `[object Object]`。
 
 ---
 
-**文档版本**: v1.0  
-**最后更新**: 2026-06-24  
+**文档版本**: v2.0
+**最后更新**: 2026-07-05
 **维护者**: VeriSure Team
