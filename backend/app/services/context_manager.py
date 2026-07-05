@@ -839,6 +839,8 @@ class ContextManager:
         """
         # 获取当前线程（如果有）的对话历史
         query = select(ConversationHistory).where(ConversationHistory.user_id == self.user_id)
+        if self.project_id is not None:
+            query = query.where(ConversationHistory.project_id == self.project_id)
         if self.thread_id:
             query = query.where(ConversationHistory.thread_id == self.thread_id)
         query = query.order_by(ConversationHistory.created_at.asc())
@@ -1022,23 +1024,28 @@ class ContextManager:
     
     async def delete_archive(self, archive_id: int) -> bool:
         """删除归档"""
+        query = delete(ConversationArchive).where(
+            ConversationArchive.id == archive_id,
+            ConversationArchive.user_id == self.user_id
+        )
+        if self.project_id is not None:
+            query = query.where(ConversationArchive.project_id == self.project_id)
         result = await self.db.execute(
-            delete(ConversationArchive)
-            .where(
-                ConversationArchive.id == archive_id,
-                ConversationArchive.user_id == self.user_id
-            )
+            query
         )
         await self.db.commit()
         return result.rowcount > 0
     
     async def get_archive(self, archive_id: int) -> Optional[Dict]:
         """获取单个归档的完整信息"""
+        query = select(ConversationArchive).where(
+            ConversationArchive.id == archive_id,
+            ConversationArchive.user_id == self.user_id
+        )
+        if self.project_id is not None:
+            query = query.where(ConversationArchive.project_id == self.project_id)
         result = await self.db.execute(
-            select(ConversationArchive).where(
-                ConversationArchive.id == archive_id,
-                ConversationArchive.user_id == self.user_id
-            )
+            query
         )
         a = result.scalar_one_or_none()
         if not a:

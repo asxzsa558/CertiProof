@@ -549,13 +549,14 @@ async def list_archives(
 @router.get("/archives/{archive_id}")
 async def get_archive(
     archive_id: int,
+    project_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """获取归档详情"""
     from app.services.context_manager import ContextManager
     
-    context_manager = ContextManager(db, current_user.id)
+    context_manager = ContextManager(db, current_user.id, project_id=project_id)
     archive = await context_manager.get_archive(archive_id)
     
     if not archive:
@@ -567,13 +568,14 @@ async def get_archive(
 @router.delete("/archives/{archive_id}")
 async def delete_archive(
     archive_id: int,
+    project_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """删除对话归档"""
     from app.services.context_manager import ContextManager
     
-    context_manager = ContextManager(db, current_user.id)
+    context_manager = ContextManager(db, current_user.id, project_id=project_id)
     success = await context_manager.delete_archive(archive_id)
     
     if not success:

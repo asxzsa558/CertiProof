@@ -100,6 +100,8 @@ def assert_source_guards() -> None:
     context_manager = (ROOT / "backend/app/services/context_manager.py").read_text(encoding="utf-8")
     assert "ConversationHistory.project_id == self.project_id" in context_manager
     assert "ConversationThread.project_id == self.project_id" in context_manager
+    assert context_manager.count("ConversationHistory.project_id == self.project_id") >= 2
+    assert "ConversationArchive.project_id == self.project_id" in context_manager
 
 
 def main() -> int:

@@ -118,9 +118,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
   // Load history on mount (key prop ensures remount on project change)
   useEffect(() => {
     const loadHistory = async () => {
-      console.log('[ChatWorkspace] loadHistory called, projectId:', projectId)
       if (!projectId) {
-        console.log('[ChatWorkspace] No projectId, showing welcome message')
         setMessages([
           {
             role: 'assistant',
@@ -131,9 +129,7 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       }
       
       try {
-        console.log('[ChatWorkspace] Fetching history for project_id:', projectId)
         const response = await api.get('/chat/history', { params: { project_id: projectId } })
-        console.log('[ChatWorkspace] History response:', response.data.length, 'messages')
         const history = response.data
         
         let nextMessages
@@ -1163,11 +1159,12 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       // 4. 轮询直到摘要生成完成
       const maxAttempts = 15  // 最多等待 30 秒
       let attempts = 0
+      const params = projectId ? { project_id: projectId } : {}
       
       const pollInterval = setInterval(async () => {
         attempts++
         try {
-          const archiveRes = await api.get(`/chat/archives/${archiveId}`)
+          const archiveRes = await api.get(`/chat/archives/${archiveId}`, { params })
           if (archiveRes.data.summary) {
             clearInterval(pollInterval)
             message.success({ content: '归档完成', key: 'archive' })
@@ -1203,7 +1200,8 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
 
   const handleDeleteArchive = async (archiveId) => {
     try {
-      await api.delete(`/chat/archives/${archiveId}`)
+      const params = projectId ? { project_id: projectId } : {}
+      await api.delete(`/chat/archives/${archiveId}`, { params })
       message.success('归档已删除')
       await loadArchives()
     } catch (error) {
