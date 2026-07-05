@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from typing import List, Optional
 from datetime import datetime, timedelta
 from app.core.database import get_db
@@ -426,6 +426,20 @@ async def run_due_scheduled_scans(db: AsyncSession, limit: int = 5) -> int:
     )
     count = 0
     for scheduled_scan in result.scalars().all():
+        due_at = scheduled_scan.next_run_at
+        claim_result = await db.execute(
+            update(ScheduledScan)
+            .where(
+                ScheduledScan.id == scheduled_scan.id,
+                ScheduledScan.is_active == True,
+                ScheduledScan.next_run_at == due_at,
+            )
+            .values(next_run_at=now + timedelta(minutes=10))
+        )
+        if claim_result.rowcount != 1:
+            continue
+        await db.commit()
+        await db.refresh(scheduled_scan)
         try:
             await execute_scheduled_scan(db, scheduled_scan)
             count += 1

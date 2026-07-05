@@ -93,6 +93,7 @@ def assert_source_guards() -> None:
     assert "created_findings = []" in monitoring_api
     assert "changes_detected=changes[\"changes_detected\"]" in monitoring_api
     assert "async def run_due_scheduled_scans" in monitoring_api
+    assert "update(ScheduledScan)" in monitoring_api
 
 
 def main() -> int:
