@@ -59,6 +59,20 @@ CAPABILITY_DISPLAY_NAMES = {
 }
 
 
+async def _can_read_task_payload(task: Dict[str, Any], db: AsyncSession, current_user: User) -> bool:
+    if task.get("user_id") == current_user.id:
+        return True
+    project_id = task.get("project_id")
+    if not project_id:
+        return False
+    from app.api.projects import get_project_for_user
+    try:
+        await get_project_for_user(db, int(project_id), current_user.id, "scan:read")
+        return True
+    except HTTPException:
+        return False
+
+
 # --- Models ---
 
 class ChatMessage(BaseModel):
@@ -260,9 +274,9 @@ async def get_task_result(
     
     前端轮询此接口，直到 status 变为 completed 或 failed
     """
-    # 检查是否已完成（仅返回当前用户的任务）
+    # 检查是否已完成
     for task in orchestrator.completed_tasks:
-        if task["task_id"] == task_id and task.get("user_id") == current_user.id:
+        if task["task_id"] == task_id and await _can_read_task_payload(task, db, current_user):
             return TaskResultResponse(
                 task_id=task_id,
                 status="completed",
@@ -273,7 +287,7 @@ async def get_task_result(
     
     # 检查是否有进度信息
     progress = orchestrator.task_progress.get(task_id)
-    if progress and progress.get("user_id") == current_user.id:
+    if progress and await _can_read_task_payload(progress, db, current_user):
         return TaskResultResponse(
             task_id=task_id,
             status="running",
@@ -327,9 +341,9 @@ async def get_agent_status(
     current_user: User = Depends(get_current_user),
 ):
     """获取特定任务的状态（兼容旧接口）"""
-    # 检查 completed_tasks（仅返回当前用户的任务）
+    # 检查 completed_tasks
     for task in orchestrator.completed_tasks:
-        if task["task_id"] == task_id and task.get("user_id") == current_user.id:
+        if task["task_id"] == task_id and await _can_read_task_payload(task, db, current_user):
             return task
 
     result = await db.execute(select(ScanTask).where(ScanTask.orchestrator_task_id == task_id))

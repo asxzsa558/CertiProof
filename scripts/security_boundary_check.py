@@ -52,6 +52,11 @@ def assert_source_guards() -> None:
     assert "Project.user_id == user_id" not in scan_service
     assert "ScanTask.project_id == project_id" in scan_service
 
+    chat_api = (ROOT / "backend/app/api/chat.py").read_text(encoding="utf-8")
+    assert "async def _can_read_task_payload" in chat_api
+    assert "await _can_read_task_payload(task, db, current_user)" in chat_api
+    assert "await _can_read_task_payload(progress, db, current_user)" in chat_api
+
 
 def main() -> int:
     assert_redaction()
