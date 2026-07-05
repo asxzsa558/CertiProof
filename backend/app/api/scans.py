@@ -78,7 +78,6 @@ async def list_scans(
         scans = await scan_service.list_scan_tasks(
             db=db,
             project_id=project_id,
-            user_id=current_user.id,
             limit=limit,
             offset=offset,
         )
@@ -99,7 +98,7 @@ async def get_scan(
 ):
     """Get scan task details."""
     await get_project_for_user(db, project_id, current_user.id, "scan:read")
-    scan_task = await scan_service.get_scan_task(db, scan_id, current_user.id)
+    scan_task = await scan_service.get_scan_task(db, project_id, scan_id)
     if not scan_task:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -118,7 +117,7 @@ async def get_scan_findings(
     """Get findings for a scan task."""
     await get_project_for_user(db, project_id, current_user.id, "scan:read")
     try:
-        findings = await scan_service.get_scan_findings(db, scan_id, current_user.id)
+        findings = await scan_service.get_scan_findings(db, project_id, scan_id)
         return findings
     except ValueError as e:
         raise HTTPException(
@@ -137,7 +136,7 @@ async def cancel_scan(
     """Cancel a pending or running scan task."""
     await get_project_for_user(db, project_id, current_user.id, "scan:cancel")
     try:
-        scan_task = await scan_service.cancel_scan_task(db, scan_id, current_user.id)
+        scan_task = await scan_service.cancel_scan_task(db, project_id, scan_id)
         return scan_task
     except ValueError as e:
         raise HTTPException(

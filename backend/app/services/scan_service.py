@@ -45,13 +45,13 @@ class ScanService:
         Returns:
             Created ScanTask
         """
-        # Verify project exists and belongs to user
+        # API routes enforce project RBAC before calling this service.
         result = await db.execute(
-            select(Project).where(Project.id == project_id, Project.user_id == user_id)
+            select(Project).where(Project.id == project_id)
         )
         project = result.scalar_one_or_none()
         if not project:
-            raise ValueError("Project not found or access denied")
+            raise ValueError("Project not found")
         
         # Verify asset if specified
         if asset_id:
@@ -138,14 +138,13 @@ class ScanService:
     async def get_scan_task(
         self,
         db: AsyncSession,
+        project_id: int,
         scan_task_id: int,
-        user_id: int,
     ) -> Optional[ScanTask]:
-        """Get scan task with permission check."""
+        """Get scan task scoped to a project."""
         result = await db.execute(
             select(ScanTask)
-            .join(Project)
-            .where(ScanTask.id == scan_task_id, Project.user_id == user_id)
+            .where(ScanTask.id == scan_task_id, ScanTask.project_id == project_id)
         )
         return result.scalar_one_or_none()
 
@@ -153,18 +152,10 @@ class ScanService:
         self,
         db: AsyncSession,
         project_id: int,
-        user_id: int,
         limit: int = 50,
         offset: int = 0,
     ) -> List[ScanTask]:
         """List scan tasks for a project."""
-        # Verify project access
-        result = await db.execute(
-            select(Project).where(Project.id == project_id, Project.user_id == user_id)
-        )
-        if not result.scalar_one_or_none():
-            raise ValueError("Project not found or access denied")
-        
         result = await db.execute(
             select(ScanTask)
             .where(ScanTask.project_id == project_id)
@@ -177,17 +168,16 @@ class ScanService:
     async def get_scan_findings(
         self,
         db: AsyncSession,
+        project_id: int,
         scan_task_id: int,
-        user_id: int,
     ) -> List[Finding]:
         """Get findings for a scan task."""
         result = await db.execute(
             select(Finding)
             .join(ScanTask)
-            .join(Project)
             .where(
                 Finding.scan_task_id == scan_task_id,
-                Project.user_id == user_id,
+                ScanTask.project_id == project_id,
             )
         )
         return list(result.scalars().all())
@@ -195,13 +185,13 @@ class ScanService:
     async def cancel_scan_task(
         self,
         db: AsyncSession,
+        project_id: int,
         scan_task_id: int,
-        user_id: int,
     ) -> ScanTask:
         """Cancel a pending or running scan task."""
-        scan_task = await self.get_scan_task(db, scan_task_id, user_id)
+        scan_task = await self.get_scan_task(db, project_id, scan_task_id)
         if not scan_task:
-            raise ValueError("Scan task not found or access denied")
+            raise ValueError("Scan task not found")
         
         if scan_task.status not in (ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING):
             raise ValueError("Can only cancel pending or running tasks")

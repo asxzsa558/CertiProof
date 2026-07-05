@@ -48,6 +48,10 @@ def assert_source_guards() -> None:
     assert "SECRET_KEY must be set to a strong non-default value" in config
     assert "DEBUG must be false in production" in config
 
+    scan_service = (ROOT / "backend/app/services/scan_service.py").read_text(encoding="utf-8")
+    assert "Project.user_id == user_id" not in scan_service
+    assert "ScanTask.project_id == project_id" in scan_service
+
 
 def main() -> int:
     assert_redaction()
