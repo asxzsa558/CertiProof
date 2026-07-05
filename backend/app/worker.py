@@ -34,6 +34,10 @@ async def run_worker() -> None:
         try:
             async with AsyncSessionLocal() as db:
                 await orchestrator.recover_incomplete_scan_tasks(db)
+                from app.api.monitoring import run_due_scheduled_scans
+                ran = await run_due_scheduled_scans(db, limit=settings.MONITORING_WORKER_BATCH_SIZE)
+                if ran:
+                    logger.info("Executed %d scheduled monitoring scan(s)", ran)
         except Exception:
             logger.exception("Task worker poll failed")
         await asyncio.sleep(max(1, settings.TASK_WORKER_POLL_SECONDS))

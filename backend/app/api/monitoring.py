@@ -262,12 +262,17 @@ async def run_scheduled_scan_now(
     scheduled_scan = result.scalar_one_or_none()
     if not scheduled_scan:
         raise HTTPException(status_code=404, detail="Scheduled scan not found")
-    
+
+    return await execute_scheduled_scan(db, scheduled_scan)
+
+
+async def execute_scheduled_scan(db: AsyncSession, scheduled_scan: ScheduledScan) -> dict:
+    """Execute one scheduled scan and record findings/history."""
     # Import here to avoid circular imports
     from app.mcp.gateway_client import mcp_gateway_client
     from app.models.scan_task import ScanTask, ScanTaskType, ScanTaskStatus, TriggeredBy
     from app.models.finding import Finding, Judgment, JudgmentEngine, FindingStatus
-    
+
     # Get asset
     result = await db.execute(
         select(Asset).where(Asset.id == scheduled_scan.asset_id)
@@ -278,7 +283,7 @@ async def run_scheduled_scan_now(
     
     # Create scan task
     scan_task = ScanTask(
-        project_id=project_id,
+        project_id=scheduled_scan.project_id,
         asset_id=scheduled_scan.asset_id,
         task_type=ScanTaskType.SCHEDULED,
         status=ScanTaskStatus.RUNNING,
@@ -312,7 +317,7 @@ async def run_scheduled_scan_now(
             if port["port"] in {22, 80, 443}:
                 continue
             finding = Finding(
-                project_id=project_id,
+                project_id=scheduled_scan.project_id,
                 scan_task_id=scan_task.id,
                 clause_id="8.1.3.1",
                 clause_name="边界访问控制",
@@ -330,7 +335,7 @@ async def run_scheduled_scan_now(
         ssl_issues = ssl_payload.get("issues") or ssl_payload.get("findings") or []
         if ssl_issues:
             finding = Finding(
-                project_id=project_id,
+                project_id=scheduled_scan.project_id,
                 scan_task_id=scan_task.id,
                 clause_id="8.1.4.5",
                 clause_name="通信传输安全",
@@ -404,3 +409,29 @@ async def run_scheduled_scan_now(
         scan_task.error_message = str(e)
         await db.commit()
         raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
+
+
+async def run_due_scheduled_scans(db: AsyncSession, limit: int = 5) -> int:
+    """Run active scheduled scans whose next_run_at is due."""
+    now = datetime.utcnow()
+    result = await db.execute(
+        select(ScheduledScan)
+        .where(
+            ScheduledScan.is_active == True,
+            ScheduledScan.next_run_at.is_not(None),
+            ScheduledScan.next_run_at <= now,
+        )
+        .order_by(ScheduledScan.next_run_at.asc())
+        .limit(limit)
+    )
+    count = 0
+    for scheduled_scan in result.scalars().all():
+        try:
+            await execute_scheduled_scan(db, scheduled_scan)
+            count += 1
+        except Exception:
+            scheduled_scan.last_run_at = datetime.utcnow()
+            scheduled_scan.next_run_at = calculate_next_run(scheduled_scan.frequency)
+            await db.commit()
+            raise
+    return count

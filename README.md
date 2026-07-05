@@ -146,6 +146,7 @@ OPENAI_API_KEY=your-openai-api-key
 TASK_EXECUTION_MODE=worker  # docker-compose 默认：API 入库，worker 执行
 TASK_WORKER_POLL_SECONDS=3
 TASK_LEASE_MINUTES=120
+MONITORING_WORKER_BATCH_SIZE=5
 ```
 
 ## 版本

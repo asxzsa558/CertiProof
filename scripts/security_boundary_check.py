@@ -53,6 +53,7 @@ def assert_source_guards() -> None:
     assert 'TASK_EXECUTION_MODE: str = "inline"' in config
     assert "TASK_WORKER_POLL_SECONDS" in config
     assert "TASK_LEASE_MINUTES" in config
+    assert "MONITORING_WORKER_BATCH_SIZE" in config
 
     scan_service = (ROOT / "backend/app/services/scan_service.py").read_text(encoding="utf-8")
     assert "Project.user_id == user_id" not in scan_service
@@ -81,6 +82,7 @@ def assert_source_guards() -> None:
     worker = (ROOT / "backend/app/worker.py").read_text(encoding="utf-8")
     assert "async def run_worker" in worker
     assert "await orchestrator.recover_incomplete_scan_tasks(db)" in worker
+    assert "run_due_scheduled_scans" in worker
     tasks_api = (ROOT / "backend/app/api/tasks.py").read_text(encoding="utf-8")
     assert 'lease_owner = "paused"' in tasks_api
     assert 'lease_owner = "resumed"' in tasks_api
@@ -90,6 +92,7 @@ def assert_source_guards() -> None:
     assert "TODO: Implement change detection" not in monitoring_api
     assert "created_findings = []" in monitoring_api
     assert "changes_detected=changes[\"changes_detected\"]" in monitoring_api
+    assert "async def run_due_scheduled_scans" in monitoring_api
 
 
 def main() -> int:

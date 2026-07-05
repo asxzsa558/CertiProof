@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     TASK_EXECUTION_MODE: str = "inline"  # inline: API 进程执行；worker: 只入库，由 app.worker 执行
     TASK_WORKER_POLL_SECONDS: int = 3
     TASK_LEASE_MINUTES: int = 120
+    MONITORING_WORKER_BATCH_SIZE: int = 5
 
     # 文件上传
     UPLOAD_DIR: str = "/app/uploads"  # 文件上传目录

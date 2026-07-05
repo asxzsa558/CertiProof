@@ -91,6 +91,7 @@ services:
       TASK_EXECUTION_MODE: worker
       TASK_WORKER_POLL_SECONDS: ${TASK_WORKER_POLL_SECONDS:-3}
       TASK_LEASE_MINUTES: ${TASK_LEASE_MINUTES:-120}
+      MONITORING_WORKER_BATCH_SIZE: ${MONITORING_WORKER_BATCH_SIZE:-5}
     volumes:
       - ./reference:/reference
     depends_on:
