@@ -85,6 +85,11 @@ def assert_source_guards() -> None:
     assert 'lease_owner = "paused"' in tasks_api
     assert 'lease_owner = "resumed"' in tasks_api
     assert "ScanTaskStatus.PENDING" in tasks_api
+    monitoring_api = (ROOT / "backend/app/api/monitoring.py").read_text(encoding="utf-8")
+    assert "TODO: Generate findings from scan results" not in monitoring_api
+    assert "TODO: Implement change detection" not in monitoring_api
+    assert "created_findings = []" in monitoring_api
+    assert "changes_detected=changes[\"changes_detected\"]" in monitoring_api
 
 
 def main() -> int:

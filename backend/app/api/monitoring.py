@@ -33,6 +33,69 @@ def calculate_next_run(frequency: ScheduleFrequency, from_time: datetime = None)
     return from_time + timedelta(days=1)
 
 
+def _result_payload(result: dict | None) -> dict:
+    if not isinstance(result, dict):
+        return {}
+    data = result.get("data")
+    if isinstance(data, dict):
+        return data
+    payload = result.get("result")
+    if isinstance(payload, dict):
+        return payload
+    return result
+
+
+def _port_number(port: dict) -> Optional[int]:
+    value = port.get("port") if isinstance(port, dict) else port
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_open_ports(scan_result: dict | None) -> list[dict]:
+    payload = _result_payload(scan_result)
+    ports = payload.get("open_ports") or []
+    normalized = []
+    for item in ports:
+        if isinstance(item, dict):
+            port = _port_number(item)
+            if port is not None:
+                normalized.append({
+                    "port": port,
+                    "service": item.get("service") or item.get("name") or "",
+                    "protocol": item.get("protocol") or "tcp",
+                })
+        else:
+            port = _port_number(item)
+            if port is not None:
+                normalized.append({"port": port, "service": "", "protocol": "tcp"})
+    return sorted(normalized, key=lambda p: (p["protocol"], p["port"]))
+
+
+def _detect_port_changes(current_ports: list[dict], previous_summary: dict | None) -> dict:
+    previous_ports = previous_summary.get("open_ports", []) if isinstance(previous_summary, dict) else []
+    previous_set = {(_port_number(p), p.get("protocol", "tcp")) for p in previous_ports if isinstance(p, dict)}
+    current_set = {(p["port"], p.get("protocol", "tcp")) for p in current_ports}
+    added = sorted(current_set - previous_set)
+    removed = sorted(previous_set - current_set)
+    return {
+        "changes_detected": bool(added or removed),
+        "added_ports": [{"port": port, "protocol": protocol} for port, protocol in added if port is not None],
+        "removed_ports": [{"port": port, "protocol": protocol} for port, protocol in removed if port is not None],
+    }
+
+
+def _severity_for_port(port: int):
+    from app.models.finding import Severity
+
+    if port in {21, 23, 135, 139, 445, 1433, 1521, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017}:
+        return Severity.HIGH
+    if port in {22, 25, 53, 110, 143, 389, 8080, 8443}:
+        return Severity.MEDIUM
+    return Severity.INFO
+
+
 @router.post("/scheduled", response_model=ScheduledScanResponse, status_code=status.HTTP_201_CREATED)
 async def create_scheduled_scan(
     project_id: int,
@@ -124,6 +187,8 @@ async def update_scheduled_scan(
         scheduled_scan.notify_on_change = scan_data.notify_on_change
     if scan_data.notify_emails is not None:
         scheduled_scan.notify_emails = scan_data.notify_emails
+    if scan_data.scan_parameters is not None:
+        scheduled_scan.scan_parameters = scan_data.scan_parameters
     
     await db.commit()
     await db.refresh(scheduled_scan)
@@ -201,14 +266,15 @@ async def run_scheduled_scan_now(
     # Import here to avoid circular imports
     from app.mcp.gateway_client import mcp_gateway_client
     from app.models.scan_task import ScanTask, ScanTaskType, ScanTaskStatus, TriggeredBy
-    from app.models.finding import Finding, Severity, Judgment, JudgmentEngine, FindingStatus
-    from app.models.evidence import Evidence, EvidenceType
+    from app.models.finding import Finding, Judgment, JudgmentEngine, FindingStatus
     
     # Get asset
     result = await db.execute(
         select(Asset).where(Asset.id == scheduled_scan.asset_id)
     )
     asset = result.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
     
     # Create scan task
     scan_task = ScanTask(
@@ -223,48 +289,100 @@ async def run_scheduled_scan_now(
     await db.flush()
     
     try:
+        scan_parameters = scheduled_scan.scan_parameters or {}
+        port_range = scan_parameters.get("port_range", "high-risk")
+
         # Execute scan via MCP Gateway
         scan_result = await mcp_gateway_client.call(
             tool_name="nmap_scan",
-            params={"target": asset.value, "port_range": "1-1000"}
+            params={"target": asset.value, "port_range": port_range}
         )
         
         # Check SSL if HTTPS is open
         ssl_result = None
-        open_ports = scan_result.get("data", {}).get("open_ports", [])
+        open_ports = _normalize_open_ports(scan_result)
         if any(p["port"] == 443 for p in open_ports):
             ssl_result = await mcp_gateway_client.call(
                 tool_name="testssl_scan",
                 params={"target": asset.value, "port": 443}
             )
         
-        # TODO: Generate findings from scan results
-        # For now, create a placeholder finding
-        finding = Finding(
-            project_id=project_id,
-            scan_task_id=scan_task.id,
-            clause_id="8.1.3.1",
-            clause_name="边界访问控制",
-            severity=Severity.INFO,
-            judgment=Judgment.PASS,
-            judgment_engine=JudgmentEngine.RULE,
-            description="扫描完成",
-            status=FindingStatus.OPEN,
-        )
-        db.add(finding)
+        created_findings = []
+        for port in open_ports:
+            if port["port"] in {22, 80, 443}:
+                continue
+            finding = Finding(
+                project_id=project_id,
+                scan_task_id=scan_task.id,
+                clause_id="8.1.3.1",
+                clause_name="边界访问控制",
+                severity=_severity_for_port(port["port"]),
+                judgment=Judgment.FAIL,
+                judgment_engine=JudgmentEngine.RULE,
+                description=f"监控发现 {asset.value} 开放 {port['protocol']}/{port['port']} {port.get('service') or ''}".strip(),
+                remediation_suggestion="确认该端口是否为业务必要端口；若非必要，应通过防火墙/安全组限制访问。",
+                status=FindingStatus.OPEN,
+            )
+            db.add(finding)
+            created_findings.append(finding)
+
+        ssl_payload = _result_payload(ssl_result)
+        ssl_issues = ssl_payload.get("issues") or ssl_payload.get("findings") or []
+        if ssl_issues:
+            finding = Finding(
+                project_id=project_id,
+                scan_task_id=scan_task.id,
+                clause_id="8.1.4.5",
+                clause_name="通信传输安全",
+                severity=_severity_for_port(443),
+                judgment=Judgment.FAIL,
+                judgment_engine=JudgmentEngine.RULE,
+                description=f"监控发现 {asset.value} 存在 SSL/TLS 风险 {len(ssl_issues)} 项",
+                remediation_suggestion="检查证书有效期、协议版本和弱加密套件配置。",
+                status=FindingStatus.OPEN,
+            )
+            db.add(finding)
+            created_findings.append(finding)
         await db.flush()
         
         # Update scan task
         scan_task.status = ScanTaskStatus.COMPLETED
         scan_task.completed_at = datetime.utcnow()
         scan_task.findings_count = len(created_findings)
+        scan_task.result_summary = {
+            "target": asset.value,
+            "open_ports": open_ports,
+            "ssl_issues": ssl_issues,
+            "findings_count": len(created_findings),
+        }
         
+        previous_result = await db.execute(
+            select(ScanHistory)
+            .where(ScanHistory.scheduled_scan_id == scheduled_scan.id)
+            .order_by(ScanHistory.executed_at.desc())
+            .limit(1)
+        )
+        previous_history = previous_result.scalar_one_or_none()
+        changes = (
+            _detect_port_changes(open_ports, previous_history.changes_summary)
+            if previous_history else
+            {"changes_detected": False, "added_ports": [], "removed_ports": []}
+        )
+        changes_summary = {
+            "target": asset.value,
+            "port_range": port_range,
+            "open_ports": open_ports,
+            "open_port_count": len(open_ports),
+            "ssl_issue_count": len(ssl_issues),
+            **changes,
+        }
+
         # Record scan history
         history = ScanHistory(
             scheduled_scan_id=scheduled_scan.id,
             scan_task_id=scan_task.id,
-            changes_detected=False,  # TODO: Implement change detection
-            changes_summary={"open_ports": len(scan_result["open_ports"])},
+            changes_detected=changes["changes_detected"],
+            changes_summary=changes_summary,
         )
         db.add(history)
         
