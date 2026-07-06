@@ -205,6 +205,20 @@ function Dashboard() {
     { key: 'next', title: '二期', body: '连续监控、OCR 证据识别、日志审计分析', action: '查看报告中心', path: '/reports' },
   ]
   const selectedEvidenceStage = evidenceStages.find((stage) => stage.key === evidenceView) || evidenceStages[0]
+  const evidenceQueue = [
+    ...dashboard.project_matrix.map((project) => ({
+      key: `project-${project.project_id}`,
+      title: project.name,
+      meta: `${project.stage} / 证据 ${project.evidence_rate}%`,
+      status: project.evidence_rate >= 80 ? 'complete' : project.evidence_rate > 0 ? 'active' : 'pending',
+    })),
+    ...dashboard.risk_queue.map((risk, index) => ({
+      key: `risk-${risk.control}-${index}`,
+      title: risk.asset,
+      meta: `${risk.control} / ${risk.action}`,
+      status: risk.status === 'resolved' ? 'complete' : 'blocked',
+    })),
+  ]
 
   const userMenu = {
     items: [
@@ -446,6 +460,16 @@ function Dashboard() {
                   <Button size="small" type="text" onClick={() => navigate(selectedEvidenceStage.path)}>
                     {selectedEvidenceStage.action}
                   </Button>
+                </div>
+                <div className="evidence-queue scroll-region">
+                  {evidenceQueue.length ? evidenceQueue.map((item) => (
+                    <div key={item.key} className={`evidence-queue-row ${item.status}`}>
+                      <strong>{item.title}</strong>
+                      <span>{item.meta}</span>
+                    </div>
+                  )) : (
+                    <div className="empty-panel">暂无证据或整改队列。执行测评后会按项目和控制点汇总。</div>
+                  )}
                 </div>
               </div>
             </Panel>

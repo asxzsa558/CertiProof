@@ -70,7 +70,6 @@ const deriveFindingStats = (scanResults) => {
 const extractHistorySignals = (history) => {
   const resultMessages = history
     .filter(item => item.context_snapshot?.scan_results)
-    .slice(-8)
     .reverse()
 
   const latestResults = resultMessages[0]?.context_snapshot?.scan_results || {}
@@ -111,8 +110,8 @@ const extractHistorySignals = (history) => {
 
   return {
     latestStats,
-    riskStream: riskStream.slice(0, 6),
-    evidenceQueue: evidenceQueue.slice(0, 8),
+    riskStream,
+    evidenceQueue,
     resultCount: resultMessages.length,
   }
 }
@@ -285,7 +284,7 @@ function ProjectCommandCenter({ project, assets, modelId, onOpenResults }) {
               <Button size="small" type="text" onClick={onOpenResults}>结果库</Button>
             </div>
             <div className="evidence-list">
-              {workspace.evidenceQueue.length ? workspace.evidenceQueue.slice(0, 5).map((item, index) => (
+              {workspace.evidenceQueue.length ? workspace.evidenceQueue.map((item, index) => (
                 <div key={`${item.target}-${item.capability}-${index}`} className="evidence-row">
                   <span className={`evidence-status ${item.status}`}>
                     {item.status === 'success' ? <CheckCircleFilled /> : item.status === 'warning' ? <ClockCircleOutlined /> : <ExclamationCircleFilled />}

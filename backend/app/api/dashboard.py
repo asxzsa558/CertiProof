@@ -480,7 +480,7 @@ async def get_organization_command_dashboard(
         .join(Project, Project.id == Finding.project_id)
         .where(Finding.project_id.in_(project_ids))
         .order_by(Finding.updated_at.desc())
-        .limit(8)
+        .limit(80)
     )
     risk_queue = [
         {

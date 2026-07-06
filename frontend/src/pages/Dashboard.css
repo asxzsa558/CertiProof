@@ -592,8 +592,49 @@
 .evidence-stage-list {
   display: grid;
   gap: 8px;
-  max-height: 154px;
+  max-height: 142px;
   overflow: auto;
+}
+
+.evidence-queue {
+  display: grid;
+  gap: 8px;
+  max-height: 182px;
+}
+
+.evidence-queue-row {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border-left: 2px solid rgba(0, 212, 255, 0.52);
+  background: rgba(2, 6, 23, 0.32);
+}
+
+.evidence-queue-row.blocked {
+  border-left-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.07);
+}
+
+.evidence-queue-row.complete {
+  border-left-color: #10b981;
+}
+
+.evidence-queue-row strong,
+.evidence-queue-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-queue-row strong {
+  color: #f8fafc;
+  font-size: 12px;
+}
+
+.evidence-queue-row span {
+  color: rgba(148, 163, 184, 0.78);
+  font-size: 11px;
 }
 
 .rbac-head {
@@ -610,7 +651,7 @@
 .risk-table {
   display: grid;
   gap: 8px;
-  max-height: 312px;
+  max-height: 420px;
 }
 
 .risk-filter-bar {

@@ -1,241 +1,216 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Table, Button } from 'antd';
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Avatar, Button, Dropdown, Select, Tag, message } from 'antd'
 import {
   ArrowLeftOutlined,
-  FileTextOutlined,
+  BarChartOutlined,
+  CheckCircleFilled,
   DownloadOutlined,
-  CheckCircleOutlined,
-  ClockCircleOutlined,
-} from '@ant-design/icons';
-import api from '../services/api';
-import '../styles/theme.css';
+  FileTextOutlined,
+  LogoutOutlined,
+  ProjectOutlined,
+  SafetyCertificateOutlined,
+  UserOutlined,
+} from '@ant-design/icons'
+import api from '../services/api'
+import { useAuthStore } from '../store/authStore'
+import VeriSureLogo from '../components/VeriSureLogo'
+import './Dashboard.css'
+import './ReportsPage.css'
 
-const ReportsPage = () => {
-  const navigate = useNavigate();
-  const [reports, setReports] = useState([]);
-  const [loading, setLoading] = useState(true);
+const statusText = (progress) => {
+  if (progress >= 100) return '可归档'
+  if (progress >= 60) return '待复核'
+  return '生成中'
+}
+
+function ReportsPage() {
+  const navigate = useNavigate()
+  const user = useAuthStore((state) => state.user)
+  const logout = useAuthStore((state) => state.logout)
+  const organizations = useAuthStore((state) => state.organizations)
+  const currentOrgId = useAuthStore((state) => state.currentOrgId)
+  const setCurrentOrg = useAuthStore((state) => state.setCurrentOrg)
+  const [dashboard, setDashboard] = useState({ summary: {}, project_matrix: [], risk_queue: [] })
+  const [loading, setLoading] = useState(false)
+  const [downloadingId, setDownloadingId] = useState(null)
+
+  const currentOrg = useMemo(
+    () => organizations.find((org) => org.id === currentOrgId) || organizations[0],
+    [organizations, currentOrgId]
+  )
 
   useEffect(() => {
     const fetchReports = async () => {
+      if (!currentOrg?.id) return
+      setLoading(true)
       try {
-        // Get all projects
-        const projectsResponse = await api.get('/dashboard/argus/overview');
-        const projects = projectsResponse.data?.recent_projects || [];
-        
-        // Create report entries for each project
-        const reportData = projects.map(project => ({
-          id: project.id,
-          projectName: project.name,
-          level: project.compliance_level || 'N/A',
-          score: project.compliance_score,
-          status: project.compliance_score !== null && project.compliance_score !== undefined ? 'completed' : 'pending',
-          updatedAt: project.updated_at,
-        }));
-        
-        setReports(reportData);
+        const response = await api.get('/dashboard/organization-command', { params: { organization_id: currentOrg.id } })
+        setDashboard({
+          summary: response.data?.summary || {},
+          project_matrix: response.data?.project_matrix || [],
+          risk_queue: response.data?.risk_queue || [],
+        })
       } catch (error) {
-        console.error('Failed to fetch reports:', error);
+        console.error('Failed to fetch reports:', error)
+        message.error('报告中心加载失败')
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
-    };
-    fetchReports();
-  }, []);
+    }
+
+    fetchReports()
+  }, [currentOrg?.id])
+
+  const reports = dashboard.project_matrix.map((project) => ({
+    ...project,
+    status: statusText(project.progress || 0),
+    blocked: (project.risk_count || 0) > 0,
+  }))
 
   const handleDownloadReport = async (projectId) => {
+    setDownloadingId(projectId)
     try {
-      const response = await api.get(`/projects/${projectId}/report`, {
-        responseType: 'blob',
-      });
-      
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `compliance-report-${projectId}.pdf`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      const response = await api.get(`/projects/${projectId}/report`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', `certiproof-report-${projectId}.pdf`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
     } catch (error) {
-      console.error('Failed to download report:', error);
+      console.error('Failed to download report:', error)
+      message.error('报告下载失败')
+    } finally {
+      setDownloadingId(null)
     }
-  };
+  }
 
-  const getStatusIcon = (status) => {
-    if (status === 'completed') {
-      return <CheckCircleOutlined style={{ color: 'var(--risk-low)' }} />;
-    }
-    return <ClockCircleOutlined style={{ color: 'var(--accent-amber)' }} />;
-  };
-
-  const columns = [
-    {
-      title: '报告 ID',
-      dataIndex: 'id',
-      key: 'id',
-      width: 100,
-      render: (id) => (
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)', fontSize: '11px' }}>
-          R-{String(id).padStart(3, '0')}
-        </span>
-      ),
-    },
-    {
-      title: '项目名称',
-      dataIndex: 'projectName',
-      key: 'project',
-      render: (name, record) => (
-        <span 
-          style={{ color: 'var(--text-primary)', fontSize: '12px', fontWeight: 500, cursor: 'pointer' }}
-          onClick={() => navigate(`/projects/${record.id}`)}
-        >
-          {name}
-        </span>
-      ),
-    },
-    {
-      title: '等级',
-      dataIndex: 'level',
-      key: 'level',
-      width: 100,
-      render: (level) => (
-        <span className={`risk-badge ${level === '三级' ? 'high' : level === '二级' ? 'medium' : 'low'}`}>
-          {level}
-        </span>
-      ),
-    },
-    {
-      title: '分数',
-      dataIndex: 'score',
-      key: 'score',
-      width: 100,
-      render: (score) => (
-        <span style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '14px',
-          fontWeight: 700,
-          color: score >= 75 ? 'var(--risk-low)' : score >= 50 ? 'var(--risk-medium)' : 'var(--risk-high)',
-        }}>
-          {score !== null && score !== undefined ? Math.round(score) : '-'}
-        </span>
-      ),
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 120,
-      render: (status) => {
-        const statusMap = {
-          completed: { label: '已完成', color: 'var(--risk-low)' },
-          pending: { label: '待处理', color: 'var(--accent-amber)' },
-        };
-        const s = statusMap[status] || statusMap.pending;
-        return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {getStatusIcon(status)}
-            <span style={{ color: s.color, fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px' }}>
-              {s.label}
-            </span>
-          </div>
-        );
+  const userMenu = {
+    items: [
+      {
+        key: 'logout',
+        icon: <LogoutOutlined />,
+        label: '退出登录',
+        onClick: logout,
       },
-    },
-    {
-      title: '更新时间',
-      dataIndex: 'updatedAt',
-      key: 'updated',
-      width: 150,
-      render: (date) => (
-        <span style={{ color: 'var(--text-muted)', fontSize: '10px', fontFamily: 'var(--font-mono)' }}>
-          {date ? new Date(date).toLocaleDateString('zh-CN') : '-'}
-        </span>
-      ),
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: 120,
-      render: (_, record) => (
-        <Button
-          size="small"
-          icon={<DownloadOutlined />}
-          onClick={() => handleDownloadReport(record.id)}
-          disabled={record.status !== 'completed'}
-          style={{
-            background: record.status === 'completed' ? 'rgba(0, 212, 255, 0.1)' : 'transparent',
-            border: '1px solid var(--border-subtle)',
-            color: record.status === 'completed' ? 'var(--accent-cyan)' : 'var(--text-muted)',
-            fontSize: '10px',
-            fontWeight: 600,
-            letterSpacing: '0.5px',
-          }}
-        >
-          PDF
-        </Button>
-      ),
-    },
-  ];
+    ],
+  }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'transparent', padding: '16px', position: 'relative' }}>
-      {/* Background Logo Watermark */}
-      <div className="bg-watermark" />
-      
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', position: 'relative', zIndex: 1 }}>
-        <button
-          onClick={() => navigate('/')}
-          style={{
-            background: 'none',
-            border: '1px solid var(--border-subtle)',
-            color: 'var(--text-secondary)',
-            padding: '6px 10px',
-            borderRadius: '2px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '10px',
-            fontWeight: 600,
-            letterSpacing: '1px',
-          }}
-        >
-          <ArrowLeftOutlined /> 返回
+    <div className="org-dashboard reports-dashboard">
+      <aside className="org-sidebar">
+        <button type="button" className="reports-back" onClick={() => navigate('/dashboard')}>
+          <ArrowLeftOutlined /> 返回 Dashboard
         </button>
-        <div>
-          <h1 style={{
-            color: 'var(--text-primary)',
-            fontSize: '18px',
-            fontWeight: 700,
-            margin: 0,
-            fontFamily: 'var(--font-mono)',
-            letterSpacing: '2px',
-          }}>
-            报告中心
-          </h1>
-          <div style={{ color: 'var(--text-muted)', fontSize: '9px', marginTop: '2px', letterSpacing: '1px' }}>
-            {reports.length} 份报告
-          </div>
+        <div className="org-brand">
+          <VeriSureLogo size={52} />
+          <span>VeriSure</span>
         </div>
-      </div>
+        <nav className="org-nav">
+          <div className="org-nav-group">
+            <em>治理中心</em>
+            <button type="button" className="active">
+              <FileTextOutlined /> 报告中心
+            </button>
+            <button type="button" onClick={() => navigate('/projects')}>
+              <ProjectOutlined /> 项目工作台
+            </button>
+            <button type="button" onClick={() => navigate('/dashboard')}>
+              <BarChartOutlined /> 全局态势
+            </button>
+          </div>
+        </nav>
+      </aside>
 
-      {/* Reports Table */}
-      <div className="argus-card" style={{ overflow: 'hidden', position: 'relative', zIndex: 1 }}>
-        <Table
-          columns={columns}
-          dataSource={reports}
-          rowKey="id"
-          loading={loading}
-          pagination={false}
-          style={{
-            background: 'transparent',
-          }}
-        />
-      </div>
+      <main className="org-main">
+        <header className="org-topbar">
+          <div>
+            <h1>报告中心</h1>
+            <p>按项目汇总等保测评进度、证据完整度、风险阻塞项和报告导出状态。</p>
+          </div>
+          <div className="org-top-actions">
+            <Select
+              className="org-select"
+              value={currentOrg?.id}
+              onChange={setCurrentOrg}
+              options={organizations.map((org) => ({ value: org.id, label: org.name }))}
+            />
+            <Dropdown menu={userMenu} placement="bottomRight">
+              <Avatar className="org-avatar" icon={<UserOutlined />}>
+                {user?.username?.[0]?.toUpperCase()}
+              </Avatar>
+            </Dropdown>
+          </div>
+        </header>
+
+        <section className="report-kpis">
+          <div className="org-kpi">
+            <span><FileTextOutlined /></span>
+            <div><strong>{reports.length}</strong><em>项目报告</em></div>
+          </div>
+          <div className="org-kpi">
+            <span><SafetyCertificateOutlined /></span>
+            <div><strong>{dashboard.summary.average_progress || 0}%</strong><em>平均进度</em></div>
+          </div>
+          <div className="org-kpi">
+            <span><CheckCircleFilled /></span>
+            <div><strong>{reports.filter((item) => item.progress >= 100).length}</strong><em>可归档</em></div>
+          </div>
+          <div className="org-kpi">
+            <span><BarChartOutlined /></span>
+            <div><strong>{dashboard.risk_queue.length}</strong><em>风险阻塞</em></div>
+          </div>
+        </section>
+
+        <section className="org-panel report-board">
+          <div className="org-panel-head">
+            <h2>项目报告矩阵</h2>
+            <span>{loading ? '同步中' : `${reports.length} 份`}</span>
+          </div>
+
+          <div className="report-table scroll-region">
+            <div className="report-row report-head">
+              <span>项目</span>
+              <span>等级</span>
+              <span>阶段</span>
+              <span>进度</span>
+              <span>风险</span>
+              <span>证据</span>
+              <span>状态</span>
+              <span>操作</span>
+            </div>
+            {reports.length ? reports.map((report) => (
+              <div className="report-row" key={report.project_id}>
+                <strong>{report.name}</strong>
+                <Tag color={report.level === '三级' ? 'red' : 'blue'}>{report.level}</Tag>
+                <span>{report.stage}</span>
+                <div className="mini-progress">
+                  <b style={{ width: `${report.progress || 0}%` }} />
+                  <em>{report.progress || 0}%</em>
+                </div>
+                <span className={report.risk_count ? 'report-risk hot' : 'report-risk'}>{report.risk_count}</span>
+                <span>{report.evidence_rate}%</span>
+                <Tag color={report.blocked ? 'gold' : report.progress >= 100 ? 'green' : 'blue'}>{report.status}</Tag>
+                <Button
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  loading={downloadingId === report.project_id}
+                  onClick={() => handleDownloadReport(report.project_id)}
+                >
+                  PDF
+                </Button>
+              </div>
+            )) : (
+              <div className="empty-panel">暂无项目报告。创建项目并完成测评后会在这里汇总。</div>
+            )}
+          </div>
+        </section>
+      </main>
     </div>
-  );
-};
+  )
+}
 
-export default ReportsPage;
+export default ReportsPage

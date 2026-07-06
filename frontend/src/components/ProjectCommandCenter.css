@@ -158,7 +158,23 @@ body.command-center-active::before {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  overflow: hidden;
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 212, 255, 0.34) rgba(15, 23, 42, 0.34);
+}
+
+.intel-rail::-webkit-scrollbar {
+  width: 6px;
+}
+
+.intel-rail::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.intel-rail::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.34);
+  border-radius: 999px;
 }
 
 .intel-panel,
@@ -173,6 +189,9 @@ body.command-center-active::before {
 }
 
 .intel-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   padding: 14px;
   overflow: hidden;
 }
@@ -338,11 +357,36 @@ body.command-center-active::before {
   min-height: 210px;
 }
 
+.risk-panel .risk-stream {
+  max-height: 250px;
+}
+
 .risk-stream,
 .evidence-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 212, 255, 0.34) rgba(15, 23, 42, 0.34);
+}
+
+.risk-stream::-webkit-scrollbar,
+.evidence-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.risk-stream::-webkit-scrollbar-track,
+.evidence-list::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.risk-stream::-webkit-scrollbar-thumb,
+.evidence-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.34);
+  border-radius: 999px;
 }
 
 .risk-item {
@@ -379,6 +423,10 @@ body.command-center-active::before {
   min-height: 210px;
 }
 
+.evidence-panel .evidence-list {
+  max-height: 232px;
+}
+
 .evidence-row {
   display: grid;
   grid-template-columns: 24px 1fr;
@@ -387,6 +435,14 @@ body.command-center-active::before {
   padding: 8px;
   background: rgba(15, 23, 42, 0.34);
   border: 1px solid rgba(148, 163, 184, 0.11);
+}
+
+.evidence-row strong,
+.evidence-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .evidence-status {
