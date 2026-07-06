@@ -377,9 +377,6 @@ class Agent:
         """判定合规状态"""
         pass_condition = step.get("pass_condition", "")
         
-        # TODO: 实现更复杂的判定逻辑
-        # 目前简单实现：根据结果判断
-        
         judgment = {
             "status": "unknown",
             "reason": "",
@@ -403,10 +400,24 @@ class Agent:
         
         elif "tls_version" in pass_condition:
             ssl_result = result.get("ssl_result", {})
-            # TODO: 解析 SSL 结果
-            judgment["status"] = "pass"
-            judgment["reason"] = "TLS 配置符合要求"
-            judgment["score"] = 1.0
+            data = ssl_result.get("data", ssl_result) if isinstance(ssl_result, dict) else {}
+            issues = data.get("issues") or []
+            vulnerabilities = data.get("vulnerabilities") or []
+            tls_version = str(data.get("tls_version") or "").lower()
+            weak_protocols = [
+                proto for proto in ("ssl", "tls1.0", "tls 1.0", "tls1.1", "tls 1.1")
+                if proto in tls_version
+            ]
+
+            if vulnerabilities or issues or weak_protocols:
+                findings_count = len(issues) + len(vulnerabilities) + len(weak_protocols)
+                judgment["status"] = "fail"
+                judgment["reason"] = f"发现 {findings_count} 个 SSL/TLS 配置风险"
+                judgment["score"] = 0.0
+            else:
+                judgment["status"] = "pass"
+                judgment["reason"] = "未发现 SSL/TLS 弱协议、漏洞或配置风险"
+                judgment["score"] = 1.0
         
         elif "no_weak_passwords" in pass_condition:
             brute_result = result.get("brute_result", {})

@@ -20,6 +20,66 @@ class QuestionnaireEngine:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.skill_loader = SkillLoader()
+
+    @staticmethod
+    def _as_float(value: Any) -> Optional[float]:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _as_list(value: Any) -> List[Any]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return [value]
+
+    def _evaluate_number_answer(self, question: Dict, answer: Any) -> bool:
+        value = self._as_float(answer)
+        if value is None:
+            return False
+
+        minimum = self._as_float(
+            question.get("min", question.get("minimum", question.get("min_value")))
+        )
+        maximum = self._as_float(
+            question.get("max", question.get("maximum", question.get("max_value")))
+        )
+        expected = self._as_float(question.get("expected", question.get("equals")))
+
+        if expected is not None:
+            return value == expected
+        if minimum is None and maximum is None:
+            return True
+        if minimum is not None and value < minimum:
+            return False
+        if maximum is not None and value > maximum:
+            return False
+        return True
+
+    def _evaluate_multi_select_answer(self, question: Dict, answer: Any) -> bool:
+        selected = {str(item) for item in self._as_list(answer)}
+        required = question.get("required_options") or question.get("required_values")
+        if required is None:
+            required = question.get("expected")
+        if required is None:
+            required = [
+                option.get("value", option.get("id", option.get("label")))
+                for option in question.get("options", [])
+                if isinstance(option, dict) and option.get("required")
+            ]
+        required_set = {str(item) for item in self._as_list(required)}
+        if not required_set:
+            return bool(selected)
+        return required_set.issubset(selected)
     
     async def get_questionnaire_for_clause(
         self,
@@ -64,6 +124,7 @@ class QuestionnaireEngine:
         for q in questions:
             if q.get("evidence_required"):
                 evidence_required[q["id"]] = "file"  # 默认需要文件证据
+        evidence_required["_pass_threshold"] = clause.get("pass_threshold", 1.0)
         
         return {
             "clause_id": clause_id,
@@ -210,13 +271,9 @@ class QuestionnaireEngine:
                 # yes/no 类型，期望回答 "yes"
                 is_correct = (user_answer == "yes")
             elif q_type == "number":
-                # 数字类型，需要检查范围
-                # TODO: 实现数字范围检查
-                is_correct = True
+                is_correct = self._evaluate_number_answer(q, user_answer)
             elif q_type == "multi_select":
-                # 多选类型，需要检查是否选择了所有必需项
-                # TODO: 实现多选检查
-                is_correct = True
+                is_correct = self._evaluate_multi_select_answer(q, user_answer)
             
             if is_correct:
                 correct_count += 1
@@ -232,9 +289,7 @@ class QuestionnaireEngine:
         # 计算总分
         score = correct_count / total_count if total_count > 0 else 0.0
         
-        # 判断是否通过
-        # TODO: 从条款定义中获取 pass_threshold
-        pass_threshold = 1.0  # 默认需要全部正确
+        pass_threshold = self._as_float((record.evidence_required or {}).get("_pass_threshold")) or 1.0
         passed = (score >= pass_threshold)
         
         evaluation = {

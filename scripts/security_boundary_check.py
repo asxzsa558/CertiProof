@@ -109,6 +109,26 @@ def assert_source_guards() -> None:
     assert context_manager.count("ConversationHistory.project_id == self.project_id") >= 2
     assert "ConversationArchive.project_id == self.project_id" in context_manager
 
+    questionnaire_engine = (ROOT / "backend/app/services/questionnaire_engine.py").read_text(encoding="utf-8")
+    assert "TODO: 实现数字范围检查" not in questionnaire_engine
+    assert "TODO: 实现多选检查" not in questionnaire_engine
+    assert "TODO: 从条款定义中获取 pass_threshold" not in questionnaire_engine
+    assert "def _evaluate_number_answer" in questionnaire_engine
+    assert "def _evaluate_multi_select_answer" in questionnaire_engine
+
+    agent = (ROOT / "backend/app/orchestrator/agent.py").read_text(encoding="utf-8")
+    assert "TODO: 解析 SSL 结果" not in agent
+    assert "weak_protocols" in agent
+    assert "发现 {findings_count} 个 SSL/TLS 配置风险" in agent
+
+    app_jsx = (ROOT / "frontend/src/App.jsx").read_text(encoding="utf-8")
+    assert "lazy(() => import('./pages/Dashboard'))" in app_jsx
+    assert "<Suspense fallback={<AppLoading />}" in app_jsx
+    vite_config = (ROOT / "frontend/vite.config.js").read_text(encoding="utf-8")
+    assert "manualChunks" in vite_config
+    assert "vendor-react" in vite_config
+    assert "vendor-charts" in vite_config
+
 
 def main() -> int:
     assert_redaction()

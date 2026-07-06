@@ -1,18 +1,35 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { ConfigProvider, theme } from 'antd'
 import { useAuthStore } from './store/authStore'
-import Login from './pages/Login'
-import Register from './pages/Register'
-import ChatPage from './pages/ChatPage'
-import ModelSettings from './pages/ModelSettings'
-import ResultsPage from './pages/ResultsPage'
-import ResultDetailPage from './pages/ResultDetailPage'
-import Dashboard from './pages/Dashboard'
-import ProjectsList from './pages/ProjectsList'
-import AssetsPage from './pages/AssetsPage'
-import ReportsPage from './pages/ReportsPage'
-import OrganizationSettings from './pages/OrganizationSettings'
 import './index.css'
+
+const Login = lazy(() => import('./pages/Login'))
+const Register = lazy(() => import('./pages/Register'))
+const ChatPage = lazy(() => import('./pages/ChatPage'))
+const ModelSettings = lazy(() => import('./pages/ModelSettings'))
+const ResultsPage = lazy(() => import('./pages/ResultsPage'))
+const ResultDetailPage = lazy(() => import('./pages/ResultDetailPage'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const ProjectsList = lazy(() => import('./pages/ProjectsList'))
+const AssetsPage = lazy(() => import('./pages/AssetsPage'))
+const ReportsPage = lazy(() => import('./pages/ReportsPage'))
+const OrganizationSettings = lazy(() => import('./pages/OrganizationSettings'))
+
+function AppLoading() {
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: '100vh',
+      background: '#0a0a0b',
+      color: '#fff',
+    }}>
+      加载中...
+    </div>
+  )
+}
 
 function ProtectedRoute({ children }) {
   const token = useAuthStore((state) => state.token)
@@ -20,18 +37,7 @@ function ProtectedRoute({ children }) {
   const organizations = useAuthStore((state) => state.organizations)
 
   if (hasHydrated === false) {
-    return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        background: '#0a0a0b',
-        color: '#fff',
-      }}>
-        加载中...
-      </div>
-    )
+    return <AppLoading />
   }
 
   if (!token) {
@@ -83,91 +89,93 @@ function App() {
       }}
     >
       <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects"
-            element={
-              <ProtectedRoute>
-                <ProjectsList />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/assets"
-            element={
-              <ProtectedRoute>
-                <AssetsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/reports"
-            element={
-              <ProtectedRoute>
-                <ReportsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects/:projectId"
-            element={
-              <ProtectedRoute>
-                <ChatPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects/:projectId/results"
-            element={
-              <ProtectedRoute>
-                <ResultsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects/:projectId/results/:scanTaskId"
-            element={
-              <ProtectedRoute>
-                <ResultDetailPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings/models"
-            element={
-              <ProtectedRoute>
-                <ModelSettings />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings/organization"
-            element={
-              <ProtectedRoute>
-                <OrganizationSettings />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<AppLoading />}>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/projects"
+              element={
+                <ProtectedRoute>
+                  <ProjectsList />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/assets"
+              element={
+                <ProtectedRoute>
+                  <AssetsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/reports"
+              element={
+                <ProtectedRoute>
+                  <ReportsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/projects/:projectId"
+              element={
+                <ProtectedRoute>
+                  <ChatPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/projects/:projectId/results"
+              element={
+                <ProtectedRoute>
+                  <ResultsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/projects/:projectId/results/:scanTaskId"
+              element={
+                <ProtectedRoute>
+                  <ResultDetailPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings/models"
+              element={
+                <ProtectedRoute>
+                  <ModelSettings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings/organization"
+              element={
+                <ProtectedRoute>
+                  <OrganizationSettings />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </ConfigProvider>
   )

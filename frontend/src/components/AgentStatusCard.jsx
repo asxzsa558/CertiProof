@@ -54,7 +54,6 @@ function AgentStatusCard({ taskIds, onComplete }) {
       wsRefs.current[taskId] = ws
 
       ws.onopen = () => {
-        console.log(`WebSocket connected for task ${taskId}`)
         // 发送心跳
         const heartbeat = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
@@ -79,7 +78,6 @@ function AgentStatusCard({ taskIds, onComplete }) {
       }
 
       ws.onclose = () => {
-        console.log(`WebSocket closed for task ${taskId}`)
         delete wsRefs.current[taskId]
       }
     } catch (error) {
