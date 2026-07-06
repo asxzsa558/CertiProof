@@ -289,6 +289,8 @@ body.command-center-active::before {
   padding: 10px;
   border: 1px solid rgba(148, 163, 184, 0.12);
   background: rgba(2, 6, 23, 0.38);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tool-cell span,
@@ -306,6 +308,17 @@ body.command-center-active::before {
   margin: 5px 0 2px;
   color: #e2e8f0;
   font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-cell i {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tool-cell.success {

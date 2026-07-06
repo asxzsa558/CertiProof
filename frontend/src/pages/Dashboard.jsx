@@ -169,6 +169,26 @@ function Dashboard() {
   const summary = dashboard.summary || emptyDashboard().summary
   const topology = dashboard.exposure_topology || emptyDashboard().exposure_topology
   const visibleNodes = topology.nodes.slice(0, 18)
+  const nodeLayout = useMemo(() => {
+    const columnsByType = {
+      organization: 12,
+      project: 42,
+      ip: 72,
+      domain: 72,
+      cloud_resource: 72,
+    }
+    const typeRows = {}
+    return Object.fromEntries(visibleNodes.map((node, index) => {
+      const row = typeRows[node.type] || 0
+      typeRows[node.type] = row + 1
+      const typeCount = visibleNodes.filter(item => item.type === node.type).length || 1
+      const y = typeCount === 1 ? 50 : 18 + (row * (64 / Math.max(1, typeCount - 1)))
+      const x = columnsByType[node.type] || (18 + ((index * 23) % 68))
+      return [node.id, { x, y }]
+    }))
+  }, [visibleNodes])
+  const visibleNodeIds = new Set(visibleNodes.map((node) => node.id))
+  const visibleEdges = (topology.edges || []).filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target))
   const selectedTool = dashboard.tool_health[selectedToolIndex] || dashboard.tool_health[0]
   const riskFilters = [
     { key: 'all', label: '全部', count: dashboard.risk_queue.length },
@@ -286,13 +306,31 @@ function Dashboard() {
 
           <Panel className="topology-panel" title="资产暴露面拓扑" meta={`${visibleNodes.length} 节点`}>
             <div className="topology-canvas">
+              {visibleEdges.length ? (
+                <svg className="topology-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                  {visibleEdges.map((edge, index) => {
+                    const source = nodeLayout[edge.source]
+                    const target = nodeLayout[edge.target]
+                    if (!source || !target) return null
+                    return (
+                      <line
+                        key={`${edge.source}-${edge.target}-${index}`}
+                        x1={source.x}
+                        y1={source.y}
+                        x2={target.x}
+                        y2={target.y}
+                      />
+                    )
+                  })}
+                </svg>
+              ) : null}
               {visibleNodes.length ? visibleNodes.map((node, index) => (
                 <div
                   key={node.id}
                   className={`topology-node ${node.type} ${node.status}`}
                   style={{
-                    left: `${12 + ((index * 29) % 76)}%`,
-                    top: `${14 + ((index * 37) % 68)}%`,
+                    left: `${nodeLayout[node.id]?.x || 50}%`,
+                    top: `${nodeLayout[node.id]?.y || 50}%`,
                     width: node.size + 12,
                     height: node.size + 12,
                   }}

@@ -37,6 +37,8 @@ import {
 import './ChatWorkspace.css'
 import './ScanAnimation.css'
 
+const { TextArea } = Input
+
 const assetKey = (asset) => String(asset?.value || asset?.target || '').trim().toLowerCase()
 
 const dedupeAssets = (assets = []) => {

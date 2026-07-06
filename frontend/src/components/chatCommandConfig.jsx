@@ -10,6 +10,7 @@ import {
   ClusterOutlined,
   CloudServerOutlined,
   BugOutlined,
+  FileTextOutlined,
   WindowsOutlined,
   LockOutlined,
   FolderOpenOutlined,
