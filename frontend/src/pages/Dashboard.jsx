@@ -3,12 +3,19 @@ import { useNavigate } from 'react-router-dom'
 import { Avatar, Button, Checkbox, Dropdown, Form, Input, Modal, Select, Tag, message } from 'antd'
 import {
   AlertOutlined,
+  ApiOutlined,
   AuditOutlined,
   BellOutlined,
+  BugOutlined,
+  ClusterOutlined,
   CheckCircleFilled,
+  CloudServerOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   FileTextOutlined,
+  GlobalOutlined,
+  KeyOutlined,
+  LockOutlined,
   LogoutOutlined,
   ProjectOutlined,
   RadarChartOutlined,
@@ -58,6 +65,27 @@ const severityLabel = {
   medium: '中危',
   low: '低危',
   info: '提示',
+}
+
+const topologyGlyph = {
+  organization: 'ORG',
+  project: 'PRJ',
+  ip: 'IP',
+  domain: 'DNS',
+  cloud_resource: 'CLD',
+}
+
+const toolIconFor = (name = '') => {
+  if (name.includes('端口')) return <ApiOutlined />
+  if (name.includes('漏洞')) return <BugOutlined />
+  if (name.includes('弱口令')) return <KeyOutlined />
+  if (name.includes('Web')) return <GlobalOutlined />
+  if (name.includes('数据库')) return <DatabaseOutlined />
+  if (name.includes('网络')) return <ClusterOutlined />
+  if (name.includes('Windows')) return <CloudServerOutlined />
+  if (name.includes('SSH')) return <LockOutlined />
+  if (name.includes('OCR')) return <FileTextOutlined />
+  return <ToolOutlined />
 }
 
 function emptyDashboard() {
@@ -173,17 +201,21 @@ function Dashboard() {
     const columnsByType = {
       organization: 12,
       project: 42,
-      ip: 72,
-      domain: 72,
-      cloud_resource: 72,
     }
     const typeRows = {}
+    let assetIndex = 0
+    const assetCount = visibleNodes.filter((node) => ['ip', 'domain', 'cloud_resource'].includes(node.type)).length
+    const assetRows = Math.ceil(assetCount / 2)
     return Object.fromEntries(visibleNodes.map((node, index) => {
       const row = typeRows[node.type] || 0
       typeRows[node.type] = row + 1
       const typeCount = visibleNodes.filter(item => item.type === node.type).length || 1
-      const y = typeCount === 1 ? 50 : 18 + (row * (64 / Math.max(1, typeCount - 1)))
-      const x = columnsByType[node.type] || (18 + ((index * 23) % 68))
+      const isAsset = ['ip', 'domain', 'cloud_resource'].includes(node.type)
+      const currentAssetIndex = isAsset ? assetIndex++ : 0
+      const y = isAsset
+        ? assetRows === 1 ? 50 : 18 + (Math.floor(currentAssetIndex / 2) * (64 / Math.max(1, assetRows - 1)))
+        : typeCount === 1 ? 50 : 18 + (row * (64 / Math.max(1, typeCount - 1)))
+      const x = isAsset ? 68 + ((currentAssetIndex % 2) * 15) : columnsByType[node.type] || (18 + ((index * 23) % 68))
       return [node.id, { x, y }]
     }))
   }, [visibleNodes])
@@ -320,19 +352,20 @@ function Dashboard() {
 
           <Panel className="topology-panel" title="资产暴露面拓扑" meta={`${visibleNodes.length} 节点`}>
             <div className="topology-canvas">
+              <div className="topology-lane lane-org">组织</div>
+              <div className="topology-lane lane-project">项目</div>
+              <div className="topology-lane lane-asset">资产</div>
               {visibleEdges.length ? (
                 <svg className="topology-edges" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                   {visibleEdges.map((edge, index) => {
                     const source = nodeLayout[edge.source]
                     const target = nodeLayout[edge.target]
                     if (!source || !target) return null
+                    const midX = (source.x + target.x) / 2
                     return (
-                      <line
+                      <path
                         key={`${edge.source}-${edge.target}-${index}`}
-                        x1={source.x}
-                        y1={source.y}
-                        x2={target.x}
-                        y2={target.y}
+                        d={`M ${source.x} ${source.y} C ${midX} ${source.y}, ${midX} ${target.y}, ${target.x} ${target.y}`}
                       />
                     )
                   })}
@@ -350,6 +383,7 @@ function Dashboard() {
                   }}
                   title={node.label}
                 >
+                  <b>{topologyGlyph[node.type] || 'N'}</b>
                   <span>{node.label}</span>
                 </div>
               )) : <div className="empty-panel">暂无资产拓扑。添加资产并执行检测后会自动生成暴露面关系。</div>}
@@ -376,10 +410,9 @@ function Dashboard() {
                     className={`tool-health ${tool.status} ${selectedTool?.name === tool.name ? 'active' : ''}`}
                     onClick={() => setSelectedToolIndex(dashboard.tool_health.findIndex((item) => item.name === tool.name))}
                   >
-                    <ToolOutlined />
+                    {toolIconFor(tool.name)}
                     <strong>{tool.name}</strong>
-                    <span>{tool.status === 'healthy' ? '可用' : '需关注'}</span>
-                    <em>{tool.latency}</em>
+                    <span>{tool.status === 'healthy' ? '链路可用' : '需要复核'} · {tool.latency}</span>
                   </button>
                 ))}
                 </div>

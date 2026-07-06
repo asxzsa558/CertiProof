@@ -44,6 +44,30 @@ const ROLE_LABELS = {
   viewer: 'VIEWER',
 }
 
+const PERMISSION_LABELS = {
+  'project:read': '查看项目',
+  'project:create': '创建项目',
+  'project:update': '编辑项目',
+  'project:delete': '删除项目',
+  'asset:read': '查看资产',
+  'asset:create': '添加资产',
+  'asset:update': '编辑资产',
+  'asset:delete': '删除资产',
+  'scan:execute': '执行检测',
+  'scan:read': '查看检测',
+  'scan:cancel': '取消检测',
+  'assessment:read': '查看测评',
+  'assessment:manage': '管理测评',
+  'evidence:manage': '管理证据',
+  'report:read': '查看报告',
+  'report:export': '导出报告',
+  'role:read': '查看角色',
+  'role:manage': '管理角色',
+  'member:manage': '管理成员',
+  'system:config': '系统配置',
+  'tool:diagnose': '工具诊断',
+}
+
 function OrgPanel({ label, value, sub, accentColor }) {
   return (
     <div className="org-panel" style={{ '--accent': accentColor }}>
@@ -64,6 +88,7 @@ export default function OrganizationSettings() {
   const [loading, setLoading] = useState(true)
   const [org, setOrg] = useState(null)
   const [members, setMembers] = useState([])
+  const [roles, setRoles] = useState([])
   const [editMode, setEditMode] = useState(false)
   const [editForm] = Form.useForm()
   const [addMemberModalOpen, setAddMemberModalOpen] = useState(false)
@@ -97,8 +122,18 @@ export default function OrganizationSettings() {
     }
   }
 
+  const loadRoles = async () => {
+    if (!currentOrgId) return
+    try {
+      const res = await api.get(`/organizations/${currentOrgId}/roles`)
+      setRoles(res.data || [])
+    } catch (err) {
+      setRoles([])
+    }
+  }
+
   useEffect(() => {
-    Promise.all([loadOrg(), loadMembers()]).finally(() => setLoading(false))
+    Promise.all([loadOrg(), loadMembers(), loadRoles()]).finally(() => setLoading(false))
   }, [currentOrgId])
 
   const handleSave = async () => {
@@ -183,7 +218,7 @@ export default function OrganizationSettings() {
             <span className="org-header-sub">// {currentOrg?.name || org.name}</span>
           </div>
         </div>
-        <button className="org-icon-btn" onClick={() => { loadOrg(); loadMembers(); }}>
+        <button className="org-icon-btn" onClick={() => { loadOrg(); loadMembers(); loadRoles(); }}>
           <ReloadOutlined />
         </button>
       </header>
@@ -194,19 +229,50 @@ export default function OrganizationSettings() {
           <span className="org-section-title">组织概况</span>
         </div>
         <div className="org-stats-grid">
-          <OrgPanel label="ORG NAME" value={org.name} accentColor="#00ff88" />
-          <OrgPanel label="ORG CODE" value={org.code} accentColor="#00b4d8" />
+          <OrgPanel label="ORG NAME" value={org.name} accentColor="#00d4ff" />
+          <OrgPanel label="ORG CODE" value={org.code} accentColor="#0ea5e9" />
           <OrgPanel
             label="MEMBERS"
             value={members.length}
             sub={`ADMINS ${adminCount}`}
-            accentColor="#d4af37"
+            accentColor="#fbbf24"
           />
           <OrgPanel
             label="STATUS"
             value={org.is_active ? 'ACTIVE' : 'INACTIVE'}
-            accentColor={org.is_active ? '#52c41a' : '#ff4d4f'}
+            accentColor={org.is_active ? '#10b981' : '#ef4444'}
           />
+        </div>
+      </section>
+
+      <section className="org-section">
+        <div className="org-section-header">
+          <span className="org-section-tag">// ACCESS MATRIX</span>
+          <span className="org-section-title">角色权限矩阵</span>
+          <span className="org-section-meta">{roles.length} ROLES</span>
+        </div>
+        <div className="org-role-matrix">
+          {roles.map((role) => (
+            <div className="org-role-card" key={role.id}>
+              <div className="org-role-head">
+                <div>
+                  <strong>{role.name}</strong>
+                  <span>{role.description || '未配置说明'}</span>
+                </div>
+                <Tag color={role.is_system ? 'cyan' : 'gold'}>{role.permissions.length} 权限</Tag>
+              </div>
+              <div className="org-permission-list">
+                {role.permissions.map((permission) => (
+                  <span key={permission}>{PERMISSION_LABELS[permission] || permission}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+          {!roles.length && (
+            <div className="org-empty">
+              <Empty description="暂无可查看角色权限" />
+            </div>
+          )}
         </div>
       </section>
 
