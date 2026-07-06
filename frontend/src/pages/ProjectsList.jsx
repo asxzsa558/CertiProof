@@ -116,17 +116,29 @@ const ProjectsList = () => {
       },
     },
     {
-      title: '分数',
+      title: '测评进度',
+      key: 'progress',
+      width: 130,
+      render: (_, record) => {
+        const value = record.command?.progress;
+        return (
+          <div className="command-progress-cell">
+            <span>{value !== null && value !== undefined ? `${Math.round(value)}%` : '-'}</span>
+            <b><i style={{ width: `${Math.max(0, Math.min(100, value || 0))}%` }} /></b>
+          </div>
+        )
+      },
+    },
+    {
+      title: '合规分数',
       dataIndex: 'compliance_score',
       key: 'score',
-      width: 100,
-      render: (score, record) => {
-        const value = record.command?.progress ?? score;
-        return (
-        <span className={`command-score ${(value || 0) >= 75 ? 'good' : (value || 0) >= 50 ? 'warn' : 'bad'}`}>
-          {value !== null && value !== undefined ? Math.round(value) : '-'}
+      width: 110,
+      render: (score) => (
+        <span className={`command-score ${(score || 0) >= 75 ? 'good' : (score || 0) >= 50 ? 'warn' : 'bad'}`}>
+          {score !== null && score !== undefined ? Math.round(score) : '-'}
         </span>
-      )},
+      ),
     },
     {
       title: '状态',

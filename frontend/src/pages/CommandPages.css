@@ -95,6 +95,36 @@
   color: #ef4444;
 }
 
+.command-progress-cell {
+  display: grid;
+  gap: 6px;
+  min-width: 96px;
+}
+
+.command-progress-cell span {
+  color: #e0f2fe;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.command-progress-cell b {
+  display: block;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(0, 212, 255, 0.16);
+}
+
+.command-progress-cell i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0ea5e9, #22d3ee);
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.38);
+}
+
 .command-status {
   color: var(--status-color, rgba(148, 163, 184, 0.82));
   font-size: 11px;
