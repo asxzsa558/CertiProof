@@ -5,6 +5,7 @@ import {
   BugOutlined,
   CheckCircleFilled,
   ClockCircleOutlined,
+  CloudServerOutlined,
   DatabaseOutlined,
   ExclamationCircleFilled,
   FileProtectOutlined,
@@ -17,6 +18,7 @@ import {
 } from '@ant-design/icons'
 import api from '../services/api'
 import ChatWorkspace from './ChatWorkspace'
+import { TOOL_CATALOG } from './chatCommandConfig'
 import './ProjectCommandCenter.css'
 
 const TOOL_GROUPS = [
@@ -27,6 +29,19 @@ const TOOL_GROUPS = [
   { key: 'database_security_scan', label: '数据库', icon: <DatabaseOutlined /> },
   { key: 'web_discovery_scan', label: 'Web', icon: <GlobalOutlined /> },
 ]
+
+const OPS_TOOLS = [
+  { command: '/scan', title: '高危端口', text: '对所有资产进行高危端口扫描', accent: '#22d3ee' },
+  { command: '/web', title: 'Web 扫描', text: '对所有资产进行Web扫描', accent: '#8b5cf6' },
+  { command: '/vuln', title: '漏洞扫描', text: '对所有资产进行漏洞扫描', accent: '#ef4444' },
+  { command: '/password', title: '弱口令', text: '对所有资产进行弱口令检测', accent: '#f97316' },
+  { command: '/db', title: '数据库', text: '对所有资产进行数据库安全检测', accent: '#06b6d4' },
+  { command: '/snmp', title: '网络设备', text: '对所有资产进行网络设备检测', accent: '#d946ef' },
+  { command: '/baseline', title: '安全基线', text: '对所有资产进行安全基线核查', accent: '#3b82f6' },
+  { command: '/tech', title: '技术测评', text: '对所有资产进行等保技术测评', accent: '#f59e0b' },
+]
+
+const TOOL_BY_COMMAND = Object.fromEntries(TOOL_CATALOG.map(tool => [tool.command, tool]))
 
 const statusCopy = {
   success: '通过',
@@ -119,6 +134,7 @@ const extractHistorySignals = (history) => {
 function ProjectCommandCenter({ project, assets, modelId, onOpenResults }) {
   const [history, setHistory] = useState([])
   const [assessment, setAssessment] = useState(null)
+  const [externalCommand, setExternalCommand] = useState(null)
 
   useEffect(() => {
     document.body.classList.add('command-center-active')
@@ -171,6 +187,16 @@ function ProjectCommandCenter({ project, assets, modelId, onOpenResults }) {
   const riskTotal = workspace.latestStats.failures + workspace.latestStats.vulnerabilities + workspace.latestStats.weakPasswords + workspace.latestStats.databaseIssues
   const unknownTotal = workspace.latestStats.warnings
   const hasSignals = workspace.resultCount > 0
+  const verifiedAssets = assets.filter(asset => asset.verification_status === 'verified').length
+  const ipAssets = assets.filter(asset => asset.asset_type === 'ip').length
+  const domainAssets = assets.filter(asset => asset.asset_type === 'domain').length
+
+  const launchTool = (tool) => {
+    setExternalCommand({
+      id: `${tool.command}-${Date.now()}`,
+      text: tool.text,
+    })
+  }
 
   const toolStatus = (toolKey) => {
     const assetResults = workspace.latestStats.assetResults || {}
@@ -217,6 +243,69 @@ function ProjectCommandCenter({ project, assets, modelId, onOpenResults }) {
       </div>
 
       <div className="command-center-grid">
+        <aside className="intel-rail left">
+          <section className="intel-panel asset-ops-panel">
+            <div className="panel-heading">
+              <span><CloudServerOutlined /> 资产作战面</span>
+              <small>{assets.length} 项</small>
+            </div>
+            <div className="asset-radar">
+              <div className="asset-radar-core">
+                <strong>{assets.length}</strong>
+                <span>Assets</span>
+              </div>
+              <i className="ring one" />
+              <i className="ring two" />
+              <i className="ring three" />
+            </div>
+            <div className="asset-micro-stats">
+              <div><strong>{ipAssets}</strong><span>IP</span></div>
+              <div><strong>{domainAssets}</strong><span>域名</span></div>
+              <div><strong>{verifiedAssets}</strong><span>已验证</span></div>
+            </div>
+            <div className="asset-roster">
+              {assets.length ? assets.map(asset => (
+                <div key={asset.id || asset.value} className="asset-roster-row">
+                  <span className={`asset-kind ${asset.asset_type || 'ip'}`}>{asset.asset_type === 'domain' ? 'DNS' : asset.asset_type === 'cloud_resource' ? '云' : 'IP'}</span>
+                  <div>
+                    <strong>{getAssetValue(asset)}</strong>
+                    <small>{asset.name || asset.verification_status || '待验证'}</small>
+                  </div>
+                </div>
+              )) : (
+                <div className="empty-intel">当前项目暂无资产。添加资产后可执行批量检测。</div>
+              )}
+            </div>
+          </section>
+
+          <section className="intel-panel launch-panel">
+            <div className="panel-heading">
+              <span><ThunderboltOutlined /> 工具发射台</span>
+              <small>全资产</small>
+            </div>
+            <div className="ops-tool-list">
+              {OPS_TOOLS.map(tool => {
+                const catalog = TOOL_BY_COMMAND[tool.command]
+                return (
+                  <button
+                    key={tool.command}
+                    type="button"
+                    className="ops-tool-button"
+                    style={{ '--tool-accent': tool.accent }}
+                    onClick={() => launchTool(tool)}
+                    disabled={!assets.length}
+                    title={tool.text}
+                  >
+                    <span>{catalog?.icon || <ApiOutlined />}</span>
+                    <strong>{tool.title}</strong>
+                    <small>{tool.command}</small>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        </aside>
+
         <main className="ai-command-core">
           <div className="core-header">
             <div>
@@ -234,6 +323,7 @@ function ProjectCommandCenter({ project, assets, modelId, onOpenResults }) {
               projectId={project?.id}
               projectName={project?.name}
               modelId={modelId}
+              externalCommand={externalCommand}
             />
           </div>
         </main>

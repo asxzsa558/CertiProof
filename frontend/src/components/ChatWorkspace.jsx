@@ -51,7 +51,7 @@ const dedupeAssets = (assets = []) => {
   })
 }
 
-function ChatWorkspace({ projectId, projectName, modelId }) {
+function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -203,6 +203,11 @@ function ChatWorkspace({ projectId, projectName, modelId }) {
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (!externalCommand?.text) return
+    handleSend(externalCommand.text)
+  }, [externalCommand?.id])
 
   const handleSend = async (text = null) => {
     const messageText = text || input.trim()
