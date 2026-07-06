@@ -17,7 +17,6 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.project import Project
-from app.models.asset import Asset
 from app.models.scan_task import ScanTask
 from app.orchestrator import orchestrator
 
@@ -221,15 +220,6 @@ async def chat(
             task_id=task_id,
             scan_task_id=task_info.get("scan_task_id"),
         )
-    
-    # 如果没有提供 asset，从项目获取第一个资产
-    if not asset and project:
-        result = await db.execute(
-            select(Asset).where(Asset.project_id == project.id).limit(1)
-        )
-        asset_obj = result.scalar_one_or_none()
-        if asset_obj:
-            asset = asset_obj.value
     
     # 使用 Orchestrator 处理
     result = await orchestrator.handle_user_input(

@@ -439,6 +439,7 @@ class Orchestrator:
         
         plan = plan_result.get("plan", [])
         response = plan_result.get("response", "")
+        plan, response = self._normalize_project_asset_plan(plan, context, user_input, response)
         plan = self._expand_project_asset_targets(plan, context)
         
         logger.info(f"AI plan: {plan}")
@@ -497,6 +498,112 @@ class Orchestrator:
                 "agents": [],
                 "message": response,
             }
+
+    def _normalize_project_asset_plan(
+        self,
+        plan: List[Dict],
+        context: Dict,
+        user_input: str,
+        response: str = "",
+    ) -> tuple[List[Dict], str]:
+        """Keep project-wide scan requests scoped to the current project's assets."""
+        if not plan:
+            return plan, response
+
+        assets = context.get("project_assets") or []
+        if not assets:
+            return plan, response
+
+        text = user_input or ""
+        wants_project_assets = any(
+            phrase in text
+            for phrase in ("全资产", "全部资产", "所有资产", "项目资产", "当前项目资产", "项目中的资产")
+        )
+        if not wants_project_assets:
+            return plan, response
+
+        normalized = []
+        requested_capability = self._requested_scan_capability(user_input)
+        if requested_capability and not any(step.get("capability") in self.SCAN_CAPABILITIES for step in plan):
+            parameters = self._project_asset_parameters_for(requested_capability, text)
+            return (
+                [{"capability": requested_capability, "parameters": parameters}],
+                self._project_asset_scan_response(requested_capability, assets),
+            )
+
+        for step in plan:
+            capability = step.get("capability")
+            if capability not in self.SCAN_CAPABILITIES:
+                normalized.append(step)
+                continue
+
+            next_step = dict(step)
+            if requested_capability:
+                next_step["capability"] = requested_capability
+                capability = requested_capability
+            parameters = dict(next_step.get("parameters") or {})
+            parameters.update(self._project_asset_parameters_for(capability, text))
+            next_step["parameters"] = parameters
+            normalized.append(next_step)
+
+        if requested_capability:
+            response = self._project_asset_scan_response(requested_capability, assets)
+
+        return normalized, response
+
+    def _project_asset_parameters_for(self, capability: str, user_input: str) -> Dict:
+        if capability == "fping_scan":
+            return {"network": "项目资产网段"}
+
+        parameters = {"target": "项目资产"}
+        if capability == "scan_ports":
+            parameters["port_range"] = "1-65535" if any(
+                token in user_input for token in ("全端口", "全部端口", "1-65535")
+            ) else "high-risk"
+        return parameters
+
+    def _project_asset_scan_response(self, capability: str, assets: List[Dict]) -> str:
+        names = [asset.get("value") for asset in assets if asset.get("value")]
+        display_name = {
+            "scan_ports": "端口扫描",
+            "scan_weak_passwords": "弱口令检测",
+            "scan_vulnerabilities": "漏洞扫描",
+            "database_security_scan": "数据库安全检测",
+            "baseline_check": "安全基线核查",
+            "scan_ssl": "SSL/TLS 检测",
+            "network_device_scan": "网络设备检测",
+            "windows_security_scan": "Windows/AD/SMB 检测",
+            "web_discovery_scan": "Web 目录发现",
+            "fping_scan": "批量存活检测",
+            "ping_asset": "Ping 检测",
+        }.get(capability, capability)
+        return f"好的，我将对当前项目的 {len(names)} 个资产执行{display_name}：{', '.join(names)}"
+
+    def _requested_scan_capability(self, user_input: str) -> Optional[str]:
+        text = user_input or ""
+        if "/scan" in text or "端口" in text:
+            return "scan_ports"
+        if "弱口令" in text or "密码" in text:
+            return "scan_weak_passwords"
+        if "漏洞" in text:
+            return "scan_vulnerabilities"
+        if "数据库" in text:
+            return "database_security_scan"
+        if "基线" in text:
+            return "baseline_check"
+        if "SSL" in text or "ssl" in text or "TLS" in text or "tls" in text:
+            return "scan_ssl"
+        if "SNMP" in text or "snmp" in text or "网络设备" in text:
+            return "network_device_scan"
+        if "Windows" in text or "windows" in text or "SMB" in text or "smb" in text or "AD" in text:
+            return "windows_security_scan"
+        if "目录" in text or "爆破" in text or "模糊" in text:
+            return "web_discovery_scan"
+        if "存活" in text or "fping" in text or "批量 Ping" in text:
+            return "fping_scan"
+        if "Ping" in text or "ping" in text:
+            return "ping_asset"
+        return None
     
     async def _execute_plan_async(
         self,
