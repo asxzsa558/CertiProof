@@ -571,6 +571,7 @@ class Orchestrator:
             "database_security_scan": "数据库安全检测",
             "baseline_check": "安全基线核查",
             "scan_ssl": "SSL/TLS 检测",
+            "nikto_scan": "Web 安全扫描",
             "network_device_scan": "网络设备检测",
             "windows_security_scan": "Windows/AD/SMB 检测",
             "web_discovery_scan": "Web 目录发现",
@@ -593,6 +594,8 @@ class Orchestrator:
             return "baseline_check"
         if "SSL" in text or "ssl" in text or "TLS" in text or "tls" in text:
             return "scan_ssl"
+        if "Web" in text or "web" in text:
+            return "nikto_scan"
         if "SNMP" in text or "snmp" in text or "网络设备" in text:
             return "network_device_scan"
         if "Windows" in text or "windows" in text or "SMB" in text or "smb" in text or "AD" in text:

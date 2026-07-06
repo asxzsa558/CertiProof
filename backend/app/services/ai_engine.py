@@ -613,9 +613,10 @@ class AIEngine:
         
         # 解析失败，返回默认
         logger.warning("Failed to parse AI plan (length=%d)", len(content))
+        fallback_message = "抱歉，我没有正确生成可执行计划。请稍后重试，或用更明确的工具指令。"
         return {
-            "plan": [{"capability": "chat", "parameters": {"message": content}}],
-            "response": content,
+            "plan": [{"capability": "chat", "parameters": {"message": fallback_message}}],
+            "response": fallback_message,
         }
     
     def _validate_plan(self, plan: Dict) -> Dict:

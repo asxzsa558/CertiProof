@@ -47,6 +47,21 @@ def main():
     ]
     assert "端口扫描" in chat_response
 
+    web_plan, web_response = orchestrator._normalize_project_asset_plan(
+        [{"capability": "chat", "parameters": {"message": "```json\n{\"plan\":"}}],
+        context,
+        "对所有资产进Web扫描",
+        "```json\n{\"plan\":",
+    )
+    web_expanded = orchestrator._expand_project_asset_targets(web_plan, context)
+    assert all(step["capability"] == "nikto_scan" for step in web_expanded)
+    assert [step["parameters"]["target"] for step in web_expanded] == [
+        "121.40.95.31",
+        "139.224.104.187",
+    ]
+    assert "```json" not in web_response
+    assert "Web 安全扫描" in web_response
+
 
 if __name__ == "__main__":
     main()
