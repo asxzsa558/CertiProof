@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Table, Tag } from 'antd';
+import { Table, message } from 'antd';
 import {
   ArrowLeftOutlined,
   DatabaseOutlined,
@@ -8,58 +8,59 @@ import {
   CloudServerOutlined,
 } from '@ant-design/icons';
 import api from '../services/api';
-import '../styles/theme.css';
+import { useAuthStore } from '../store/authStore';
+import VeriSureLogo from '../components/VeriSureLogo';
+import './OrganizationSettings.css';
+import './CommandPages.css';
 
 const AssetsPage = () => {
   const navigate = useNavigate();
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const currentOrgId = useAuthStore((state) => state.currentOrgId);
 
   useEffect(() => {
     const fetchAssets = async () => {
+      if (!currentOrgId) return;
+      setLoading(true);
       try {
-        // Get all projects first
-        const projectsResponse = await api.get('/dashboard/argus/overview');
-        const projects = projectsResponse.data?.recent_projects || [];
-        
-        // Get assets from all projects
-        let allAssets = [];
-        for (const project of projects) {
+        const projectsResponse = await api.get('/projects/', { params: { organization_id: currentOrgId } });
+        const projects = projectsResponse.data || [];
+        const assetGroups = await Promise.all(projects.map(async (project) => {
           try {
             const assetsResponse = await api.get(`/projects/${project.id}/assets/`);
-            if (assetsResponse.data) {
-              const assetsWithProject = assetsResponse.data.map(asset => ({
-                ...asset,
-                projectName: project.name,
-                projectId: project.id,
-              }));
-              allAssets = allAssets.concat(assetsWithProject);
-            }
+            return (assetsResponse.data || []).map((asset) => ({
+              ...asset,
+              projectName: project.system_name || project.name,
+              projectId: project.id,
+            }));
           } catch (error) {
             console.error(`Failed to fetch assets for project ${project.id}:`, error);
+            return [];
           }
-        }
+        }));
         
-        setAssets(allAssets);
+        setAssets(assetGroups.flat());
       } catch (error) {
         console.error('Failed to fetch assets:', error);
+        message.error?.('加载资产列表失败');
       } finally {
         setLoading(false);
       }
     };
     fetchAssets();
-  }, []);
+  }, [currentOrgId]);
 
   const getAssetIcon = (type) => {
     switch (type) {
       case 'ip':
-        return <DatabaseOutlined style={{ color: 'var(--accent-cyan)' }} />;
+        return <DatabaseOutlined className="command-asset-icon cyan" />;
       case 'domain':
-        return <GlobalOutlined style={{ color: 'var(--accent-blue)' }} />;
+        return <GlobalOutlined className="command-asset-icon blue" />;
       case 'cloud_resource':
-        return <CloudServerOutlined style={{ color: 'var(--accent-amber)' }} />;
+        return <CloudServerOutlined className="command-asset-icon amber" />;
       default:
-        return <DatabaseOutlined style={{ color: 'var(--text-muted)' }} />;
+        return <DatabaseOutlined className="command-asset-icon muted" />;
     }
   };
 
@@ -71,7 +72,7 @@ const AssetsPage = () => {
     };
     const s = statusMap[status] || statusMap.pending;
     return (
-      <span style={{ color: s.color, fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px' }}>
+      <span className="command-status" style={{ '--status-color': s.color }}>
         ● {s.label}
       </span>
     );
@@ -84,7 +85,7 @@ const AssetsPage = () => {
       key: 'id',
       width: 100,
       render: (id) => (
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)', fontSize: '11px' }}>
+        <span className="command-mono command-id">
           A-{String(id).padStart(3, '0')}
         </span>
       ),
@@ -94,9 +95,9 @@ const AssetsPage = () => {
       dataIndex: 'value',
       key: 'value',
       render: (value, record) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div className="command-asset-value">
           {getAssetIcon(record.asset_type)}
-          <span style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+          <span className="command-mono">
             {value}
           </span>
         </div>
@@ -110,7 +111,7 @@ const AssetsPage = () => {
       render: (type) => {
         const typeLabels = { ip: 'IP', domain: '域名', cloud_resource: '云资源' };
         return (
-          <span style={{ color: 'var(--text-secondary)', fontSize: '10px', fontWeight: 600, letterSpacing: '0.5px' }}>
+          <span className="command-muted">
             {typeLabels[type] || type}
           </span>
         );
@@ -123,7 +124,7 @@ const AssetsPage = () => {
       width: 150,
       render: (name, record) => (
         <span 
-          style={{ color: 'var(--accent-cyan)', fontSize: '11px', cursor: 'pointer' }}
+          className="command-link"
           onClick={() => navigate(`/projects/${record.projectId}`)}
         >
           {name}
@@ -142,7 +143,7 @@ const AssetsPage = () => {
       dataIndex: 'name',
       key: 'name',
       render: (name) => (
-        <span style={{ color: 'var(--text-secondary)', fontSize: '11px' }}>
+        <span className="command-muted">
           {name || '-'}
         </span>
       ),
@@ -150,50 +151,32 @@ const AssetsPage = () => {
   ];
 
   return (
-    <div style={{ minHeight: '100vh', background: 'transparent', padding: '16px', position: 'relative' }}>
-      {/* Background Logo Watermark */}
-      <div className="bg-watermark" />
-      
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', position: 'relative', zIndex: 1 }}>
-        <button
-          onClick={() => navigate('/')}
-          style={{
-            background: 'none',
-            border: '1px solid var(--border-subtle)',
-            color: 'var(--text-secondary)',
-            padding: '6px 10px',
-            borderRadius: '2px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '10px',
-            fontWeight: 600,
-            letterSpacing: '1px',
-          }}
-        >
-          <ArrowLeftOutlined /> 返回
+    <div className="org-root command-page">
+      <div className="org-bg-logo"><CloudServerOutlined /></div>
+      <div className="org-bg-vignette" />
+
+      <header className="org-header">
+        <button className="org-back-btn" onClick={() => navigate('/dashboard')}>
+          <ArrowLeftOutlined /> 返回 Dashboard
         </button>
-        <div>
-          <h1 style={{
-            color: 'var(--text-primary)',
-            fontSize: '18px',
-            fontWeight: 700,
-            margin: 0,
-            fontFamily: 'var(--font-mono)',
-            letterSpacing: '2px',
-          }}>
-            资产管理
-          </h1>
-          <div style={{ color: 'var(--text-muted)', fontSize: '9px', marginTop: '2px', letterSpacing: '1px' }}>
-            {assets.length} 个资产
+        <div className="org-header-title">
+          <VeriSureLogo size={28} />
+          <div className="org-header-text">
+            <span className="org-header-name">ASSET MATRIX</span>
+            <span className="org-header-sub">// {assets.length} 个资产 · 跨项目归属视图</span>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Assets Table */}
-      <div className="argus-card" style={{ overflow: 'hidden', position: 'relative', zIndex: 1 }}>
+      <section className="org-section">
+        <div className="org-section-header">
+          <span className="org-section-tag">ASSETS</span>
+          <span className="org-section-title">资产归属矩阵</span>
+          <span className="org-section-meta">所有检测结果按资产与项目回溯</span>
+        </div>
+      </section>
+
+      <div className="command-table-card">
         <Table
           columns={columns}
           dataSource={assets}
@@ -202,10 +185,6 @@ const AssetsPage = () => {
           pagination={{
             pageSize: 20,
             showSizeChanger: false,
-            style: { background: 'var(--bg-secondary)', padding: '12px' },
-          }}
-          style={{
-            background: 'transparent',
           }}
         />
       </div>

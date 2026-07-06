@@ -99,6 +99,8 @@ app = web.Application()
 app.router.add_get('/health', health)
 app.router.add_get('/api/v1/ws/{path:.*}', proxy_websocket)
 app.router.add_route('*', '/api/{path:.*}', proxy_api)
+# /assets is an app route; /assets/* remains the built static asset directory.
+app.router.add_get('/assets', handle_index)
 app.router.add_static('/assets/', path=os.path.join(STATIC_DIR, 'assets'), name='assets')
 
 async def spa_fallback(request):

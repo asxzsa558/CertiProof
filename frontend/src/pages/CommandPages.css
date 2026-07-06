@@ -1,0 +1,150 @@
+.command-page {
+  padding-top: 24px;
+}
+
+.command-table-card {
+  position: relative;
+  z-index: 5;
+  overflow-x: auto;
+  border: 1px solid rgba(0, 212, 255, 0.16);
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.76), rgba(2, 6, 23, 0.58));
+  backdrop-filter: blur(22px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 60px rgba(0,0,0,0.28);
+}
+
+.command-table-card .ant-table {
+  min-width: 760px;
+  color: rgba(226, 232, 240, 0.92);
+  background: transparent;
+}
+
+.command-table-card .ant-table-container,
+.command-table-card .ant-table-content,
+.command-table-card .ant-table-thead > tr > th,
+.command-table-card .ant-table-tbody > tr > td {
+  background: transparent !important;
+  border-color: rgba(148, 163, 184, 0.12) !important;
+}
+
+.command-table-card .ant-table-thead > tr > th {
+  color: rgba(148, 163, 184, 0.86) !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.command-table-card .ant-table-tbody > tr:hover > td {
+  background: rgba(0, 212, 255, 0.06) !important;
+}
+
+.command-table-card .ant-empty-description,
+.command-table-card .ant-pagination,
+.command-table-card .ant-pagination-item a,
+.command-table-card .ant-pagination-prev button,
+.command-table-card .ant-pagination-next button {
+  color: rgba(203, 213, 225, 0.72) !important;
+}
+
+.command-mono {
+  color: rgba(226, 232, 240, 0.92);
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.command-id {
+  color: #00d4ff;
+}
+
+.command-title {
+  color: #f8fafc;
+  font-weight: 650;
+}
+
+.command-muted {
+  color: rgba(148, 163, 184, 0.82);
+  font-size: 12px;
+}
+
+.command-link {
+  color: #00d4ff;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.command-link:hover {
+  color: #7dd3fc;
+}
+
+.command-score {
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.command-score.good {
+  color: #22c55e;
+}
+
+.command-score.warn {
+  color: #f59e0b;
+}
+
+.command-score.bad {
+  color: #ef4444;
+}
+
+.command-status {
+  color: var(--status-color, rgba(148, 163, 184, 0.82));
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.command-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.command-icon-button {
+  color: #00d4ff !important;
+}
+
+.command-icon-button.danger {
+  color: #ef4444 !important;
+}
+
+.command-asset-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.command-asset-icon.cyan {
+  color: #00d4ff;
+}
+
+.command-asset-icon.blue {
+  color: #60a5fa;
+}
+
+.command-asset-icon.amber {
+  color: #f59e0b;
+}
+
+.command-asset-icon.muted {
+  color: rgba(148, 163, 184, 0.72);
+}
+
+@media (max-width: 720px) {
+  .command-page {
+    padding: 16px;
+  }
+
+  .command-page .org-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

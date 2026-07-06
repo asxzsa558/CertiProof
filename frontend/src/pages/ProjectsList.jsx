@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Table, Tag, Modal, Form, Input, Select, Button, Popconfirm, message } from 'antd';
+import { Table, Modal, Form, Input, Select, Button, Popconfirm, message } from 'antd';
 import {
   ProjectOutlined,
   ArrowLeftOutlined,
-  SearchOutlined,
   EditOutlined,
   DeleteOutlined,
 } from '@ant-design/icons';
 import api from '../services/api';
-import '../styles/theme.css';
+import { useAuthStore } from '../store/authStore';
+import VeriSureLogo from '../components/VeriSureLogo';
+import './OrganizationSettings.css';
+import './CommandPages.css';
 
 const ProjectsList = () => {
   const navigate = useNavigate();
@@ -18,20 +20,32 @@ const ProjectsList = () => {
   const [editingProject, setEditingProject] = useState(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [form] = Form.useForm();
+  const currentOrgId = useAuthStore((state) => state.currentOrgId);
+
+  const fetchProjects = async () => {
+    if (!currentOrgId) return;
+    setLoading(true);
+    try {
+      const [projectsRes, commandRes] = await Promise.all([
+        api.get('/projects/', { params: { organization_id: currentOrgId } }),
+        api.get('/dashboard/organization-command', { params: { organization_id: currentOrgId } }),
+      ]);
+      const matrixById = new Map((commandRes.data?.project_matrix || []).map((project) => [project.project_id, project]));
+      setProjects((projectsRes.data || []).map((project) => ({
+        ...project,
+        command: matrixById.get(project.id) || {},
+      })));
+    } catch (error) {
+      console.error('Failed to fetch projects:', error);
+      message.error('加载项目列表失败');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchProjects = async () => {
-      try {
-        const response = await api.get('/dashboard/overview');
-        setProjects(response.data.projects || []);
-      } catch (error) {
-        console.error('Failed to fetch projects:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchProjects();
-  }, []);
+  }, [currentOrgId]);
 
   const handleEdit = (project, e) => {
     e.stopPropagation();
@@ -51,9 +65,7 @@ const ProjectsList = () => {
       await api.put(`/projects/${editingProject.id}`, values);
       message.success('项目更新成功');
       setEditModalVisible(false);
-      // 重新获取项目列表
-      const response = await api.get('/dashboard/overview');
-      setProjects(response.data.projects || []);
+      fetchProjects();
     } catch (error) {
       console.error('Failed to update project:', error);
       message.error('更新失败：' + (error.response?.data?.detail || error.message));
@@ -65,9 +77,7 @@ const ProjectsList = () => {
     try {
       await api.delete(`/projects/${projectId}`);
       message.success('项目删除成功');
-      // 重新获取项目列表
-      const response = await api.get('/dashboard/overview');
-      setProjects(response.data.projects || []);
+      fetchProjects();
     } catch (error) {
       console.error('Failed to delete project:', error);
       message.error('删除失败：' + (error.response?.data?.detail || error.message));
@@ -81,7 +91,7 @@ const ProjectsList = () => {
       key: 'id',
       width: 100,
       render: (id) => (
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)', fontSize: '12px' }}>
+        <span className="command-mono command-id">
           P-{String(id).padStart(3, '0')}
         </span>
       ),
@@ -90,17 +100,14 @@ const ProjectsList = () => {
       title: '项目名称',
       dataIndex: 'name',
       key: 'name',
-      render: (name) => (
-        <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{name}</span>
-      ),
+      render: (name, record) => <span className="command-title">{record.system_name || name}</span>,
     },
     {
       title: '等级',
-      dataIndex: 'overall_status',
       key: 'level',
       width: 120,
       render: (_, record) => {
-        const level = record.assessment_types?.[0]?.level || 'N/A';
+        const level = record.command?.level || record.compliance_level || '未定级';
         return (
           <span className={`risk-badge ${level === '三级' ? 'high' : level === '二级' ? 'medium' : 'low'}`}>
             {level}
@@ -110,23 +117,20 @@ const ProjectsList = () => {
     },
     {
       title: '分数',
-      dataIndex: 'overall_score',
+      dataIndex: 'compliance_score',
       key: 'score',
       width: 100,
-      render: (score) => (
-        <span style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '16px',
-          fontWeight: 700,
-          color: score >= 75 ? 'var(--risk-low)' : score >= 50 ? 'var(--risk-medium)' : 'var(--risk-high)',
-        }}>
-          {score !== null && score !== undefined ? Math.round(score) : '-'}
+      render: (score, record) => {
+        const value = record.command?.progress ?? score;
+        return (
+        <span className={`command-score ${(value || 0) >= 75 ? 'good' : (value || 0) >= 50 ? 'warn' : 'bad'}`}>
+          {value !== null && value !== undefined ? Math.round(value) : '-'}
         </span>
-      ),
+      )},
     },
     {
       title: '状态',
-      dataIndex: 'overall_status',
+      dataIndex: 'status',
       key: 'status',
       width: 120,
       render: (status) => {
@@ -137,35 +141,30 @@ const ProjectsList = () => {
         };
         const s = statusMap[status] || statusMap.not_started;
         return (
-          <span style={{ color: s.color, fontSize: '11px', fontWeight: 600, letterSpacing: '0.5px' }}>
+          <span className="command-status" style={{ '--status-color': s.color }}>
             ● {s.label}
           </span>
         );
       },
     },
     {
-      title: '资产',
-      dataIndex: 'asset_count',
-      key: 'assets',
+      title: '当前阶段',
+      key: 'stage',
       width: 80,
-      render: (count) => (
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
-          {count || 0}
-        </span>
-      ),
+      render: (_, record) => <span className="command-muted">{record.command?.stage || '未开始'}</span>,
     },
     {
       title: '操作',
       key: 'action',
       width: 120,
       render: (_, record) => (
-        <div style={{ display: 'flex', gap: '8px' }} onClick={(e) => e.stopPropagation()}>
+        <div className="command-actions" onClick={(e) => e.stopPropagation()}>
           <Button
             type="text"
             size="small"
             icon={<EditOutlined />}
             onClick={(e) => handleEdit(record, e)}
-            style={{ color: 'var(--accent-cyan)' }}
+            className="command-icon-button"
           />
           <Popconfirm
             title="确认删除"
@@ -181,7 +180,7 @@ const ProjectsList = () => {
               size="small"
               icon={<DeleteOutlined />}
               onClick={(e) => e.stopPropagation()}
-              style={{ color: 'var(--risk-high)' }}
+              className="command-icon-button danger"
             />
           </Popconfirm>
         </div>
@@ -190,47 +189,32 @@ const ProjectsList = () => {
   ];
 
   return (
-    <div style={{ minHeight: '100vh', background: 'transparent', padding: '16px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', position: 'relative', zIndex: 1 }}>
-        <button
-          onClick={() => navigate('/')}
-          style={{
-            background: 'none',
-            border: '1px solid var(--border-subtle)',
-            color: 'var(--text-secondary)',
-            padding: '6px 10px',
-            borderRadius: '2px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '10px',
-            fontWeight: 600,
-            letterSpacing: '1px',
-          }}
-        >
-          <ArrowLeftOutlined /> 返回
+    <div className="org-root command-page">
+      <div className="org-bg-logo"><ProjectOutlined /></div>
+      <div className="org-bg-vignette" />
+
+      <header className="org-header">
+        <button className="org-back-btn" onClick={() => navigate('/dashboard')}>
+          <ArrowLeftOutlined /> 返回 Dashboard
         </button>
-        <div>
-          <h1 style={{
-            color: 'var(--text-primary)',
-            fontSize: '18px',
-            fontWeight: 700,
-            margin: 0,
-            fontFamily: 'var(--font-mono)',
-            letterSpacing: '2px',
-          }}>
-            项目管理
-          </h1>
-          <div style={{ color: 'var(--text-muted)', fontSize: '9px', marginTop: '2px', letterSpacing: '1px' }}>
-            {projects.length} 个项目
+        <div className="org-header-title">
+          <VeriSureLogo size={28} />
+          <div className="org-header-text">
+            <span className="org-header-name">PROJECT WORKSPACE</span>
+            <span className="org-header-sub">// {projects.length} 个项目 · 组织级测评矩阵</span>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Projects Table */}
-      <div className="argus-card" style={{ overflow: 'hidden' }}>
+      <section className="org-section">
+        <div className="org-section-header">
+          <span className="org-section-tag">PROJECTS</span>
+          <span className="org-section-title">项目执行入口</span>
+          <span className="org-section-meta">点击项目进入 AI 检测工作台</span>
+        </div>
+      </section>
+
+      <div className="command-table-card">
         <Table
           columns={columns}
           dataSource={projects}
@@ -241,9 +225,6 @@ const ProjectsList = () => {
             onClick: () => navigate(`/projects/${record.id}`),
             style: { cursor: 'pointer' },
           })}
-          style={{
-            background: 'transparent',
-          }}
         />
       </div>
 
