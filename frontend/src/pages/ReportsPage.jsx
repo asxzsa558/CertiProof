@@ -129,7 +129,7 @@ function ReportsPage() {
         <header className="org-topbar">
           <div>
             <h1>报告中心</h1>
-            <p>按项目汇总等保测评进度、证据完整度、风险阻塞项和报告导出状态。</p>
+            <p>按项目汇总等保测评进度、测评任务、证据数量、风险阻塞项和报告导出状态。</p>
           </div>
           <div className="org-top-actions">
             <Select
@@ -178,7 +178,7 @@ function ReportsPage() {
               <span>阶段</span>
               <span>进度</span>
               <span>风险</span>
-              <span>证据</span>
+              <span>测评任务</span>
               <span>状态</span>
               <span>操作</span>
             </div>
@@ -192,7 +192,7 @@ function ReportsPage() {
                   <em>{report.progress || 0}%</em>
                 </div>
                 <span className={report.risk_count ? 'report-risk hot' : 'report-risk'}>{report.risk_count}</span>
-                <span>{report.evidence_rate}%</span>
+                <span>{report.task_done || 0}/{report.task_total || 0}</span>
                 <Tag color={report.blocked ? 'gold' : report.progress >= 100 ? 'green' : 'blue'}>{report.status}</Tag>
                 <Button
                   size="small"

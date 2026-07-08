@@ -241,8 +241,8 @@ function Dashboard() {
     ...dashboard.project_matrix.map((project) => ({
       key: `project-${project.project_id}`,
       title: project.name,
-      meta: `${project.stage} / 证据 ${project.evidence_rate}%`,
-      status: project.evidence_rate >= 80 ? 'complete' : project.evidence_rate > 0 ? 'active' : 'pending',
+      meta: `${project.stage} / 任务 ${project.task_done || 0}/${project.task_total || 0} / 证据 ${project.evidence_count || 0} 条`,
+      status: (project.task_completion_rate || 0) >= 80 ? 'complete' : (project.task_completion_rate || 0) > 0 ? 'active' : 'pending',
     })),
     ...dashboard.risk_queue.map((risk, index) => ({
       key: `risk-${risk.control}-${index}`,
@@ -329,7 +329,7 @@ function Dashboard() {
                 <span>当前阶段</span>
                 <span>总进度</span>
                 <span>风险</span>
-                <span>证据</span>
+                <span>测评任务</span>
                 <span>负责人</span>
                 <span>下一步</span>
               </div>
@@ -338,14 +338,17 @@ function Dashboard() {
                   <strong>{project.name}</strong>
                   <Tag color={project.level === '三级' ? 'blue' : 'cyan'}>{project.level}</Tag>
                   <span>{project.stage}</span>
-                  <div className="mini-progress"><b style={{ width: `${project.progress}%` }} /><em>{project.progress}%</em></div>
+                  <div className="matrix-progress-cell">
+                    <div className="mini-progress"><b style={{ width: `${project.progress}%` }} /></div>
+                    <em>{project.progress}%</em>
+                  </div>
                   <span className={project.risk_count ? 'risk-count hot' : 'risk-count'}>{project.risk_count}</span>
-                  <span>{project.evidence_rate}%</span>
+                  <span>{project.task_done || 0}/{project.task_total || 0}</span>
                   <span>{project.owner}</span>
                   <Button size="small" type="text" onClick={() => navigate(`/projects/${project.project_id}`)}>{project.next_action}</Button>
                 </div>
               )) : (
-                <div className="empty-panel">暂无项目。创建项目后，这里会按项目展示测评阶段、风险和证据完成率。</div>
+                <div className="empty-panel">暂无项目。创建项目后，这里会按项目展示测评阶段、风险和任务完成情况。</div>
               )}
             </div>
           </Panel>

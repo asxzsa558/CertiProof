@@ -54,7 +54,8 @@ const dedupeAssets = (assets = []) => {
 function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [activeRequests, setActiveRequests] = useState(0)
+  const loading = activeRequests > 0
   const [inputHistory, setInputHistory] = useState([])
   const [historyIndex, setHistoryIndex] = useState(null)
 
@@ -92,14 +93,17 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
   const [assessmentDrawerVisible, setAssessmentDrawerVisible] = useState(false)
   const [assessmentLoading, setAssessmentLoading] = useState(false)
   const messagesEndRef = useRef(null)
-  const wsRef = useRef(null)
-  const pollRef = useRef(null)
+  const messagesContainerRef = useRef(null)
+  const wsRefsRef = useRef(new Map())
+  const pollRefsRef = useRef(new Map())
   const completedTaskIdsRef = useRef(new Set())
   const inputRef = useRef(null)
+  const stickToBottomRef = useRef(true)
 
   const rememberInput = (text) => {
     const value = (text || '').trim()
     if (!value) return
+    stickToBottomRef.current = true
     setInputHistory(prev => (prev[prev.length - 1] === value ? prev : [...prev.slice(-49), value]))
     setHistoryIndex(null)
   }
@@ -113,8 +117,14 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
+  const updateStickToBottom = () => {
+    const el = messagesContainerRef.current
+    if (!el) return
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96
+  }
+
   useEffect(() => {
-    scrollToBottom()
+    if (stickToBottomRef.current) scrollToBottom()
   }, [messages])
 
   // Load history on mount (key prop ensures remount on project change)
@@ -194,13 +204,10 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
 
   useEffect(() => {
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-        wsRef.current = null
-      }
-      if (pollRef.current) {
-        clearTimeout(pollRef.current)
-      }
+      wsRefsRef.current.forEach(ws => ws.close())
+      wsRefsRef.current.clear()
+      pollRefsRef.current.forEach(timeoutId => clearTimeout(timeoutId))
+      pollRefsRef.current.clear()
     }
   }, [])
 
@@ -211,7 +218,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
 
   const handleSend = async (text = null) => {
     const messageText = text || input.trim()
-    if (!messageText || loading) return
+    if (!messageText) return
     rememberInput(messageText)
 
     // 检测诊断命令
@@ -287,7 +294,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     rememberInput('/diagnose')
     setMessages(prev => [...prev, { role: 'user', content: '/diagnose' }])
     setInput('')
-    setLoading(true)
+    setActiveRequests(prev => prev + 1)
 
     try {
       const response = await api.get('/diagnostics/mcp/health')
@@ -306,7 +313,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         isError: true,
       }])
     } finally {
-      setLoading(false)
+      setActiveRequests(prev => Math.max(0, prev - 1))
     }
   }
 
@@ -314,7 +321,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     rememberInput(`/ping ${target}`)
     setMessages(prev => [...prev, { role: 'user', content: `/ping ${target}` }])
     setInput('')
-    setLoading(true)
+    setActiveRequests(prev => prev + 1)
 
     try {
       const response = await api.post('/chat/', {
@@ -334,7 +341,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         isError: true,
       }])
     } finally {
-      setLoading(false)
+      setActiveRequests(prev => Math.max(0, prev - 1))
     }
   }
 
@@ -351,7 +358,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     const userMessage = { role: 'user', content: messageText }
     setMessages((prev) => [...prev, userMessage])
     setInput('')
-    setLoading(true)
+    setActiveRequests(prev => prev + 1)
 
     try {
       const response = await api.post('/chat/', {
@@ -389,7 +396,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
       }
       setMessages((prev) => [...prev, errorMessage])
     } finally {
-      setLoading(false)
+      setActiveRequests(prev => Math.max(0, prev - 1))
     }
   }
 
@@ -489,7 +496,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
       }
       setMessages(prev => [...prev, userMessage])
       setInput('')
-      setLoading(true)
+      setActiveRequests(prev => prev + 1)
       
       const scanResponse = await api.post('/chat/', {
         message: JSON.stringify({
@@ -524,7 +531,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         isError: true,
       }])
     } finally {
-      setLoading(false)
+      setActiveRequests(prev => Math.max(0, prev - 1))
     }
   }
 
@@ -553,7 +560,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
       }
       setMessages(prev => [...prev, userMessage])
       setInput('')
-      setLoading(true)
+      setActiveRequests(prev => prev + 1)
       
       const scanResponse = await api.post('/chat/', {
         message: JSON.stringify({
@@ -591,7 +598,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         isError: true,
       }])
     } finally {
-      setLoading(false)
+      setActiveRequests(prev => Math.max(0, prev - 1))
     }
   }
 
@@ -670,7 +677,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
       }
       setMessages(prev => [...prev, userMessage])
       setInput('')
-      setLoading(true)
+      setActiveRequests(prev => prev + 1)
       
       const scanResponse = await api.post('/chat/', {
         message: JSON.stringify({
@@ -711,15 +718,13 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         isError: true,
       }])
     } finally {
-      setLoading(false)
+      setActiveRequests(prev => Math.max(0, prev - 1))
     }
   }
 
   const connectWebSocket = (taskId) => {
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
-    }
+    const existingWs = wsRefsRef.current.get(taskId)
+    if (existingWs) existingWs.close()
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsHost = window.location.host
@@ -729,7 +734,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
 
     try {
       const ws = new WebSocket(wsUrl)
-      wsRef.current = ws
+      wsRefsRef.current.set(taskId, ws)
       startPollingFallback(taskId)
 
       ws.onopen = () => {
@@ -808,7 +813,8 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
             if (completedTaskIdsRef.current.has(taskId)) return
             completedTaskIdsRef.current.add(taskId)
             ws.close()
-            wsRef.current = null
+            wsRefsRef.current.delete(taskId)
+            clearPollingFallback(taskId)
 
             setMessages(prev => prev.map(m =>
               m.taskId === taskId ? { ...m, taskCompleted: true, taskStatus: 'completed' } : m
@@ -821,7 +827,8 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
             })])
           } else if (msg.type === 'failed') {
             ws.close()
-            wsRef.current = null
+            wsRefsRef.current.delete(taskId)
+            clearPollingFallback(taskId)
 
             setMessages(prev => prev.map(m =>
               m.taskId === taskId ? { ...m, taskCompleted: true, taskStatus: 'failed' } : m
@@ -863,15 +870,15 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
       }
 
       ws.onclose = () => {
-        if (wsRef.current === ws) {
-          wsRef.current = null
+        if (wsRefsRef.current.get(taskId) === ws) {
+          wsRefsRef.current.delete(taskId)
         }
       }
 
       setTimeout(() => {
-        if (!wsConnected && wsRef.current === ws) {
+        if (!wsConnected && wsRefsRef.current.get(taskId) === ws) {
           ws.close()
-          wsRef.current = null
+          wsRefsRef.current.delete(taskId)
           startPollingFallback(taskId)
         }
       }, 3000)
@@ -880,10 +887,24 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     }
   }
 
+  const clearPollingFallback = (taskId) => {
+    const timeoutId = pollRefsRef.current.get(taskId)
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+      pollRefsRef.current.delete(taskId)
+    }
+  }
+
   const startPollingFallback = (taskId) => {
-    if (pollRef.current) {
-      clearTimeout(pollRef.current)
-      pollRef.current = null
+    clearPollingFallback(taskId)
+    const pollRef = {
+      get current() {
+        return pollRefsRef.current.get(taskId)
+      },
+      set current(timeoutId) {
+        if (timeoutId) pollRefsRef.current.set(taskId, timeoutId)
+        else pollRefsRef.current.delete(taskId)
+      },
     }
     pollTaskResultUntilDone({
       api,
@@ -1504,7 +1525,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
       </Modal>
 
       {/* Messages */}
-      <div className="workspace-messages">
+      <div className="workspace-messages" ref={messagesContainerRef} onScroll={updateStickToBottom}>
         {messages.map((msg, index) => (
           <div key={index} className={`workspace-message ${msg.role}`}>
             <div className="message-avatar">
@@ -1669,14 +1690,12 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
             onKeyDown={handleKeyPress}
             placeholder={projectName ? `向 Agent 询问"${projectName}"的合规状态... 输入 / 查看快捷命令` : '向 Agent 询问合规相关问题... 输入 / 查看快捷命令'}
             autoSize={{ minRows: 1, maxRows: 4 }}
-            disabled={loading}
             className="workspace-input"
           />
           <Button
             type="primary"
             icon={<SendOutlined />}
             onClick={() => handleSend()}
-            loading={loading}
             disabled={!input.trim()}
             className="workspace-send-btn"
           >

@@ -231,15 +231,15 @@ async def fping_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     if not targets and not network:
         raise ValueError("Missing required parameter: targets or network")
     
-    # 如果是网段，生成 IP 列表
     if network and not targets:
-        # 简单处理 CIDR
         import ipaddress
         try:
             network_obj = ipaddress.ip_network(network, strict=False)
-            targets = [str(ip) for ip in network_obj.hosts()]
+            targets = [str(ip) for ip in network_obj.hosts()] or [str(network_obj.network_address)]
         except ValueError:
-            raise ValueError(f"Invalid network: {network}")
+            if "/" in str(network):
+                raise ValueError(f"Invalid CIDR network: {network}")
+            targets = [str(network)]
     
     cmd = ["fping", "-a", "-q", "-r", "1"]
     cmd.extend(targets)
@@ -340,10 +340,13 @@ async def execute(request: ExecuteRequest):
     tool_name = request.tool
     params = request.params
     
-    if tool_name == "masscan_scan":
-        return await masscan_scan(params)
-    elif tool_name == "fping_scan":
-        return await fping_scan(params)
+    try:
+        if tool_name == "masscan_scan":
+            return await masscan_scan(params)
+        elif tool_name == "fping_scan":
+            return await fping_scan(params)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     
     raise HTTPException(status_code=404, detail=f"Unknown tool: {tool_name}")
 

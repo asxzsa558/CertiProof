@@ -394,7 +394,7 @@ async def get_organization_command_dashboard(
 
         evidence_result = await db.execute(select(func.count(Evidence.id)).where(Evidence.project_id == project.id))
         evidence_count = evidence_result.scalar() or 0
-        evidence_rate = round((task_done / task_total) * 100) if task_total else min(100, evidence_count * 20)
+        task_completion_rate = round((task_done / task_total) * 100) if task_total else 0
 
         progress = round(float(assessment.progress if assessment else (project.compliance_score or 0)))
         progress_values.append(progress)
@@ -412,7 +412,10 @@ async def get_organization_command_dashboard(
             "stage": current_phase.name if current_phase else ("报告输出" if progress >= 100 else "差距分析"),
             "progress": progress,
             "risk_count": risk_count,
-            "evidence_rate": evidence_rate,
+            "evidence_count": evidence_count,
+            "task_total": task_total,
+            "task_done": task_done,
+            "task_completion_rate": task_completion_rate,
             "owner": owner_name,
             "next_action": "查看整改" if risk_count else "推进测评",
         })
