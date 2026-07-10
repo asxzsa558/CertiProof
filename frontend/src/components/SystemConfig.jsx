@@ -306,7 +306,37 @@ function SystemConfig({ trigger, value, onChange }) {
     )
   }
 
-  // --- Tab 4: 报告 ---
+  // --- Tab 4: 文档分析 ---
+  const renderDocumentTab = () => {
+    return (
+      <div className="config-tab-content">
+        <div className="config-section">
+          <SectionTitle
+            icon={<FileTextOutlined />}
+            title="文档分析模式"
+            subtitle="控制原生解析、OCR 补充和深度交叉验证"
+          />
+          <Form layout="vertical">
+            <Form.Item
+              label="默认模式"
+              help="标准模式只对扫描页、图片页和低文本页补充 OCR；深度模式会对 PDF 全页做 OCR/视觉交叉验证。"
+            >
+              <Select
+                value={getCurrentValue('document.analysis_mode') || 'standard'}
+                onChange={(v) => handleConfigChange('document.analysis_mode', v)}
+                className="full-width-select"
+              >
+                <Option value="standard">标准模式</Option>
+                <Option value="deep">深度模式</Option>
+              </Select>
+            </Form.Item>
+          </Form>
+        </div>
+      </div>
+    )
+  }
+
+  // --- Tab 5: 报告 ---
   const renderReportTab = () => {
     return (
       <div className="config-tab-content">
@@ -319,11 +349,11 @@ function SystemConfig({ trigger, value, onChange }) {
           <Form layout="vertical">
             <Form.Item label="默认格式">
               <Select
-                value={getCurrentValue('report.default_format') || 'pdf'}
+                value={getCurrentValue('report.default_format') || 'html'}
                 onChange={(v) => handleConfigChange('report.default_format', v)}
                 className="full-width-select"
               >
-                <Option value="pdf">PDF</Option>
+                <Option value="html">HTML</Option>
                 <Option value="json">JSON</Option>
               </Select>
             </Form.Item>
@@ -339,7 +369,7 @@ function SystemConfig({ trigger, value, onChange }) {
           <Form layout="vertical">
             <Form.Item
               label="包含原始扫描数据"
-              help="报告 PDF/JSON 中是否包含完整的扫描原始数据（端口列表、SSL 详情等）。"
+              help="报告 HTML/JSON 中是否包含完整的扫描原始数据（端口列表、SSL 详情等）。"
             >
               <Switch
                 checked={getCurrentValue('report.include_raw_scans') === true}
@@ -437,6 +467,9 @@ function SystemConfig({ trigger, value, onChange }) {
             </TabPane>
             <TabPane tab={<span><FileProtectOutlined /> 测评流程</span>} key="assessment">
               {renderAssessmentTab()}
+            </TabPane>
+            <TabPane tab={<span><FileTextOutlined /> 文档分析</span>} key="document">
+              {renderDocumentTab()}
             </TabPane>
             <TabPane tab={<span><FileTextOutlined /> 报告</span>} key="report">
               {renderReportTab()}

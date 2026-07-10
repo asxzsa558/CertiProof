@@ -9,6 +9,7 @@ from app.models.user import User
 from app.models.project import Project
 from app.models.asset import Asset
 from app.models.monitoring import ScheduledScan, ScanHistory, ScheduleFrequency
+from app.models.change_snapshot import ChangeSnapshot
 from app.schemas.monitoring import (
     ScheduledScanCreate,
     ScheduledScanUpdate,
@@ -17,6 +18,56 @@ from app.schemas.monitoring import (
 )
 
 router = APIRouter(prefix="/projects/{project_id}/monitoring", tags=["Monitoring"])
+
+
+@router.get("/changes")
+async def list_detected_changes(
+    project_id: int,
+    limit: int = 50,
+    reassessment_only: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "assessment:read")
+
+    query = select(ChangeSnapshot).where(ChangeSnapshot.project_id == project_id)
+    if reassessment_only:
+        query = query.where(ChangeSnapshot.reassessment_required.is_(True))
+    result = await db.execute(query.order_by(ChangeSnapshot.id.desc()).limit(min(limit, 100)))
+    return [
+        {
+            "id": item.id,
+            "type": item.snapshot_type,
+            "subject": item.subject,
+            "scope": item.scope,
+            "changes": item.changes or {},
+            "reliable": item.reliable,
+            "reassessment_required": item.reassessment_required,
+            "created_at": item.created_at,
+        }
+        for item in result.scalars().all()
+    ]
+
+
+@router.post("/changes/{change_id}/acknowledge")
+async def acknowledge_detected_change(
+    project_id: int,
+    change_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "assessment:manage")
+    result = await db.execute(
+        select(ChangeSnapshot).where(ChangeSnapshot.id == change_id, ChangeSnapshot.project_id == project_id)
+    )
+    change = result.scalar_one_or_none()
+    if not change:
+        raise HTTPException(status_code=404, detail="Change snapshot not found")
+    change.reassessment_required = False
+    await db.commit()
+    return {"id": change.id, "reassessment_required": False}
 
 
 def calculate_next_run(frequency: ScheduleFrequency, from_time: datetime = None) -> datetime:

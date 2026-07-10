@@ -15,6 +15,22 @@ class Dummy:
         pass
 
 
+class ScanTaskTypeDummy:
+    FULL = "full"
+
+
+class ScanTaskStatusDummy:
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class TriggeredByDummy:
+    MANUAL = "manual"
+
+
 def module(name, **attrs):
     mod = types.ModuleType(name)
     for key, value in attrs.items():
@@ -24,7 +40,12 @@ def module(name, **attrs):
 
 
 def load_orchestrator_class():
-    module("sqlalchemy", select=lambda *args, **kwargs: None)
+    module(
+        "sqlalchemy",
+        select=lambda *args, **kwargs: None,
+        update=lambda *args, **kwargs: None,
+        or_=lambda *args, **kwargs: None,
+    )
     module("sqlalchemy.ext")
     module("sqlalchemy.ext.asyncio", AsyncSession=Dummy)
     module("app")
@@ -41,14 +62,15 @@ def load_orchestrator_class():
     module(
         "app.models.scan_task",
         ScanTask=Dummy,
-        ScanTaskType=types.SimpleNamespace(FULL="full"),
-        ScanTaskStatus=types.SimpleNamespace(RUNNING="running", COMPLETED="completed", FAILED="failed"),
-        TriggeredBy=types.SimpleNamespace(MANUAL="manual"),
+        ScanTaskType=ScanTaskTypeDummy,
+        ScanTaskStatus=ScanTaskStatusDummy,
+        TriggeredBy=TriggeredByDummy,
     )
     module("app.models.finding", Finding=Dummy)
     module("app.models.project", Project=Dummy)
     module("app.core")
     module("app.core.database", AsyncSessionLocal=Dummy)
+    module("app.core.config", settings=types.SimpleNamespace(TASK_EXECUTION_MODE="inline", TASK_LEASE_MINUTES=10))
 
     path = Path(__file__).resolve().parents[1] / "backend/app/orchestrator/orchestrator.py"
     spec = importlib.util.spec_from_file_location("contract_orchestrator", path)

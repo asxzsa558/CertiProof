@@ -9,6 +9,7 @@ import {
   FileTextOutlined,
   LogoutOutlined,
   ProjectOutlined,
+  EyeOutlined,
   SafetyCertificateOutlined,
   UserOutlined,
 } from '@ant-design/icons'
@@ -34,6 +35,7 @@ function ReportsPage() {
   const [dashboard, setDashboard] = useState({ summary: {}, project_matrix: [], risk_queue: [] })
   const [loading, setLoading] = useState(false)
   const [downloadingId, setDownloadingId] = useState(null)
+  const [previewingId, setPreviewingId] = useState(null)
 
   const currentOrg = useMemo(
     () => organizations.find((org) => org.id === currentOrgId) || organizations[0],
@@ -75,7 +77,7 @@ function ReportsPage() {
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement('a')
       link.href = url
-      link.setAttribute('download', `certiproof-report-${projectId}.pdf`)
+      link.setAttribute('download', `certiproof-report-${projectId}.html`)
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -85,6 +87,21 @@ function ReportsPage() {
       message.error('报告下载失败')
     } finally {
       setDownloadingId(null)
+    }
+  }
+
+  const handlePreviewReport = async (projectId) => {
+    setPreviewingId(projectId)
+    try {
+      const response = await api.get(`/projects/${projectId}/report`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/html' }))
+      window.location.assign(url)
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+    } catch (error) {
+      console.error('Failed to preview report:', error)
+      message.error('报告预览失败')
+    } finally {
+      setPreviewingId(null)
     }
   }
 
@@ -194,14 +211,23 @@ function ReportsPage() {
                 <span className={report.risk_count ? 'report-risk hot' : 'report-risk'}>{report.risk_count}</span>
                 <span>{report.task_done || 0}/{report.task_total || 0}</span>
                 <Tag color={report.blocked ? 'gold' : report.progress >= 100 ? 'green' : 'blue'}>{report.status}</Tag>
-                <Button
-                  size="small"
-                  icon={<DownloadOutlined />}
-                  loading={downloadingId === report.project_id}
-                  onClick={() => handleDownloadReport(report.project_id)}
-                >
-                  PDF
-                </Button>
+                <div className="report-actions">
+                  <Button
+                    size="small"
+                    icon={<EyeOutlined />}
+                    loading={previewingId === report.project_id}
+                    onClick={() => handlePreviewReport(report.project_id)}
+                  >
+                    预览
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    loading={downloadingId === report.project_id}
+                    onClick={() => handleDownloadReport(report.project_id)}
+                    aria-label="下载 HTML 报告"
+                  />
+                </div>
               </div>
             )) : (
               <div className="empty-panel">暂无项目报告。创建项目并完成测评后会在这里汇总。</div>

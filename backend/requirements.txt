@@ -24,10 +24,13 @@ httpx
 # Utilities
 python-dotenv
 email-validator
-reportlab
 pyyaml
 dnspython
 aiofiles
+python-docx
+pypdf
+pypdfium2
+Pillow
 
 # Testing
 pytest

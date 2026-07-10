@@ -20,7 +20,7 @@ const pollTaskResultUntilDone = async ({
   setMessages,
   completedTaskIdsRef,
   pollRef,
-  maxAttempts = 120,
+  maxAttempts = 900,
   interval = 2000,
 }) => {
   for (let i = 0; i < maxAttempts; i++) {
@@ -61,13 +61,13 @@ const pollTaskResultUntilDone = async ({
   }
 
   setMessages(prev => updateTaskMessage(prev, taskId, {
-    taskCompleted: true,
-    taskStatus: 'timeout',
+    taskCompleted: false,
+    taskStatus: 'running',
+    currentStep: '任务仍在后台执行，可稍后刷新或查看历史结果。',
   }))
   setMessages(prev => [...prev, {
     role: 'assistant',
-    content: '任务执行超时，请稍后再试。',
-    isError: true,
+    content: '任务仍在后台执行，漏洞扫描、弱口令、SSL 等长任务可能需要更久。你可以继续发送其他指令，稍后刷新或查看结果库。',
   }])
 }
 

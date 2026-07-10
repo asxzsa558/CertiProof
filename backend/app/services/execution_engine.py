@@ -57,6 +57,7 @@ class ExecutionEngine:
             "cme": "crackmapexec_scan",
             "baseline": "baseline_check",
             "linux_baseline": "baseline_check",
+            "generate_pdf_report": "generate_html_report",
         }
         return aliases.get(capability_name, capability_name)
 
@@ -370,6 +371,7 @@ class ExecutionEngine:
                     "capability": capability_name,
                     "status": "success",
                     "target": parameters.get("target", "unknown"),
+                    "parameters": safe_parameters,
                     "result": result,
                 })
                 success_count += 1
@@ -699,6 +701,7 @@ class ExecutionEngine:
             return {
                 "capability": capability_name,
                 "target": target,
+                "parameters": redact_sensitive(parameters),
                 "status": result.get("status"),
                 "result": result.get("result"),
                 "error": result.get("error"),
@@ -887,8 +890,8 @@ class ExecutionEngine:
             return await self._update_ticket_status(parameters, user_id, project_id, db)
 
         # 报告生成类能力
-        elif capability_name == "generate_pdf_report":
-            return await self._generate_pdf_report(parameters, user_id, project_id, db)
+        elif capability_name == "generate_html_report":
+            return await self._generate_html_report(parameters, user_id, project_id, db)
 
         elif capability_name == "generate_json_report":
             return await self._generate_json_report(parameters, user_id, project_id, db)
@@ -1956,8 +1959,10 @@ class ExecutionEngine:
 
         if parameters.get("resolution_notes"):
             ticket.resolution_notes = parameters["resolution_notes"]
+        if parameters.get("skip_reason"):
+            ticket.skip_reason = parameters["skip_reason"]
 
-        if new_status in ("resolved", "verified", "closed"):
+        if new_status in ("resolved", "verified", "closed", "skipped"):
             from datetime import datetime
             ticket.resolved_at = datetime.utcnow()
 
@@ -1969,21 +1974,21 @@ class ExecutionEngine:
             "status": new_status,
         }
 
-    async def _generate_pdf_report(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
-        """生成 PDF 报告"""
-        from app.services.report_service import generate_report
+    async def _generate_html_report(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """生成 HTML 报告"""
+        from app.services.report_service import generate_html_report
 
         pid = parameters.get("project_id", project_id)
         if not pid:
             return {"message": "请指定项目 ID"}
 
         try:
-            pdf_buffer = await generate_report(db, pid)
+            html = await generate_html_report(db, pid)
             return {
-                "message": f"PDF 报告已生成（{len(pdf_buffer.getvalue())} 字节）",
+                "message": f"HTML 报告已生成（{len(html.encode('utf-8'))} 字节）",
                 "project_id": pid,
-                "format": "pdf",
-                "size_bytes": len(pdf_buffer.getvalue()),
+                "format": "html",
+                "size_bytes": len(html.encode("utf-8")),
             }
         except Exception as e:
             return {"message": f"报告生成失败: {str(e)}"}
@@ -2152,7 +2157,7 @@ class ExecutionEngine:
 - 更新工单状态
 
 📄 **报告生成**
-- 生成 PDF 报告
+- 生成 HTML 报告
 - 生成 JSON 报告
 
 ⏰ **定时任务**

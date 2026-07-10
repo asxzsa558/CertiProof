@@ -24,7 +24,10 @@ async def create_asset(
     # Verify project exists and user has access
     from app.api.projects import get_project_for_user
     project = await get_project_for_user(db, project_id, current_user.id, "asset:create")
-    
+
+    from app.services.change_detection import record_asset_snapshot
+    await record_asset_snapshot(db, project_id)
+
     # Generate verification token
     verification_token = secrets.token_urlsafe(32)
     
@@ -39,6 +42,7 @@ async def create_asset(
     db.add(asset)
     await db.commit()
     await db.refresh(asset)
+    await record_asset_snapshot(db, project_id)
     
     return asset
 
@@ -179,6 +183,9 @@ async def delete_asset(
             detail="Asset not found",
         )
     
+    from app.services.change_detection import record_asset_snapshot
+    await record_asset_snapshot(db, project_id)
     await db.delete(asset)
     await db.commit()
+    await record_asset_snapshot(db, project_id)
     return None

@@ -50,10 +50,16 @@ DEFAULT_CONFIGS = {
         "description": "多资产扫描最大并发数（1-10）",
         "category": "assessment",
     },
+    # 文档合规检查
+    "document.analysis_mode": {
+        "value": settings.DOCUMENT_ANALYSIS_MODE,
+        "description": "默认文档分析模式（standard/deep）",
+        "category": "document",
+    },
     # 报告
     "report.default_format": {
         "value": settings.REPORT_DEFAULT_FORMAT,
-        "description": "默认报告格式（pdf/json）",
+        "description": "默认报告格式（html/json）",
         "category": "report",
     },
     "report.include_raw_scans": {
@@ -89,7 +95,7 @@ class ConfigService:
         db_configs = {c.key: c.value for c in result.scalars().all()}
 
         # 合并默认配置和数据库配置
-        grouped = {"ai": {}, "assessment": {}, "report": {}}
+        grouped = {"ai": {}, "assessment": {}, "document": {}, "report": {}}
         for key, meta in DEFAULT_CONFIGS.items():
             category = meta["category"]
             if key in db_configs:

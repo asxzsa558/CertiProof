@@ -62,8 +62,10 @@ services:
       MCP_GATEWAY_URL: http://mcp-gateway:9000
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       TASK_EXECUTION_MODE: ${TASK_EXECUTION_MODE:-worker}
+      DOCUMENT_ANALYSIS_MODE: ${DOCUMENT_ANALYSIS_MODE:-standard}
     volumes:
       - ./reference:/reference
+      - uploads_data:/app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -92,8 +94,10 @@ services:
       TASK_WORKER_POLL_SECONDS: ${TASK_WORKER_POLL_SECONDS:-3}
       TASK_LEASE_MINUTES: ${TASK_LEASE_MINUTES:-120}
       MONITORING_WORKER_BATCH_SIZE: ${MONITORING_WORKER_BATCH_SIZE:-5}
+      DOCUMENT_ANALYSIS_MODE: ${DOCUMENT_ANALYSIS_MODE:-standard}
     volumes:
       - ./reference:/reference
+      - uploads_data:/app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -217,6 +221,11 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      PADDLE_DEVICE: ${PADDLE_DEVICE:-cpu}
+      PADDLE_PDX_MODEL_SOURCE: ${PADDLE_PDX_MODEL_SOURCE:-BOS}
+      DOCUMENT_OCR_ENGINE: ${DOCUMENT_OCR_ENGINE:-auto}
+    volumes:
+      - ocr_models:/root/.paddlex
     restart: unless-stopped
     networks:
       - certiproof-net
@@ -224,6 +233,8 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  uploads_data:
+  ocr_models:
 
 networks:
   certiproof-net:

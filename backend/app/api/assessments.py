@@ -11,9 +11,9 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from typing import Dict, List, Optional
 from pydantic import BaseModel
 
@@ -22,11 +22,22 @@ from app.core.security import get_current_user
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+MAX_TASK_UPLOAD_SIZE = 100 * 1024 * 1024
 from app.models.user import User
 from app.models.assessment import FlowTemplate, Assessment, PhaseInstance, TaskInstance, FlowEvent
 from app.models.project import Project
+from app.models.finding import Finding, Severity, Judgment, JudgmentEngine, FindingStatus
+from app.models.remediation import RemediationTicket, RemediationStatus
+from app.models.scan_task import ScanTask, ScanTaskType, ScanTaskStatus, TriggeredBy
+from app.models.evidence import Evidence, EvidenceType
 from app.services.flow_engine import FlowEngine, get_flow_engine
-from app.services.assessment_templates import LEVEL_2_TEMPLATE, LEVEL_3_TEMPLATE
+from app.services.config_service import get_config_service
+from app.services.document_pipeline import (
+    SUPPORTED_SUFFIXES,
+    create_document_run,
+    normalize_analysis_mode,
+)
+from app.services.file_storage import file_storage
 
 router = APIRouter(prefix="/assessments", tags=["Assessments"])
 
@@ -197,27 +208,8 @@ async def init_default_templates(
 ):
     """初始化默认流程模板"""
     engine = get_flow_engine(db)
-    
-    # 检查是否已存在
-    existing = await engine.list_templates(active_only=False)
-    if existing:
-        return {"message": "Templates already exist", "count": len(existing)}
-    
-    # 创建二级模板
-    await engine.create_template(
-        name=LEVEL_2_TEMPLATE["name"],
-        compliance_level=LEVEL_2_TEMPLATE["compliance_level"],
-        phases_config=LEVEL_2_TEMPLATE["phases_config"],
-    )
-    
-    # 创建三级模板
-    await engine.create_template(
-        name=LEVEL_3_TEMPLATE["name"],
-        compliance_level=LEVEL_3_TEMPLATE["compliance_level"],
-        phases_config=LEVEL_3_TEMPLATE["phases_config"],
-    )
-    
-    return {"message": "Default templates created"}
+    templates = await engine.upsert_default_templates()
+    return {"message": "Default templates upserted", "count": len(templates)}
 
 
 # ========== Assessment APIs ==========
@@ -544,9 +536,9 @@ async def list_tasks(
     current_user: User = Depends(get_current_user),
 ):
     """列出阶段的所有任务"""
-    await require_phase_permission(db, phase_id, current_user, "assessment:read")
+    phase, assessment = await require_phase_permission(db, phase_id, current_user, "assessment:read")
     engine = get_flow_engine(db)
-    tasks = await engine.get_tasks(phase_id)
+    tasks = await engine.get_tasks(phase_id, official_only=True)
     
     return [
         TaskResponse(
@@ -771,6 +763,7 @@ async def _execute_task_async_multi(
             asset_results = {}
             all_failed = []
             all_completed = []
+            all_warnings = []
 
             for i, result in enumerate(results):
                 target = targets[i]
@@ -784,15 +777,19 @@ async def _execute_task_async_multi(
                     asset_results[target] = result
                     if result["status"] == "failed":
                         all_failed.append({"target": target, **result})
+                    elif result["status"] == "partial":
+                        all_completed.append({"target": target, **result})
+                        all_warnings.append({"target": target, **result})
                     else:
                         all_completed.append({"target": target, **result})
 
             final_result = {
-                "status": "completed" if not all_failed else ("partial" if all_completed else "failed"),
+                "status": "completed" if not all_failed and not all_warnings else ("partial" if all_completed else "failed"),
                 "task_type": task_type,
                 "asset_results": asset_results,
                 "completed": all_completed,
                 "failed": all_failed,
+                "warnings": all_warnings,
             }
 
             # 更新任务状态
@@ -871,6 +868,8 @@ async def execute_task(
     assessment = await engine.get_assessment(phase.assessment_id)
     
     try:
+        if task.status != "todo":
+            await engine.reset_task(task_id)
         # 开始任务
         await engine.start_task(task_id)
         
@@ -889,26 +888,31 @@ async def execute_task(
         else:
             # 多目标并发执行
             import asyncio
-            tasks_list = []
-            for target in targets:
+            from app.core.database import AsyncSessionLocal
+
+            async def execute_target(target):
                 target_params = dict(req.params or {})
                 if req.credentials and target in req.credentials:
                     target_params.update(req.credentials[target])
-                tasks_list.append(
-                    executor.execute_task(
+                async with AsyncSessionLocal() as target_db:
+                    return await get_task_executor(target_db).execute_task(
                         task_type=task.task_type,
                         target=target,
                         project_id=assessment.project_id,
                         user_id=current_user.id,
                         params=target_params,
                     )
-                )
+
+            tasks_list = []
+            for target in targets:
+                tasks_list.append(execute_target(target))
             results = await asyncio.gather(*tasks_list, return_exceptions=True)
             
             # 汇总结果
             asset_results = {}
             all_failed = []
             all_completed = []
+            all_warnings = []
             
             for i, result in enumerate(results):
                 target = targets[i]
@@ -922,23 +926,27 @@ async def execute_task(
                     asset_results[target] = result
                     if result["status"] == "failed":
                         all_failed.append({"target": target, **result})
+                    elif result["status"] == "partial":
+                        all_completed.append({"target": target, **result})
+                        all_warnings.append({"target": target, **result})
                     else:
                         all_completed.append({"target": target, **result})
             
             result = {
-                "status": "completed" if not all_failed else ("partial" if all_completed else "failed"),
+                "status": "completed" if not all_failed and not all_warnings else ("partial" if all_completed else "failed"),
                 "task_type": task.task_type,
                 "asset_results": asset_results,
                 "completed": all_completed,
                 "failed": all_failed,
+                "warnings": all_warnings,
             }
         
         # 更新任务状态
         if result["status"] in ["completed", "partial"]:
             await engine.complete_task(task_id, result)
             return {
-                "message": "任务执行完成",
-                "status": "completed",
+                "message": "任务部分完成，存在无法检测项" if result["status"] == "partial" else "任务执行完成",
+                "status": result["status"],
                 "result": result
             }
         elif result["status"] == "failed":
@@ -1010,6 +1018,197 @@ UPLOAD_DIR = Path(settings.UPLOAD_DIR) / "assessments"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
+async def _resolve_document_analysis_mode(db: AsyncSession, mode: str | None) -> str:
+    if not mode or mode == "default":
+        mode = await get_config_service(db).get("document.analysis_mode", settings.DOCUMENT_ANALYSIS_MODE)
+    return normalize_analysis_mode(mode)
+
+
+@router.post("/tasks/{task_id}/documents", status_code=status.HTTP_202_ACCEPTED)
+async def upload_task_documents(
+    task_id: int,
+    files: List[UploadFile] = File(...),
+    analysis_mode: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """保存一个或多个文档证据，并排队执行聚合合规分析。"""
+    task, _, assessment = await require_task_permission(db, task_id, current_user, "evidence:manage")
+    if task.status == "in_progress":
+        raise HTTPException(status_code=409, detail="文档正在分析，请等待完成后再上传")
+    if task.task_type != "doc_review" or "文档检查：" not in task.name:
+        raise HTTPException(status_code=400, detail="该任务不是文档合规检查任务")
+    if not files:
+        raise HTTPException(status_code=400, detail="请至少上传一个文件")
+
+    configured_mode = await _resolve_document_analysis_mode(db, analysis_mode)
+
+    saved = []
+    clause_id = f"DOC-TASK-{task.id}"
+    for file in files:
+        file_name = file.filename or "document"
+        suffix = Path(file_name).suffix.lower()
+        if suffix not in SUPPORTED_SUFFIXES:
+            detail = "暂不支持旧版 DOC，请转换为 DOCX 或 PDF" if suffix == ".doc" else f"不支持的文件格式：{suffix or '未知'}"
+            raise HTTPException(status_code=415, detail=detail)
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail=f"{file_name} 是空文件")
+        if len(content) > MAX_TASK_UPLOAD_SIZE:
+            raise HTTPException(status_code=413, detail=f"{file_name} 超过 100MB")
+
+        file_path, digest, file_size = await file_storage.save_file(assessment.project_id, file_name, content)
+        duplicate = (await db.execute(
+            select(Evidence).where(
+                Evidence.project_id == assessment.project_id,
+                Evidence.clause_id == clause_id,
+                Evidence.hash_sha256 == digest,
+            )
+        )).scalar_one_or_none()
+        if duplicate:
+            await file_storage.delete_file(file_path)
+            saved.append({"id": duplicate.id, "file_name": duplicate.file_name, "duplicate": True})
+            continue
+
+        evidence = Evidence(
+            project_id=assessment.project_id,
+            evidence_type=EvidenceType.DOCUMENT,
+            source="document_compliance_upload",
+            file_name=file_name,
+            file_path=file_path,
+            file_size=file_size,
+            mime_type=file.content_type or "application/octet-stream",
+            clause_id=clause_id,
+            hash_sha256=digest,
+            uploaded_by=current_user.id,
+            description=task.name,
+        )
+        db.add(evidence)
+        await db.flush()
+        saved.append({"id": evidence.id, "file_name": file_name, "duplicate": False})
+
+    await db.commit()
+    run = await create_document_run(db, task, assessment.project_id, current_user.id, configured_mode)
+    return {"status": "queued", "task_id": task.id, "run_id": run.id, "analysis_mode": configured_mode, "files": saved}
+
+
+@router.get("/tasks/{task_id}/documents")
+async def list_task_documents(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task, _, assessment = await require_task_permission(db, task_id, current_user, "assessment:read")
+    evidences = (await db.execute(
+        select(Evidence)
+        .where(Evidence.project_id == assessment.project_id, Evidence.clause_id == f"DOC-TASK-{task.id}")
+        .order_by(Evidence.created_at)
+    )).scalars().all()
+    return [{
+        "id": evidence.id,
+        "file_name": evidence.file_name,
+        "file_size": evidence.file_size,
+        "mime_type": evidence.mime_type,
+        "hash_sha256": evidence.hash_sha256,
+        "created_at": evidence.created_at,
+        "extraction": {
+            key: (evidence.content or {}).get(key)
+            for key in ("analysis_mode", "page_count", "native_blocks", "ocr_blocks", "vision_blocks", "warnings")
+        } if evidence.content else None,
+    } for evidence in evidences]
+
+
+@router.delete("/tasks/{task_id}/documents/{evidence_id}")
+async def delete_task_document(
+    task_id: int,
+    evidence_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task, _, assessment = await require_task_permission(db, task_id, current_user, "evidence:manage")
+    if task.status == "in_progress":
+        raise HTTPException(status_code=409, detail="文档正在分析，请等待完成后再删除")
+    evidence = (await db.execute(
+        select(Evidence).where(
+            Evidence.id == evidence_id,
+            Evidence.project_id == assessment.project_id,
+            Evidence.clause_id == f"DOC-TASK-{task.id}",
+        )
+    )).scalar_one_or_none()
+    if not evidence:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    await file_storage.delete_file(evidence.file_path)
+    await db.delete(evidence)
+    await db.commit()
+
+    remaining = (await db.execute(
+        select(Evidence.id).where(
+            Evidence.project_id == assessment.project_id,
+            Evidence.clause_id == f"DOC-TASK-{task.id}",
+        )
+    )).scalars().all()
+    if remaining:
+        previous_mode = (task.result or {}).get("analysis_mode")
+        configured_mode = await _resolve_document_analysis_mode(db, previous_mode)
+        run = await create_document_run(db, task, assessment.project_id, current_user.id, configured_mode)
+        return {"status": "queued", "run_id": run.id, "analysis_mode": configured_mode}
+
+    finding_ids = (await db.execute(
+        select(Finding.id).where(
+            Finding.project_id == assessment.project_id,
+            Finding.clause_id.like(f"DOC-TASK-{task.id}-%"),
+        )
+    )).scalars().all()
+    if finding_ids:
+        await db.execute(delete(RemediationTicket).where(RemediationTicket.finding_id.in_(finding_ids)))
+        await db.execute(delete(Finding).where(Finding.id.in_(finding_ids)))
+    await db.commit()
+    await get_flow_engine(db).reset_task(task.id)
+    return {"status": "empty"}
+
+
+@router.post("/tasks/{task_id}/documents/analyze", status_code=status.HTTP_202_ACCEPTED)
+async def reanalyze_task_documents(
+    task_id: int,
+    analysis_mode: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task, _, assessment = await require_task_permission(db, task_id, current_user, "evidence:manage")
+    has_files = (await db.execute(
+        select(Evidence.id).where(
+            Evidence.project_id == assessment.project_id,
+            Evidence.clause_id == f"DOC-TASK-{task.id}",
+        ).limit(1)
+    )).scalar_one_or_none()
+    if not has_files:
+        raise HTTPException(status_code=400, detail="该任务尚未上传文档")
+    configured_mode = await _resolve_document_analysis_mode(db, analysis_mode)
+    run = await create_document_run(db, task, assessment.project_id, current_user.id, configured_mode)
+    return {"status": "queued", "run_id": run.id, "analysis_mode": configured_mode}
+
+
+@router.get("/document-runs/{run_id}")
+async def get_document_run(
+    run_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    run = await db.get(ScanTask, run_id)
+    if not run or (run.parameters or {}).get("source") != "document_control_analysis":
+        raise HTTPException(status_code=404, detail="文档分析任务不存在")
+    await require_project_permission(db, run.project_id, current_user, "assessment:read")
+    return {
+        "id": run.id,
+        "status": run.status,
+        "progress": run.progress,
+        "error": run.error_message,
+        "result": run.result_summary,
+        "created_at": run.created_at,
+        "completed_at": run.completed_at,
+    }
+
+
 def _extract_text_from_file(file_path: Path) -> str:
     """从文件中提取文本内容（支持 txt、md、pdf、docx）"""
     suffix = file_path.suffix.lower()
@@ -1055,10 +1254,160 @@ def _extract_text_from_file(file_path: Path) -> str:
     return ""
 
 
+async def _sync_document_gap_findings(
+    db: AsyncSession,
+    project_id: int,
+    task: TaskInstance,
+    analysis: dict,
+    user_id: int,
+) -> dict:
+    if (
+        not analysis
+        or analysis.get("type") != "document_control_analysis"
+        or analysis.get("status") == "unable"
+    ):
+        return {"created_or_updated": 0, "scan_task_id": None}
+
+    scan_task = await db.get(ScanTask, analysis.get("run_id")) if analysis.get("run_id") else None
+    if not scan_task:
+        scan_task = ScanTask(
+            project_id=project_id,
+            task_type=ScanTaskType.TARGETED,
+            status=ScanTaskStatus.COMPLETED,
+            triggered_by=TriggeredBy.MANUAL,
+            parameters={
+                "source": "document_control_analysis",
+                "task_id": task.id,
+                "document_name": analysis.get("document_name"),
+                "file_name": analysis.get("file_name"),
+            },
+            orchestrator_task_id=f"doc-control-{task.id}-{uuid.uuid4().hex[:8]}",
+            result_summary=analysis,
+            completed_at=datetime.utcnow(),
+        )
+        db.add(scan_task)
+        await db.flush()
+
+    failed_clause_ids = set()
+    changed = 0
+    for control in analysis.get("controls", []):
+        for point in control.get("points", []):
+            if point.get("status") not in {"fail", "partial"}:
+                continue
+
+            clause_id = f"DOC-TASK-{task.id}-{control.get('id')}-{point.get('id')}"
+            failed_clause_ids.add(clause_id)
+            result = await db.execute(
+                select(Finding).where(Finding.project_id == project_id, Finding.clause_id == clause_id)
+            )
+            finding = result.scalar_one_or_none()
+            is_partial = point.get("status") == "partial"
+            description = (
+                f"{analysis.get('document_name') or task.name}："
+                f"{'证据不完整，' if is_partial else ''}{point.get('missing_judgement')}"
+            )
+            suggestion = point.get("remediation") or f"补充“{point.get('text')}”相关制度描述，并在文档中保留可审计证据。"
+            evidence_ids = sorted({
+                item.get("evidence_id") for item in point.get("evidence", []) if item.get("evidence_id")
+            })
+
+            if finding:
+                finding.scan_task_id = scan_task.id
+                finding.description = description
+                finding.remediation_suggestion = suggestion
+                finding.confidence = analysis.get("confidence")
+                finding.judgment = Judgment.PARTIAL if is_partial else Judgment.FAIL
+                finding.evidence_ids = evidence_ids
+                if finding.status == FindingStatus.RESOLVED:
+                    finding.status = FindingStatus.OPEN
+                    finding.resolved_at = None
+            else:
+                finding = Finding(
+                    project_id=project_id,
+                    scan_task_id=scan_task.id,
+                    clause_id=clause_id,
+                    clause_name=control.get("title") or analysis.get("document_name"),
+                    severity=Severity.MEDIUM,
+                    judgment=Judgment.PARTIAL if is_partial else Judgment.FAIL,
+                    judgment_engine=JudgmentEngine.RULE,
+                    confidence=analysis.get("confidence"),
+                    description=description,
+                    remediation_suggestion=suggestion,
+                    status=FindingStatus.OPEN,
+                    evidence_ids=evidence_ids,
+                )
+                db.add(finding)
+                await db.flush()
+
+            result = await db.execute(
+                select(RemediationTicket).where(RemediationTicket.finding_id == finding.id)
+            )
+            ticket = result.scalar_one_or_none()
+            if ticket:
+                ticket.title = description[:500]
+                ticket.description = description
+                ticket.remediation_plan = suggestion
+                if ticket.status in (
+                    RemediationStatus.RESOLVED,
+                    RemediationStatus.VERIFIED,
+                    RemediationStatus.CLOSED,
+                ):
+                    ticket.status = RemediationStatus.OPEN
+                    ticket.resolved_at = None
+                    ticket.verified_at = None
+                    ticket.resolution_notes = "复测再次发现该缺失项，已重新打开。"
+            else:
+                db.add(RemediationTicket(
+                    finding_id=finding.id,
+                    project_id=project_id,
+                    title=description[:500],
+                    description=description,
+                    remediation_plan=suggestion,
+                    priority="medium",
+                    assigned_by=user_id,
+                    status=RemediationStatus.OPEN,
+                ))
+            changed += 1
+
+    fixed = 0
+    existing_result = await db.execute(
+        select(Finding).where(
+            Finding.project_id == project_id,
+            Finding.clause_id.like(f"DOC-TASK-{task.id}-%"),
+        )
+    )
+    for finding in existing_result.scalars().all():
+        if finding.clause_id in failed_clause_ids:
+            continue
+        if finding.status != FindingStatus.RESOLVED:
+            finding.status = FindingStatus.RESOLVED
+            finding.resolved_at = datetime.utcnow()
+
+        ticket_result = await db.execute(
+            select(RemediationTicket).where(RemediationTicket.finding_id == finding.id)
+        )
+        ticket = ticket_result.scalar_one_or_none()
+        if ticket and ticket.status not in (RemediationStatus.CLOSED, RemediationStatus.SKIPPED):
+            ticket.status = RemediationStatus.RESOLVED
+            ticket.resolved_at = ticket.resolved_at or datetime.utcnow()
+            ticket.resolution_notes = ticket.resolution_notes or "文档复测未再发现该缺失项。"
+        fixed += 1
+
+    scan_task.findings_count = len(failed_clause_ids)
+    scan_task.medium_severity_count = len(failed_clause_ids)
+    await db.commit()
+    return {
+        "created_or_updated": changed,
+        "fixed": fixed,
+        "scan_task_id": scan_task.id,
+    }
+
+
 @router.post("/tasks/{task_id}/upload")
 async def upload_task_document(
     task_id: int,
     file: UploadFile = File(...),
+    analysis_mode: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1074,6 +1423,52 @@ async def upload_task_document(
     task = await engine.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
+    if task.status == "in_progress":
+        raise HTTPException(status_code=409, detail="文档正在分析，请等待完成后再上传")
+
+    if task.task_type == "doc_review" and "文档检查：" in task.name:
+        phase = await engine.get_phase(task.phase_id)
+        assessment = await engine.get_assessment(phase.assessment_id) if phase else None
+        if not assessment:
+            raise HTTPException(status_code=404, detail="测评不存在")
+        file_name = file.filename or "document"
+        suffix = Path(file_name).suffix.lower()
+        if suffix not in SUPPORTED_SUFFIXES:
+            detail = "暂不支持旧版 DOC，请转换为 DOCX 或 PDF" if suffix == ".doc" else f"不支持的文件格式：{suffix or '未知'}"
+            raise HTTPException(status_code=415, detail=detail)
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="文件为空")
+        if len(content) > MAX_TASK_UPLOAD_SIZE:
+            raise HTTPException(status_code=413, detail="文件过大，单个文档最大支持 100MB")
+        file_path, digest, file_size = await file_storage.save_file(assessment.project_id, file_name, content)
+        duplicate = (await db.execute(
+            select(Evidence).where(
+                Evidence.project_id == assessment.project_id,
+                Evidence.clause_id == f"DOC-TASK-{task.id}",
+                Evidence.hash_sha256 == digest,
+            )
+        )).scalar_one_or_none()
+        if duplicate:
+            await file_storage.delete_file(file_path)
+        else:
+            db.add(Evidence(
+                project_id=assessment.project_id,
+                evidence_type=EvidenceType.DOCUMENT,
+                source="document_compliance_upload",
+                file_name=file_name,
+                file_path=file_path,
+                file_size=file_size,
+                mime_type=file.content_type or "application/octet-stream",
+                clause_id=f"DOC-TASK-{task.id}",
+                hash_sha256=digest,
+                uploaded_by=current_user.id,
+                description=task.name,
+            ))
+        await db.commit()
+        configured_mode = await _resolve_document_analysis_mode(db, analysis_mode)
+        run = await create_document_run(db, task, assessment.project_id, current_user.id, configured_mode)
+        return {"status": "queued", "task_id": task.id, "run_id": run.id, "analysis_mode": configured_mode, "message": "文档已上传，正在后台分析"}
 
     # 保存文件
     file_ext = Path(file.filename).suffix if file.filename else ""
@@ -1083,6 +1478,8 @@ async def upload_task_document(
     file_path = task_upload_dir / unique_name
 
     content = await file.read()
+    if len(content) > MAX_TASK_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail="文件过大，单个文档最大支持 100MB")
     with open(file_path, "wb") as f:
         f.write(content)
 
@@ -1106,6 +1503,8 @@ async def upload_task_document(
             document_content=document_content,
         )
 
+    analysis_result = None
+
     # 上传文档并完成任务
     result = await engine.upload_task_document(
         task_id=task_id,
@@ -1115,6 +1514,7 @@ async def upload_task_document(
         mime_type=file.content_type or "application/octet-stream",
         project_id=assessment.project_id,
         validation_result=validation_result,
+        analysis_result=analysis_result,
     )
 
     return result
@@ -1122,6 +1522,10 @@ async def upload_task_document(
 
 class SkipTaskRequest(BaseModel):
     reason: str = ""
+
+
+class RestartRequest(BaseModel):
+    mode: str = "reset"
 
 
 @router.post("/tasks/{task_id}/skip")
@@ -1209,7 +1613,7 @@ async def reset_task(
     current_user: User = Depends(get_current_user),
 ):
     """
-    重置任务（将 failed/cancelled 状态的任务重置为 todo）
+    重置任务（清空结果并回到 todo；正在执行中的任务需先停止）
     """
     await require_task_permission(db, task_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
@@ -1217,10 +1621,10 @@ async def reset_task(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    if task.status not in ("failed", "cancelled"):
+    if task.status == "in_progress":
         raise HTTPException(
             status_code=400,
-            detail=f"任务状态为 {task.status}，不能重置",
+            detail="任务正在执行中，请先停止后再重置",
         )
 
     try:
@@ -1237,22 +1641,24 @@ async def reset_task(
 @router.post("/{assessment_id}/restart")
 async def restart_assessment(
     assessment_id: int,
+    req: Optional[RestartRequest] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    重新开始测评（将 completed 状态重置为 not_started）
-    同时重置所有阶段和任务
+    继续或重置测评。mode=continue 保留流程结果，mode=reset 重置阶段、任务和测评产物。
     """
     await require_assessment_permission(db, assessment_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
-        assessment = await engine.restart_assessment(assessment_id)
+        mode = (req.mode if req else "reset")
+        assessment = await engine.restart_assessment(assessment_id, mode=mode)
+        reset = mode != "continue"
         return {
-            "status": "restarted",
+            "status": "reset" if reset else "reopened",
             "assessment_id": assessment_id,
-            "message": "测评已重新开始",
+            "message": "测评进度、问题、证据和整改队列已完全重置" if reset else "测评已重新打开，历史结果和证据已保留",
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1261,22 +1667,24 @@ async def restart_assessment(
 @router.post("/phases/{phase_id}/restart")
 async def restart_phase(
     phase_id: int,
+    req: Optional[RestartRequest] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    重新开始阶段（将 completed/skipped 状态重置为 pending）
-    同时重置该阶段下所有任务
+    继续或重置阶段。mode=continue 保留任务结果，mode=reset 重置本阶段任务进度。
     """
     await require_phase_permission(db, phase_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
     
     try:
-        phase = await engine.restart_phase(phase_id)
+        mode = (req.mode if req else "reset")
+        phase = await engine.restart_phase(phase_id, mode=mode)
+        reset = mode != "continue"
         return {
-            "status": "restarted",
+            "status": "reset" if reset else "reopened",
             "phase_id": phase_id,
-            "message": "阶段已重新开始",
+            "message": "阶段进度已重置" if reset else "阶段已重新打开，历史结果和证据已保留",
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1353,7 +1761,7 @@ async def get_assessment_summary(
     task_details = []
     
     for phase in phases:
-        tasks = await engine.get_tasks(phase.id)
+        tasks = await engine.get_tasks(phase.id, official_only=True)
         for task in tasks:
             total_tasks += 1
             if task.status == "completed":
@@ -1412,7 +1820,7 @@ async def get_assessment_summary(
                         "status": t.status,
                         "result": t.result,
                     }
-                    for t in await engine.get_tasks(p.id)
+                    for t in await engine.get_tasks(p.id, official_only=True)
                 ],
             }
             for p in phases
@@ -1429,7 +1837,7 @@ async def get_assessment_summary(
 
 async def _calculate_phase_score(engine, phase) -> float:
     """计算阶段分数"""
-    tasks = await engine.get_tasks(phase.id)
+    tasks = await engine.get_tasks(phase.id, official_only=True)
     total = len(tasks)
     completed = sum(1 for t in tasks if t.status == "completed")
     return round((completed / total * 100) if total > 0 else 0, 1)
@@ -1438,33 +1846,24 @@ async def _calculate_phase_score(engine, phase) -> float:
 @router.get("/{assessment_id}/report")
 async def get_assessment_report(
     assessment_id: int,
-    format: str = "json",
+    format: str = "html",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取测评报告（支持 json 和 pdf 格式）"""
+    """获取测评报告（HTML 为主，兼容 json）"""
     await require_assessment_permission(db, assessment_id, current_user, "report:export")
     engine = get_flow_engine(db)
     assessment = await engine.get_assessment(assessment_id)
     if not assessment:
         raise HTTPException(status_code=404, detail="测评不存在")
     
-    if format == "pdf":
-        from app.services.report_service import generate_report
-        pdf_bytes = await generate_report(
-            db=db,
-            project_id=assessment.project_id
-        )
-        from fastapi.responses import StreamingResponse
-        return StreamingResponse(
-            pdf_bytes,
-            media_type="application/pdf",
-            headers={"Content-Disposition": "attachment; filename=assessment_report.pdf"},
-        )
-    else:
+    if format == "json":
         from app.services.report_service import generate_json_report
-        json_report = await generate_json_report(
-            db=db,
-            project_id=assessment.project_id
-        )
-        return json_report
+        return await generate_json_report(db=db, project_id=assessment.project_id)
+
+    from app.services.report_service import generate_html_report
+    return Response(
+        content=await generate_html_report(db=db, project_id=assessment.project_id),
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=assessment_report.html"},
+    )

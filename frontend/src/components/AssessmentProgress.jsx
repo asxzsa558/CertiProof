@@ -30,6 +30,7 @@ import {
   ClusterOutlined,
   WindowsOutlined,
   GlobalOutlined,
+  ToolOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import './AssessmentProgress.css'
@@ -38,6 +39,11 @@ const { Step } = Steps
 
 const TASK_TYPE_ICONS = {
   asset_discovery: <RadarChartOutlined />,
+  high_risk_port_scan: <RadarChartOutlined />,
+  basic_vulnerability_scan: <BugOutlined />,
+  basic_baseline_check: <SettingOutlined />,
+  basic_weak_password_scan: <KeyOutlined />,
+  basic_ssl_tls_scan: <LockOutlined />,
   config_check: <SettingOutlined />,
   vuln_scan: <BugOutlined />,
   pentest: <FileTextOutlined />,  // 已废弃：渗透测试改为文档审查
@@ -49,7 +55,49 @@ const TASK_TYPE_ICONS = {
   network_check: <ClusterOutlined />,
   windows_check: <WindowsOutlined />,
   web_scan: <GlobalOutlined />,
+  full_compliance_scan: <SafetyCertificateOutlined />,
+  full_asset_assessment: <SafetyCertificateOutlined />,
+  web_vulnerability_assessment: <GlobalOutlined />,
+  directory_discovery_assessment: <GlobalOutlined />,
+  web_fuzz_assessment: <GlobalOutlined />,
+  sql_injection_assessment: <DatabaseOutlined />,
+  database_security_assessment: <DatabaseOutlined />,
+  network_device_assessment: <ClusterOutlined />,
+  windows_ad_smb_assessment: <WindowsOutlined />,
+  ssh_baseline_assessment: <SettingOutlined />,
+  remediation: <ToolOutlined />,
+  retest: <CheckCircleFilled />,
+  html_report: <FileTextOutlined />,
 }
+
+const EXECUTABLE_TASK_TYPES = [
+  'asset_discovery',
+  'high_risk_port_scan',
+  'basic_vulnerability_scan',
+  'basic_baseline_check',
+  'basic_weak_password_scan',
+  'basic_ssl_tls_scan',
+  'config_check',
+  'vuln_scan',
+  'ssl_check',
+  'password_scan',
+  'db_check',
+  'network_check',
+  'windows_check',
+  'web_scan',
+  'full_compliance_scan',
+  'full_asset_assessment',
+  'web_vulnerability_assessment',
+  'directory_discovery_assessment',
+  'web_fuzz_assessment',
+  'sql_injection_assessment',
+  'database_security_assessment',
+  'network_device_assessment',
+  'windows_ad_smb_assessment',
+  'ssh_baseline_assessment',
+]
+
+const SSH_CREDENTIAL_TASK_TYPES = ['config_check', 'basic_baseline_check', 'ssh_baseline_assessment']
 
 const PHASE_ICONS = {
   1: <SafetyCertificateOutlined />,
@@ -96,12 +144,15 @@ function AssessmentProgress({ projectId, projectName }) {
 
   // 轮询相关
   const pollingRef = useRef(null)
+  const pollingPhaseIdRef = useRef(null)
   const [expandedErrors, setExpandedErrors] = useState({})
 
   // 文档上传弹窗
   const [uploadModalVisible, setUploadModalVisible] = useState(false)
   const [uploadTask, setUploadTask] = useState(null)
-  const [uploadFile, setUploadFile] = useState(null)
+  const [uploadFiles, setUploadFiles] = useState([])
+  const [taskDocuments, setTaskDocuments] = useState([])
+  const [uploadAnalysisMode, setUploadAnalysisMode] = useState('default')
   const [uploading, setUploading] = useState(false)
   const [projectLevel, setProjectLevel] = useState(null)
 
@@ -173,40 +224,49 @@ function AssessmentProgress({ projectId, projectName }) {
     setExpandedPhases(prev => ({ ...prev, [phaseId]: !prev[phaseId] }))
   }
 
-  const handleRestartAssessment = async () => {
+  const handleRestartAssessment = async (mode = 'reset') => {
     if (!assessment?.id) return
+    const reset = mode === 'reset'
     
     Modal.confirm({
-      title: '确认重新测评',
-      content: '重新测评将重置所有阶段和任务，已有的测评结果将被清除。确定要继续吗？',
-      okText: '确认',
+      title: reset ? '确认完全重置测评' : '继续测评',
+      content: reset
+        ? '将清空阶段进度、任务结果、问题、证据和整改队列，让测评从头开始。'
+        : '将重新打开测评以便补充证据或执行复测，已有阶段、任务结果和证据都会保留。',
+      okText: reset ? '完全重置' : '继续',
       cancelText: '取消',
-      okButtonProps: { danger: true },
+      okButtonProps: reset ? { danger: true } : undefined,
       onOk: async () => {
         try {
-          await api.post(`/assessments/${assessment.id}/restart`)
-          message.success('测评已重新开始')
+          await api.post(`/assessments/${assessment.id}/restart`, { mode })
+          message.success(reset ? '测评进度已完全重置' : '测评已重新打开')
+          window.dispatchEvent(new CustomEvent('certiproof:assessment-reset', {
+            detail: { projectId, assessmentId: assessment.id, mode },
+          }))
           setShowCompletionView(false)
           fetchAssessment()
         } catch (error) {
           console.error('Failed to restart assessment:', error)
-          message.error(`重新开始失败: ${error.response?.data?.detail || error.message}`)
+          message.error(`${reset ? '完全重置' : '继续测评'}失败: ${error.response?.data?.detail || error.message}`)
         }
       },
     })
   }
 
-  const handleRestartPhase = async (phaseId) => {
+  const handleRestartPhase = async (phaseId, mode = 'reset') => {
+    const reset = mode === 'reset'
     Modal.confirm({
-      title: '确认重新开始阶段',
-      content: '重新开始将重置该阶段下所有任务，已有的结果将被清除。确定要继续吗？',
-      okText: '确认',
+      title: reset ? '确认重置当前阶段' : '继续阶段',
+      content: reset
+        ? '将清空该阶段下所有任务进度和任务结果，其他阶段不受影响。'
+        : '将重新打开该阶段以便补充材料，已有任务结果和证据都会保留。',
+      okText: reset ? '重置阶段' : '继续',
       cancelText: '取消',
-      okButtonProps: { danger: true },
+      okButtonProps: reset ? { danger: true } : undefined,
       onOk: async () => {
         try {
-          await api.post(`/assessments/phases/${phaseId}/restart`)
-          message.success('阶段已重新开始')
+          await api.post(`/assessments/phases/${phaseId}/restart`, { mode })
+          message.success(reset ? '阶段进度已重置' : '阶段已重新打开')
           fetchAssessment()
           if (selectedPhase?.id === phaseId) {
             const response = await api.get(`/assessments/phases/${phaseId}/tasks`)
@@ -214,7 +274,7 @@ function AssessmentProgress({ projectId, projectName }) {
           }
         } catch (error) {
           console.error('Failed to restart phase:', error)
-          message.error(`重新开始失败: ${error.response?.data?.detail || error.message}`)
+          message.error(`${reset ? '重置阶段' : '继续阶段'}失败: ${error.response?.data?.detail || error.message}`)
         }
       },
     })
@@ -225,28 +285,20 @@ function AssessmentProgress({ projectId, projectName }) {
     try {
       const response = await api.get(`/assessments/${assessment.id}/report`, {
         params: { format },
-        responseType: format === 'pdf' ? 'blob' : 'json',
+        responseType: format === 'json' ? 'json' : 'blob',
       })
       
-      if (format === 'pdf') {
-        // 检查是否为错误响应
-        const contentType = response.headers['content-type'] || ''
-        if (!contentType.includes('application/pdf')) {
-          // 尝试读取错误信息
-          const text = await response.data.text()
-          throw new Error(text || '报告生成失败')
-        }
-        
-        const blob = new Blob([response.data], { type: 'application/pdf' })
+      if (format === 'html') {
+        const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
         const url = window.URL.createObjectURL(blob)
         const link = document.createElement('a')
         link.href = url
-        link.setAttribute('download', `测评报告_${assessment.id}.pdf`)
+        link.setAttribute('download', `测评报告_${assessment.id}.html`)
         document.body.appendChild(link)
         link.click()
         link.remove()
         window.URL.revokeObjectURL(url)
-        message.success('PDF 报告下载成功')
+        message.success('HTML 报告下载成功')
       } else {
         // 检查响应是否有错误字段
         if (response.data.detail) {
@@ -273,17 +325,22 @@ function AssessmentProgress({ projectId, projectName }) {
   }
 
   // 轮询任务状态
-  const startPolling = useCallback(() => {
-    if (pollingRef.current) return
+  const startPolling = useCallback((phaseId) => {
+    const activePhaseId = phaseId || selectedPhase?.id
+    if (!activePhaseId) return
+    if (pollingRef.current && pollingPhaseIdRef.current === activePhaseId) return
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current)
+      pollingRef.current = null
+    }
+    pollingPhaseIdRef.current = activePhaseId
     
     pollingRef.current = setInterval(async () => {
-      if (!selectedPhase) return
-      
       try {
         // 同时刷新任务列表和测评进度（确保 phase progress 和 total progress 实时更新）
         const [tasksRes] = await Promise.all([
-          api.get(`/assessments/phases/${selectedPhase.id}/tasks`),
-          fetchAssessment(),
+          api.get(`/assessments/phases/${activePhaseId}/tasks`),
+          fetchAssessment({ silent: true }),
         ])
         const newTasks = tasksRes.data
         setTasks(newTasks)
@@ -293,6 +350,7 @@ function AssessmentProgress({ projectId, projectName }) {
         if (!hasInProgress && pollingRef.current) {
           clearInterval(pollingRef.current)
           pollingRef.current = null
+          pollingPhaseIdRef.current = null
         }
       } catch (error) {
         console.error('Polling error:', error)
@@ -304,11 +362,13 @@ function AssessmentProgress({ projectId, projectName }) {
     if (pollingRef.current) {
       clearInterval(pollingRef.current)
       pollingRef.current = null
+      pollingPhaseIdRef.current = null
     }
   }, [])
 
-  const fetchAssessment = async () => {
-    setLoading(true)
+  const fetchAssessment = async (options = {}) => {
+    const silent = options.silent === true
+    if (!silent) setLoading(true)
     try {
       const response = await api.get(`/assessments/projects/${projectId}`)
       if (response.data && response.data.length > 0) {
@@ -326,7 +386,7 @@ function AssessmentProgress({ projectId, projectName }) {
       setAssessment(null)
       setPhases([])
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -342,7 +402,7 @@ function AssessmentProgress({ projectId, projectName }) {
       // 如果有进行中的任务，启动轮询
       const hasInProgress = response.data.some(t => t.status === 'in_progress')
       if (hasInProgress) {
-        startPolling()
+        startPolling(phase.id)
       }
     } catch (error) {
       console.error('Failed to fetch tasks:', error)
@@ -383,7 +443,7 @@ function AssessmentProgress({ projectId, projectName }) {
       setTasks(response.data)
       
       // 启动轮询
-      startPolling()
+      startPolling(selectedPhase.id)
     } catch (error) {
       console.error('Failed to start task:', error)
       message.error(`启动任务失败: ${error.response?.data?.detail || error.message}`)
@@ -466,14 +526,18 @@ function AssessmentProgress({ projectId, projectName }) {
       if (Object.keys(credentials).length > 0) {
         payload.credentials = credentials
       }
-      await api.post(`/assessments/tasks/${executeTask.id}/execute`, payload)
-      message.success('任务已启动')
+      const executeResponse = await api.post(`/assessments/tasks/${executeTask.id}/execute`, payload)
+      if (executeResponse.data?.status === 'partial') {
+        message.warning(executeResponse.data.message || '任务部分完成，存在无法检测项')
+      } else {
+        message.success(executeResponse.data?.message || '任务执行完成')
+      }
       setExecuteModalVisible(false)
       
       // 刷新任务列表并启动轮询
       const response = await api.get(`/assessments/phases/${selectedPhase.id}/tasks`)
       setTasks(response.data)
-      startPolling()
+      startPolling(selectedPhase.id)
     } catch (error) {
       console.error('Failed to execute task:', error)
       message.error(`执行任务失败: ${error.response?.data?.detail || error.message}`)
@@ -519,20 +583,26 @@ function AssessmentProgress({ projectId, projectName }) {
 
   const handleOpenUpload = async (task) => {
     setUploadTask(task)
-    setUploadFile(null)
+    setUploadFiles([])
+    setTaskDocuments([])
+    setUploadAnalysisMode('default')
     setUploadModalVisible(true)
 
     try {
-      const response = await api.get(`/assessments/tasks/${task.id}/project-level`)
-      setProjectLevel(response.data)
+      const [levelResponse, documentsResponse] = await Promise.all([
+        api.get(`/assessments/tasks/${task.id}/project-level`),
+        api.get(`/assessments/tasks/${task.id}/documents`),
+      ])
+      setProjectLevel(levelResponse.data)
+      setTaskDocuments(documentsResponse.data || [])
     } catch (error) {
-      console.error('Failed to get project level:', error)
+      console.error('Failed to load document task:', error)
       setProjectLevel(null)
     }
   }
 
   const handleSubmitUpload = async () => {
-    if (!uploadFile) {
+    if (uploadFiles.length === 0) {
       message.warning('请先选择文件')
       return
     }
@@ -541,37 +611,22 @@ function AssessmentProgress({ projectId, projectName }) {
     setUploading(true)
     try {
       const formData = new FormData()
-      formData.append('file', uploadFile)
+      uploadFiles.forEach(file => formData.append('files', file))
+      formData.append('analysis_mode', uploadAnalysisMode)
 
       const response = await api.post(
-        `/assessments/tasks/${uploadTask.id}/upload`,
+        `/assessments/tasks/${uploadTask.id}/documents`,
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } }
       )
 
-      if (response.data.status === 'failed') {
-        Modal.error({
-          title: '定级验证失败',
-          content: (
-            <div>
-              <p>{response.data.message || '文档验证失败'}</p>
-              {response.data.validation && (
-                <div style={{ marginTop: 12, padding: 12, background: 'rgba(255,77,79,0.1)', borderRadius: 4 }}>
-                  <p>项目等级：<strong>{response.data.validation.project_level || '未知'}</strong></p>
-                  <p>文档识别定级：<strong>{response.data.validation.document_level || '未能识别'}</strong></p>
-                </div>
-              )}
-            </div>
-          ),
-        })
-      } else {
-        message.success(response.data.message || '文档上传成功')
-        const tasksResponse = await api.get(`/assessments/phases/${selectedPhase.id}/tasks`)
-        setTasks(tasksResponse.data)
-        fetchAssessment()
-        setUploadModalVisible(false)
-        setUploadFile(null)
-      }
+      message.success(`已上传 ${uploadFiles.length} 个文件，正在后台分析`)
+      const tasksResponse = await api.get(`/assessments/phases/${selectedPhase.id}/tasks`)
+      setTasks(tasksResponse.data)
+      fetchAssessment()
+      setUploadModalVisible(false)
+      setUploadFiles([])
+      startPolling(selectedPhase.id)
     } catch (error) {
       console.error('Upload failed:', error)
       const errMsg = error.response?.data?.detail || error.message || '上传失败'
@@ -579,6 +634,52 @@ function AssessmentProgress({ projectId, projectName }) {
     } finally {
       setUploading(false)
     }
+  }
+
+  const handleDeleteDocument = async (documentId) => {
+    if (!uploadTask) return
+    try {
+      await api.delete(`/assessments/tasks/${uploadTask.id}/documents/${documentId}`)
+      const response = await api.get(`/assessments/tasks/${uploadTask.id}/documents`)
+      setTaskDocuments(response.data || [])
+      message.success('文档已移除，检查结果将自动更新')
+      startPolling(selectedPhase?.id || uploadTask.phase_id)
+    } catch (error) {
+      message.error(error.response?.data?.detail || '删除文档失败')
+    }
+  }
+
+  const handleReanalyzeDocuments = async (task) => {
+    let analysisMode = 'default'
+    Modal.confirm({
+      title: '重新分析文档',
+      content: (
+        <Radio.Group
+          defaultValue="default"
+          onChange={(event) => { analysisMode = event.target.value }}
+          className="document-mode-options"
+        >
+          <Radio value="default">使用系统默认</Radio>
+          <Radio value="standard">标准模式</Radio>
+          <Radio value="deep">深度模式</Radio>
+        </Radio.Group>
+      ),
+      okText: '重新分析',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.post(`/assessments/tasks/${task.id}/documents/analyze`, null, {
+            params: { analysis_mode: analysisMode },
+          })
+          message.success('已重新提交文档分析')
+          const response = await api.get(`/assessments/phases/${selectedPhase.id}/tasks`)
+          setTasks(response.data)
+          startPolling(selectedPhase.id)
+        } catch (error) {
+          message.error(error.response?.data?.detail || '重新分析失败')
+        }
+      },
+    })
   }
 
   const handleOpenSkip = (task) => {
@@ -616,6 +717,9 @@ function AssessmentProgress({ projectId, projectName }) {
   // 获取失败原因
   const getFailureReason = (task) => {
     if (!task.result) return '任务执行失败'
+    const issues = getTaskIssues(task)
+    const firstWarning = issues.find(item => item.level === 'warning')
+    if (firstWarning && !issues.some(item => item.level === 'failed')) return firstWarning.error
     
     // 单目标失败
     if (task.result.error) return task.result.error
@@ -639,59 +743,217 @@ function AssessmentProgress({ projectId, projectName }) {
     return '任务执行失败'
   }
 
-  // 渲染失败详情
-  const renderFailureDetails = (task) => {
-    if (!task.result) return null
-    
-    const details = []
-    
-    // 多工具执行失败
-    if (task.result.failed && task.result.failed.length > 0) {
-      task.result.failed.forEach((f, i) => {
-        details.push({
-          target: f.target || task.result.target || '未知',
-          capability: f.capability || '未知工具',
-          error: f.error || '未知错误',
-        })
+  const getTaskIssues = (task) => {
+    const result = task.result || {}
+    const issues = []
+
+    ;(result.failed || []).forEach((item) => {
+      issues.push({
+        level: 'failed',
+        target: item.target || result.target || '未知',
+        capability: item.capability || '未知工具',
+        error: item.error || '执行失败',
       })
-    }
-    
-    // 多资产执行失败
-    if (task.result.asset_results) {
-      Object.entries(task.result.asset_results).forEach(([target, r]) => {
+    })
+
+    ;(result.warnings || []).forEach((item) => {
+      issues.push({
+        level: 'warning',
+        target: item.target || result.target || '未知',
+        capability: item.capability || '未知工具',
+        error: item.error || item.warning || '检测未完整完成',
+      })
+    })
+
+    if (result.asset_results) {
+      Object.entries(result.asset_results).forEach(([target, r]) => {
+        ;(r.failed || []).forEach((item) => {
+          issues.push({
+            level: 'failed',
+            target,
+            capability: item.capability || '扫描',
+            error: item.error || '执行失败',
+          })
+        })
+        ;(r.warnings || []).forEach((item) => {
+          issues.push({
+            level: 'warning',
+            target,
+            capability: item.capability || '扫描',
+            error: item.error || item.warning || '检测未完整完成',
+          })
+        })
         if (r.status === 'failed') {
-          details.push({
-            target: target,
+          issues.push({
+            level: 'failed',
+            target,
             capability: '扫描',
             error: r.error || '执行失败',
+          })
+        } else if (r.status === 'partial') {
+          issues.push({
+            level: 'warning',
+            target,
+            capability: r.task_type || '扫描',
+            error: '该资产存在无法检测或未完整完成的子项',
           })
         }
       })
     }
-    
-    // 单错误
-    if (task.result.error && details.length === 0) {
-      details.push({
-        target: task.result.target || '未知',
+
+    if (result.error && issues.length === 0) {
+      issues.push({
+        level: 'failed',
+        target: result.target || '未知',
         capability: '执行',
-        error: task.result.error,
+        error: result.error,
       })
     }
+
+    return issues
+  }
+
+  // 渲染失败详情
+  const renderFailureDetails = (task) => {
+    const details = getTaskIssues(task)
     
     if (details.length === 0) return null
     
     return (
       <div className="task-error-details">
         {details.map((d, i) => (
-          <div key={i} className="error-detail-item">
+          <div key={i} className={`error-detail-item ${d.level}`}>
             <div className="error-detail-header">
-              <WarningOutlined style={{ color: '#ef4444', marginRight: 6 }} />
+              <WarningOutlined style={{ color: d.level === 'warning' ? '#f59e0b' : '#ef4444', marginRight: 6 }} />
               <span className="error-target">{d.target}</span>
               <span className="error-capability">[{d.capability}]</span>
             </div>
             <div className="error-detail-message">{d.error}</div>
           </div>
         ))}
+      </div>
+    )
+  }
+
+  const handleOpenEvidence = async (item) => {
+    if (!item.evidence_id) return
+    try {
+      const response = await api.get(`/evidences/${item.evidence_id}/download`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(response.data)
+      window.open(`${url}${item.page ? `#page=${item.page}` : ''}`, '_blank', 'noopener,noreferrer')
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+    } catch (error) {
+      message.error(error.response?.data?.detail || '证据文件打开失败')
+    }
+  }
+
+  const renderDocumentAnalysis = (task) => {
+    const analysis = task.result?.analysis
+    if (!analysis) return null
+
+    const statusMap = {
+      pass: { color: 'success', text: '通过' },
+      partial: { color: 'warning', text: '部分通过' },
+      fail: { color: 'error', text: '不通过' },
+      unable: { color: 'default', text: '无法判断' },
+    }
+    const status = statusMap[analysis.status] || statusMap.unable
+    const gaps = analysis.gaps || []
+    const comparison = analysis.retest_comparison
+    const controls = analysis.controls || []
+
+    return (
+      <div className="document-analysis">
+        <div className="document-analysis-summary">
+          <Tag color={status.color}>{status.text}</Tag>
+          <strong>{analysis.document_name || '文档检查'}</strong>
+          <span>覆盖率 {Math.round((analysis.coverage || 0) * 100)}%</span>
+          <span>置信度 {Math.round((analysis.confidence || 0) * 100)}%</span>
+          <span>{analysis.analysis_mode === 'deep' ? '深度模式' : '标准模式'}</span>
+        </div>
+        {(analysis.files || []).length > 0 && (
+          <div className="document-file-summary">
+            {analysis.files.map(file => (
+              <div key={file.evidence_id}>
+                <FileTextOutlined />
+                <span>{file.file_name}</span>
+                <em>{file.page_count || 0} 页 · 原生 {file.native_blocks || 0} · OCR {file.ocr_blocks || 0} · 视觉 {Math.max((file.vision_blocks || 0) - (file.ocr_blocks || 0), 0)}</em>
+              </div>
+            ))}
+          </div>
+        )}
+        {comparison && (
+          <div className="document-analysis-comparison">
+            复测：{comparison.status === 'improved' ? '已改善' : comparison.status === 'regressed' ? '有退化' : '无变化'}
+            {' '}({comparison.delta > 0 ? '+' : ''}{Math.round((comparison.delta || 0) * 100)}%)
+          </div>
+        )}
+        {gaps.length > 0 && (
+          <div className="document-analysis-gaps">
+            {gaps.slice(0, 3).map((gap, index) => (
+              <div key={index}>缺失：{gap}</div>
+            ))}
+            {gaps.length > 3 && <div>还有 {gaps.length - 3} 项缺失</div>}
+          </div>
+        )}
+        {controls.length > 0 && (
+          <details className="document-analysis-details">
+            <summary>
+              检查详情：{analysis.passed_points || 0}/{analysis.total_points || 0} 个检查点通过，共 {controls.length} 个检查域
+            </summary>
+            <div className="document-control-list">
+              {controls.map((control) => {
+                const controlStatus = statusMap[control.status] || statusMap.unable
+                return (
+                  <div key={control.id} className="document-control">
+                    <div className="document-control-title">
+                      <Tag color={controlStatus.color}>{controlStatus.text}</Tag>
+                      <strong>{control.title}</strong>
+                    </div>
+                    {(control.points || []).map((point) => {
+                      const pointStatus = statusMap[point.status] || statusMap.unable
+                      const evidence = point.evidence || []
+                      return (
+                        <div key={`${control.id}-${point.id}`} className="document-control-point">
+                          <div className="document-control-point-title">
+                            <Tag color={pointStatus.color}>{pointStatus.text}</Tag>
+                            <span>{point.text}</span>
+                          </div>
+                          {point.status === 'fail' && (
+                            <div className="document-control-missing">
+                              {point.contradiction ? '发现与检查要求冲突的内容：' : ''}{point.llm_reason || point.missing_judgement}
+                            </div>
+                          )}
+                          {evidence.slice(0, 2).map((item, index) => (
+                            <div key={index} className="document-control-evidence">
+                              <button
+                                type="button"
+                                className="evidence-location"
+                                onClick={() => handleOpenEvidence(item)}
+                                title="打开原始证据文件"
+                              >
+                                {item.file_name || '文档'}
+                                {item.page ? ` · 第 ${item.page} 页` : ''}
+                                {item.section ? ` · ${item.section}` : ''}
+                                {item.type ? ` · ${item.type}` : ''}
+                              </button>
+                              <span>证据：{item.text}</span>
+                            </div>
+                          ))}
+                          {(point.basis || []).length > 0 && (
+                            <div className="document-control-basis">
+                              依据：{point.basis.join('、')}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+          </details>
+        )}
       </div>
     )
   }
@@ -790,29 +1052,27 @@ function AssessmentProgress({ projectId, projectName }) {
                       </Tag>
                     )}
                     {isCompleted && (
-                      <>
-                        <Tag color="#10b981" icon={<CheckCircleFilled />} className="phase-done-tag">
-                          完成
-                        </Tag>
-                        <Button
-                          type="link"
-                          size="small"
-                          icon={<ReloadOutlined />}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleRestartPhase(phase.id)
-                          }}
-                          style={{ padding: '0 4px', fontSize: 11 }}
-                        >
-                          重新开始
-                        </Button>
-                      </>
+                      <Tag color="#10b981" icon={<CheckCircleFilled />} className="phase-done-tag">
+                        完成
+                      </Tag>
                     )}
                     {isSkipped && (
                       <Tag color="#94a3b8" className="phase-skipped-tag">
                         已跳过
                       </Tag>
                     )}
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleRestartPhase(phase.id, 'reset')
+                      }}
+                      style={{ padding: '0 4px', fontSize: 11 }}
+                    >
+                      重置
+                    </Button>
                   </div>
                   {isActive && (
                     <div className="phase-progress-bar">
@@ -861,6 +1121,16 @@ function AssessmentProgress({ projectId, projectName }) {
             查看测评结果
           </Button>
         )}
+
+        <Button
+          block
+          danger
+          icon={<ReloadOutlined />}
+          onClick={() => handleRestartAssessment('reset')}
+          style={{ marginTop: 8 }}
+        >
+          完全重置测评
+        </Button>
       </div>
 
       {/* Completion View Modal */}
@@ -1016,11 +1286,11 @@ function AssessmentProgress({ projectId, projectName }) {
             <div className="completion-actions">
               <Button
                 icon={<FileTextOutlined />}
-                onClick={() => handleDownloadReport('pdf')}
+                onClick={() => handleDownloadReport('html')}
                 type="primary"
                 size="large"
               >
-                下载 PDF 报告
+                下载 HTML 报告
               </Button>
               <Button
                 icon={<FileTextOutlined />}
@@ -1031,11 +1301,18 @@ function AssessmentProgress({ projectId, projectName }) {
               </Button>
               <Button
                 icon={<ReloadOutlined />}
-                onClick={handleRestartAssessment}
+                onClick={() => handleRestartAssessment('continue')}
+                size="large"
+              >
+                继续补充
+              </Button>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={() => handleRestartAssessment('reset')}
                 size="large"
                 danger
               >
-                重新测评
+                完全重置测评
               </Button>
             </div>
           </div>
@@ -1053,7 +1330,7 @@ function AssessmentProgress({ projectId, projectName }) {
           </div>
         }
         placement="right"
-        width={420}
+        width="min(720px, 94vw)"
         onClose={() => {
           setDrawerVisible(false)
           stopPolling()
@@ -1100,17 +1377,22 @@ function AssessmentProgress({ projectId, projectName }) {
                   {tasks.map(task => {
                     const taskStatus = TASK_STATUS_CONFIG[task.status] || TASK_STATUS_CONFIG.todo
                     const taskIcon = TASK_TYPE_ICONS[task.task_type] || <FileTextOutlined />
+                    const taskIssues = getTaskIssues(task)
+                    const hasIssues = taskIssues.length > 0
+                    const hasOnlyWarnings = hasIssues && taskIssues.every(item => item.level === 'warning')
                     const isFailed = task.status === 'failed'
                     const isInProgress = task.status === 'in_progress'
                     const isExpanded = expandedErrors[task.id]
                     
                     return (
-                      <div key={task.id} className={`task-item ${taskStatus.className}`}>
+                      <div key={task.id} className={`task-item ${taskStatus.className} ${hasOnlyWarnings ? 'partial' : ''}`}>
                         <div className="task-icon">
                           {isInProgress ? (
                             <Spin size="small" />
                           ) : isFailed ? (
                             <CloseCircleFilled style={{ color: '#ef4444' }} />
+                          ) : hasOnlyWarnings ? (
+                            <WarningOutlined style={{ color: '#f59e0b' }} />
                           ) : task.status === 'completed' ? (
                             <CheckCircleFilled style={{ color: '#10b981' }} />
                           ) : (
@@ -1123,7 +1405,10 @@ function AssessmentProgress({ projectId, projectName }) {
                             <Tag color={taskStatus.color} size="small">
                               {taskStatus.text}
                             </Tag>
-                            {isFailed && (
+                            {hasOnlyWarnings && (
+                              <Tag color="warning" size="small">存在无法检测项</Tag>
+                            )}
+                            {(isFailed || hasIssues) && (
                               <span 
                                 className="error-toggle"
                                 onClick={() => toggleErrorExpand(task.id)}
@@ -1132,15 +1417,42 @@ function AssessmentProgress({ projectId, projectName }) {
                               </span>
                             )}
                           </div>
-                          {isFailed && (
-                            <div className="task-error-summary">
+                          {(isFailed || hasIssues) && (
+                            <div className={`task-error-summary ${hasOnlyWarnings ? 'warning' : ''}`}>
                               <WarningOutlined style={{ marginRight: 4 }} />
-                              {getFailureReason(task)}
+                              {hasOnlyWarnings ? getFailureReason(task) : getFailureReason(task)}
                             </div>
                           )}
-                          {isFailed && isExpanded && renderFailureDetails(task)}
+                          {(isFailed || hasIssues) && isExpanded && renderFailureDetails(task)}
+                          {task.task_type === 'doc_review' && task.status === 'in_progress' && task.result?.progress && (
+                            <div className="document-run-progress">
+                              <Progress percent={task.result.progress.percent || 0} size="small" />
+                              <span>{task.result.progress.message || '正在分析文档'}</span>
+                            </div>
+                          )}
+                          {task.task_type === 'doc_review' && task.status === 'completed' && renderDocumentAnalysis(task)}
                         </div>
                         <div className="task-actions">
+                          {task.status === 'completed' && task.task_type === 'doc_review' && (
+                            <Button
+                              type="link"
+                              size="small"
+                              icon={<UploadOutlined />}
+                              onClick={() => handleOpenUpload(task)}
+                            >
+                              管理文档
+                            </Button>
+                          )}
+                          {task.status === 'completed' && EXECUTABLE_TASK_TYPES.includes(task.task_type) && (
+                            <Button
+                              type="link"
+                              size="small"
+                              icon={<PlayCircleFilled />}
+                              onClick={() => handleOpenExecute(task)}
+                            >
+                              重新执行
+                            </Button>
+                          )}
                           {task.status === 'todo' && (
                             <>
                               {task.task_type === 'doc_review' && (
@@ -1153,7 +1465,7 @@ function AssessmentProgress({ projectId, projectName }) {
                                   上传文档
                                 </Button>
                               )}
-                              {['config_check', 'vuln_scan', 'asset_discovery', 'ssl_check', 'password_scan', 'db_check', 'network_check', 'windows_check', 'web_scan'].includes(task.task_type) && (
+                              {EXECUTABLE_TASK_TYPES.includes(task.task_type) && (
                                 <Button
                                   type="link"
                                   size="small"
@@ -1163,7 +1475,7 @@ function AssessmentProgress({ projectId, projectName }) {
                                   执行
                                 </Button>
                               )}
-                              {!['config_check', 'vuln_scan', 'asset_discovery', 'ssl_check', 'password_scan', 'db_check', 'network_check', 'windows_check', 'web_scan', 'doc_review'].includes(task.task_type) && (
+                              {!EXECUTABLE_TASK_TYPES.includes(task.task_type) && task.task_type !== 'doc_review' && (
                                 <Button
                                   type="link"
                                   size="small"
@@ -1185,33 +1497,29 @@ function AssessmentProgress({ projectId, projectName }) {
                           )}
                           {isInProgress && (
                             <>
-                              {task.task_type === 'doc_review' && (
-                                <Button
-                                  type="link"
-                                  size="small"
-                                  icon={<UploadOutlined />}
-                                  onClick={() => handleOpenUpload(task)}
-                                >
-                                  上传文档
-                                </Button>
+                              {task.task_type === 'doc_review' ? (
+                                <Tag color="processing">分析中</Tag>
+                              ) : (
+                                <>
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    icon={<CheckCircleFilled />}
+                                    onClick={() => handleCompleteTask(task.id)}
+                                  >
+                                    完成
+                                  </Button>
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    danger
+                                    icon={<StopOutlined />}
+                                    onClick={() => handleStopTask(task.id)}
+                                  >
+                                    停止
+                                  </Button>
+                                </>
                               )}
-                              <Button
-                                type="link"
-                                size="small"
-                                icon={<CheckCircleFilled />}
-                                onClick={() => handleCompleteTask(task.id)}
-                              >
-                                完成
-                              </Button>
-                              <Button
-                                type="link"
-                                size="small"
-                                danger
-                                icon={<StopOutlined />}
-                                onClick={() => handleStopTask(task.id)}
-                              >
-                                停止
-                              </Button>
                             </>
                           )}
                           {task.status === 'cancelled' && (
@@ -1223,19 +1531,36 @@ function AssessmentProgress({ projectId, projectName }) {
                                 icon={<ReloadOutlined />}
                                 onClick={() => handleResetTask(task.id)}
                               >
-                                重新开始
+                                继续处理
                               </Button>
                             </>
                           )}
-                          {isFailed && (
-                            <Button
-                              type="link"
-                              size="small"
-                              icon={<ReloadOutlined />}
-                              onClick={() => handleResetTask(task.id)}
-                            >
-                              重新开始
-                            </Button>
+                          {!isInProgress && !['todo', 'cancelled'].includes(task.status) && (
+                            <>
+                              {task.task_type === 'doc_review' && task.status === 'failed' && (
+                                <>
+                                  <Button type="link" size="small" onClick={() => handleOpenUpload(task)}>
+                                    管理文档
+                                  </Button>
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    icon={<ReloadOutlined />}
+                                    onClick={() => handleReanalyzeDocuments(task)}
+                                  >
+                                    重新分析
+                                  </Button>
+                                </>
+                              )}
+                              <Button
+                                type="link"
+                                size="small"
+                                icon={<ReloadOutlined />}
+                                onClick={() => handleResetTask(task.id)}
+                              >
+                                重置
+                              </Button>
+                            </>
                           )}
                         </div>
                       </div>
@@ -1300,39 +1625,71 @@ function AssessmentProgress({ projectId, projectName }) {
           </div>
         )}
 
+        <Form layout="vertical" style={{ marginBottom: 16 }}>
+          <Form.Item
+            label="本次分析模式"
+            help="标准模式按需补充 OCR；深度模式会对 PDF 全页做 OCR/视觉交叉验证。"
+          >
+            <Radio.Group
+              value={uploadAnalysisMode}
+              onChange={(event) => setUploadAnalysisMode(event.target.value)}
+              disabled={uploading}
+              className="document-mode-options"
+            >
+              <Radio value="default">使用系统默认</Radio>
+              <Radio value="standard">标准模式</Radio>
+              <Radio value="deep">深度模式</Radio>
+            </Radio.Group>
+          </Form.Item>
+        </Form>
+
         <Upload.Dragger
+          multiple
           beforeUpload={(file) => {
-            setUploadFile(file)
+            if (file.size > 100 * 1024 * 1024) {
+              message.error('文件过大，单个文档最大支持 100MB')
+              return Upload.LIST_IGNORE
+            }
+            setUploadFiles(current => current.some(item => item.uid === file.uid) ? current : [...current, file])
             return false
           }}
-          fileList={uploadFile ? [{ uid: '-1', name: uploadFile.name, status: 'done' }] : []}
-          onRemove={() => {
-            setUploadFile(null)
+          fileList={uploadFiles.map(file => ({ uid: file.uid, name: file.name, status: 'done' }))}
+          onRemove={(file) => {
+            setUploadFiles(current => current.filter(item => item.uid !== file.uid))
           }}
-          accept=".pdf,.doc,.docx,.txt,.md"
+          accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff"
           disabled={uploading}
         >
           <p className="ant-upload-drag-icon">
             <InboxOutlined />
           </p>
-          <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
+          <p className="ant-upload-text">点击或拖拽一个或多个文件到此区域</p>
           <p className="ant-upload-hint">
-            支持 PDF、Word、TXT、MD 格式。单个文件不超过 20MB。
+            支持 DOCX、PDF、TXT、MD 和常见图片。单个文件不超过 100MB。
           </p>
         </Upload.Dragger>
 
-        {uploadFile && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: 12,
-              background: 'rgba(16, 185, 129, 0.1)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              borderRadius: 4,
-              fontSize: 13,
-            }}
-          >
-            已选择：<strong>{uploadFile.name}</strong> ({(uploadFile.size / 1024).toFixed(1)} KB)
+        {taskDocuments.length > 0 && (
+          <div className="existing-document-list">
+            <strong>已纳入本项检查的文档</strong>
+            {taskDocuments.map(document => (
+              <div key={document.id}>
+                <span><FileTextOutlined /> {document.file_name}</span>
+                <em>
+                  {document.extraction
+                    ? `${document.extraction.analysis_mode === 'deep' ? '深度' : '标准'} · ${document.extraction.page_count || 0} 页 · 原生 ${document.extraction.native_blocks || 0} · OCR ${document.extraction.ocr_blocks || 0} · 视觉 ${Math.max((document.extraction.vision_blocks || 0) - (document.extraction.ocr_blocks || 0), 0)}`
+                    : '等待解析'}
+                </em>
+                <Button
+                  type="text"
+                  danger
+                  size="small"
+                  icon={<CloseOutlined />}
+                  onClick={() => handleDeleteDocument(document.id)}
+                  aria-label={`删除 ${document.file_name}`}
+                />
+              </div>
+            ))}
           </div>
         )}
       </Modal>
@@ -1471,7 +1828,7 @@ function AssessmentProgress({ projectId, projectName }) {
             </Form.Item>
           )}
 
-          {['config_check'].includes(executeTask?.task_type) && (
+          {SSH_CREDENTIAL_TASK_TYPES.includes(executeTask?.task_type) && (
             <>
               {executeMode === 'all' && (
                 <Form.Item label="凭据模式">

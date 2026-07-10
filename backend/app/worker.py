@@ -38,6 +38,10 @@ async def run_worker() -> None:
                 ran = await run_due_scheduled_scans(db, limit=settings.MONITORING_WORKER_BATCH_SIZE)
                 if ran:
                     logger.info("Executed %d scheduled monitoring scan(s)", ran)
+                from app.services.document_pipeline import process_pending_document_runs
+                documents_ran = await process_pending_document_runs(db)
+                if documents_ran:
+                    logger.info("Executed %d document analysis run(s)", documents_ran)
         except Exception:
             logger.exception("Task worker poll failed")
         await asyncio.sleep(max(1, settings.TASK_WORKER_POLL_SECONDS))

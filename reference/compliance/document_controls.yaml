@@ -1,0 +1,496 @@
+version: "2026.07-core10"
+basis:
+  - "GB/T 22239-2019"
+  - "GB/T 28448-2019"
+description: "CertiProof 等保自查文档标准库。结论来自结构化必检项和规则评分；LLM 只作为证据判读辅助，不直接给最终合规结论。"
+
+documents:
+  security_management_policy:
+    name: "信息安全管理制度"
+    aliases: ["信息安全管理制度", "网络安全管理制度", "安全管理制度"]
+    controls:
+      - id: "DOC-SMP-001"
+        title: "制度范围与目标"
+        required_points:
+          - id: "P1"
+            text: "明确制度适用范围"
+            evidence_keywords: ["适用范围", "适用于", "覆盖范围"]
+            missing_judgement: "未发现制度适用范围。"
+          - id: "P2"
+            text: "明确安全管理目标或方针"
+            evidence_keywords: ["安全方针", "安全目标", "管理目标", "总体目标"]
+            missing_judgement: "未发现安全管理目标或方针。"
+      - id: "DOC-SMP-002"
+        title: "职责与执行要求"
+        required_points:
+          - id: "P1"
+            text: "明确安全职责或责任部门"
+            evidence_keywords: ["安全职责", "责任部门", "岗位职责", "安全管理员"]
+            missing_judgement: "未发现安全职责或责任部门。"
+          - id: "P2"
+            text: "明确制度执行、检查或考核要求"
+            evidence_keywords: ["执行", "检查", "考核", "监督"]
+            missing_judgement: "未发现制度执行、检查或考核要求。"
+      - id: "DOC-SMP-003"
+        title: "制度发布与维护"
+        required_points:
+          - id: "P1"
+            text: "明确制度审批、发布或生效要求"
+            evidence_keywords: ["审批", "发布", "生效", "批准"]
+            missing_judgement: "未发现制度审批、发布或生效要求。"
+          - id: "P2"
+            text: "明确制度评审、修订或版本维护要求"
+            evidence_keywords: ["评审", "修订", "版本", "维护"]
+            missing_judgement: "未发现制度评审、修订或版本维护要求。"
+      - id: "DOC-SMP-004"
+        title: "制度覆盖范围"
+        required_points:
+          - id: "P1"
+            text: "覆盖人员、系统或资产安全管理对象"
+            evidence_keywords: ["人员", "系统", "资产", "设备"]
+            missing_judgement: "未发现人员、系统或资产安全管理对象。"
+          - id: "P2"
+            text: "明确违规处理或责任追究要求"
+            evidence_keywords: ["违规", "责任追究", "处罚", "问责"]
+            missing_judgement: "未发现违规处理或责任追究要求。"
+
+  security_org_setup:
+    name: "信息安全管理机构设置文件"
+    aliases: ["信息安全管理机构设置文件", "安全管理机构", "安全委员会", "网络安全领导小组"]
+    controls:
+      - id: "DOC-ORG-001"
+        title: "机构设置"
+        required_points:
+          - id: "P1"
+            text: "明确安全管理组织或领导小组"
+            evidence_keywords: ["安全委员会", "领导小组", "安全管理机构", "组织架构"]
+            missing_judgement: "未发现安全管理组织或领导小组设置。"
+          - id: "P2"
+            text: "明确牵头部门或责任人"
+            evidence_keywords: ["牵头部门", "负责人", "责任人", "归口管理"]
+            missing_judgement: "未发现牵头部门或责任人。"
+      - id: "DOC-ORG-002"
+        title: "职责分工"
+        required_points:
+          - id: "P1"
+            text: "明确部门职责"
+            evidence_keywords: ["部门职责", "职责分工", "工作职责"]
+            missing_judgement: "未发现部门职责分工。"
+          - id: "P2"
+            text: "明确协调或会议机制"
+            evidence_keywords: ["会议", "协调", "例会", "沟通机制"]
+            missing_judgement: "未发现安全协调或会议机制。"
+      - id: "DOC-ORG-003"
+        title: "岗位与人员配置"
+        required_points:
+          - id: "P1"
+            text: "明确安全管理员或关键岗位"
+            evidence_keywords: ["安全管理员", "关键岗位", "系统管理员", "审计管理员"]
+            missing_judgement: "未发现安全管理员或关键岗位设置。"
+          - id: "P2"
+            text: "明确岗位任命、授权或备案要求"
+            evidence_keywords: ["任命", "授权", "备案", "任职"]
+            missing_judgement: "未发现岗位任命、授权或备案要求。"
+      - id: "DOC-ORG-004"
+        title: "监督与考核"
+        required_points:
+          - id: "P1"
+            text: "明确安全管理机构监督检查职责"
+            evidence_keywords: ["监督", "检查", "督导", "考核"]
+            missing_judgement: "未发现安全管理机构监督检查职责。"
+          - id: "P2"
+            text: "明确安全工作汇报或决策机制"
+            evidence_keywords: ["汇报", "报告", "决策", "审批"]
+            missing_judgement: "未发现安全工作汇报或决策机制。"
+
+  personnel_security_policy:
+    name: "人员安全管理制度"
+    aliases: ["人员安全管理制度", "人员安全", "人员管理制度"]
+    controls:
+      - id: "DOC-PSP-001"
+        title: "人员全生命周期"
+        required_points:
+          - id: "P1"
+            text: "覆盖人员录用安全要求"
+            evidence_keywords: ["录用", "入职", "背景审查", "保密协议"]
+            missing_judgement: "未发现人员录用安全要求。"
+          - id: "P2"
+            text: "覆盖人员离岗或调岗要求"
+            evidence_keywords: ["离岗", "调岗", "离职", "权限回收"]
+            missing_judgement: "未发现人员离岗或调岗要求。"
+      - id: "DOC-PSP-002"
+        title: "培训与考核"
+        required_points:
+          - id: "P1"
+            text: "明确安全教育培训要求"
+            evidence_keywords: ["安全培训", "教育培训", "安全意识"]
+            missing_judgement: "未发现安全教育培训要求。"
+          - id: "P2"
+            text: "明确考核或违规处理要求"
+            evidence_keywords: ["考核", "违规", "奖惩", "处罚"]
+            missing_judgement: "未发现考核或违规处理要求。"
+      - id: "DOC-PSP-003"
+        title: "访问权限与保密"
+        required_points:
+          - id: "P1"
+            text: "明确人员权限申请、变更和回收要求"
+            evidence_keywords: ["权限申请", "权限变更", "权限回收", "授权"]
+            missing_judgement: "未发现人员权限申请、变更和回收要求。"
+          - id: "P2"
+            text: "明确保密协议或保密责任"
+            evidence_keywords: ["保密协议", "保密责任", "保密义务", "泄密"]
+            missing_judgement: "未发现保密协议或保密责任。"
+      - id: "DOC-PSP-004"
+        title: "第三方与外来人员"
+        required_points:
+          - id: "P1"
+            text: "明确第三方或外来人员安全管理"
+            evidence_keywords: ["第三方", "外来人员", "供应商人员", "外包人员"]
+            missing_judgement: "未发现第三方或外来人员安全管理要求。"
+          - id: "P2"
+            text: "明确人员安全事件报告或处理要求"
+            evidence_keywords: ["安全事件", "报告", "处理", "处置"]
+            missing_judgement: "未发现人员安全事件报告或处理要求。"
+
+  secure_construction_policy:
+    name: "安全建设管理制度"
+    aliases: ["安全建设管理制度", "建设管理制度", "安全建设"]
+    controls:
+      - id: "DOC-SCP-001"
+        title: "建设过程控制"
+        required_points:
+          - id: "P1"
+            text: "明确系统建设安全要求"
+            evidence_keywords: ["安全建设", "安全需求", "建设要求", "安全方案"]
+            missing_judgement: "未发现系统建设安全要求。"
+          - id: "P2"
+            text: "明确测试、验收或上线要求"
+            evidence_keywords: ["测试", "验收", "上线", "交付"]
+            missing_judgement: "未发现测试、验收或上线要求。"
+      - id: "DOC-SCP-002"
+        title: "外包与变更"
+        required_points:
+          - id: "P1"
+            text: "明确外包开发或供应商安全管理"
+            evidence_keywords: ["外包", "供应商", "第三方", "服务商"]
+            missing_judgement: "未发现外包或供应商安全管理要求。"
+          - id: "P2"
+            text: "明确变更管理要求"
+            evidence_keywords: ["变更", "变更审批", "变更记录"]
+            missing_judgement: "未发现变更管理要求。"
+      - id: "DOC-SCP-003"
+        title: "安全设计与开发"
+        required_points:
+          - id: "P1"
+            text: "明确安全设计评审要求"
+            evidence_keywords: ["安全设计", "设计评审", "方案评审", "评审"]
+            missing_judgement: "未发现安全设计评审要求。"
+          - id: "P2"
+            text: "明确开发过程安全控制要求"
+            evidence_keywords: ["安全开发", "代码安全", "开发规范", "源代码"]
+            missing_judgement: "未发现开发过程安全控制要求。"
+      - id: "DOC-SCP-004"
+        title: "交付与上线"
+        required_points:
+          - id: "P1"
+            text: "明确上线前安全测试或漏洞修复要求"
+            evidence_keywords: ["上线前", "安全测试", "漏洞修复", "风险评估"]
+            missing_judgement: "未发现上线前安全测试或漏洞修复要求。"
+          - id: "P2"
+            text: "明确交付物、文档或配置移交要求"
+            evidence_keywords: ["交付物", "移交", "配置清单", "文档"]
+            missing_judgement: "未发现交付物、文档或配置移交要求。"
+
+  security_operations_policy:
+    name: "安全运维管理制度"
+    aliases: ["安全运维管理制度", "安全运维", "运维管理制度"]
+    controls:
+      - id: "DOC-SOP-001"
+        title: "日常运维控制"
+        required_points:
+          - id: "P1"
+            text: "明确账号和权限管理"
+            evidence_keywords: ["账号", "账户", "权限", "授权"]
+            missing_judgement: "未发现账号和权限管理要求。"
+          - id: "P2"
+            text: "明确补丁、漏洞或配置管理"
+            evidence_keywords: ["补丁", "漏洞", "配置", "加固"]
+            missing_judgement: "未发现补丁、漏洞或配置管理要求。"
+      - id: "DOC-SOP-002"
+        title: "备份与日志"
+        required_points:
+          - id: "P1"
+            text: "明确数据备份要求"
+            evidence_keywords: ["备份", "恢复", "容灾"]
+            missing_judgement: "未发现数据备份要求。"
+          - id: "P2"
+            text: "明确日志审计或巡检要求"
+            evidence_keywords: ["日志", "审计", "巡检", "监控"]
+            missing_judgement: "未发现日志审计或巡检要求。"
+      - id: "DOC-SOP-003"
+        title: "变更与应急运维"
+        required_points:
+          - id: "P1"
+            text: "明确运维变更审批和回退要求"
+            evidence_keywords: ["变更审批", "回退", "变更记录", "变更方案"]
+            missing_judgement: "未发现运维变更审批和回退要求。"
+          - id: "P2"
+            text: "明确故障、异常或安全事件处理要求"
+            evidence_keywords: ["故障", "异常", "安全事件", "应急处理"]
+            missing_judgement: "未发现故障、异常或安全事件处理要求。"
+      - id: "DOC-SOP-004"
+        title: "运维边界与第三方"
+        required_points:
+          - id: "P1"
+            text: "明确远程运维或外部接入控制"
+            evidence_keywords: ["远程运维", "远程接入", "VPN", "堡垒机"]
+            missing_judgement: "未发现远程运维或外部接入控制要求。"
+          - id: "P2"
+            text: "明确第三方运维服务管理"
+            evidence_keywords: ["第三方运维", "外包运维", "服务商", "供应商"]
+            missing_judgement: "未发现第三方运维服务管理要求。"
+
+  incident_response_plan:
+    name: "信息安全事件应急预案"
+    aliases: ["信息安全事件应急预案", "网络安全事件应急预案", "应急预案"]
+    controls:
+      - id: "DOC-IRP-001"
+        title: "应急组织与分级"
+        required_points:
+          - id: "P1"
+            text: "明确应急组织和职责"
+            evidence_keywords: ["应急组织", "应急小组", "职责", "指挥"]
+            missing_judgement: "未发现应急组织和职责。"
+          - id: "P2"
+            text: "明确事件分级或分类"
+            evidence_keywords: ["事件分级", "事件分类", "等级", "级别"]
+            missing_judgement: "未发现事件分级或分类。"
+      - id: "DOC-IRP-002"
+        title: "处置流程与演练"
+        required_points:
+          - id: "P1"
+            text: "明确报告、响应和处置流程"
+            evidence_keywords: ["报告", "响应", "处置", "流程"]
+            missing_judgement: "未发现报告、响应和处置流程。"
+          - id: "P2"
+            text: "明确应急演练或预案更新要求"
+            evidence_keywords: ["演练", "更新", "修订", "复盘"]
+            missing_judgement: "未发现应急演练或预案更新要求。"
+      - id: "DOC-IRP-003"
+        title: "恢复与联络"
+        required_points:
+          - id: "P1"
+            text: "明确业务恢复或系统恢复要求"
+            evidence_keywords: ["恢复", "业务恢复", "系统恢复", "恢复时间"]
+            missing_judgement: "未发现业务恢复或系统恢复要求。"
+          - id: "P2"
+            text: "明确应急联系人或外部协同渠道"
+            evidence_keywords: ["联系人", "联系方式", "外部协同", "通报"]
+            missing_judgement: "未发现应急联系人或外部协同渠道。"
+      - id: "DOC-IRP-004"
+        title: "预案保障"
+        required_points:
+          - id: "P1"
+            text: "明确应急资源、工具或备份保障"
+            evidence_keywords: ["应急资源", "工具", "备份", "保障"]
+            missing_judgement: "未发现应急资源、工具或备份保障。"
+          - id: "P2"
+            text: "明确事件总结、改进或责任复盘"
+            evidence_keywords: ["总结", "改进", "复盘", "责任"]
+            missing_judgement: "未发现事件总结、改进或责任复盘要求。"
+
+  incident_management_policy:
+    name: "安全事件管理制度"
+    aliases: ["安全事件管理制度", "事件管理制度", "安全事件处理制度"]
+    controls:
+      - id: "DOC-IMP-001"
+        title: "事件报告与处置"
+        required_points:
+          - id: "P1"
+            text: "明确事件发现和报告要求"
+            evidence_keywords: ["事件发现", "事件报告", "上报", "通报"]
+            missing_judgement: "未发现事件发现和报告要求。"
+          - id: "P2"
+            text: "明确事件处置和记录要求"
+            evidence_keywords: ["事件处置", "处理记录", "处置记录", "闭环"]
+            missing_judgement: "未发现事件处置和记录要求。"
+      - id: "DOC-IMP-002"
+        title: "分析改进"
+        required_points:
+          - id: "P1"
+            text: "明确事件分析或复盘要求"
+            evidence_keywords: ["分析", "复盘", "原因", "总结"]
+            missing_judgement: "未发现事件分析或复盘要求。"
+          - id: "P2"
+            text: "明确整改或预防措施"
+            evidence_keywords: ["整改", "预防", "改进", "措施"]
+            missing_judgement: "未发现整改或预防措施。"
+      - id: "DOC-IMP-003"
+        title: "事件分级与升级"
+        required_points:
+          - id: "P1"
+            text: "明确安全事件分类或分级"
+            evidence_keywords: ["事件分类", "事件分级", "级别", "严重程度"]
+            missing_judgement: "未发现安全事件分类或分级。"
+          - id: "P2"
+            text: "明确事件升级、通报或报告时限"
+            evidence_keywords: ["升级", "通报", "报告时限", "时限"]
+            missing_judgement: "未发现事件升级、通报或报告时限。"
+      - id: "DOC-IMP-004"
+        title: "证据与闭环"
+        required_points:
+          - id: "P1"
+            text: "明确事件证据留存要求"
+            evidence_keywords: ["证据", "留存", "取证", "记录"]
+            missing_judgement: "未发现事件证据留存要求。"
+          - id: "P2"
+            text: "明确事件关闭或闭环验证要求"
+            evidence_keywords: ["关闭", "闭环", "验证", "确认"]
+            missing_judgement: "未发现事件关闭或闭环验证要求。"
+
+  security_audit_policy:
+    name: "安全审计管理制度"
+    aliases: ["安全审计管理制度", "审计管理制度", "安全审计"]
+    controls:
+      - id: "DOC-SAP-001"
+        title: "审计范围与内容"
+        required_points:
+          - id: "P1"
+            text: "明确审计对象或范围"
+            evidence_keywords: ["审计对象", "审计范围", "审计内容"]
+            missing_judgement: "未发现审计对象或范围。"
+          - id: "P2"
+            text: "明确审计日志内容"
+            evidence_keywords: ["审计日志", "操作日志", "登录日志", "访问日志"]
+            missing_judgement: "未发现审计日志内容要求。"
+      - id: "DOC-SAP-002"
+        title: "审计保护与留存"
+        required_points:
+          - id: "P1"
+            text: "明确日志留存期限"
+            evidence_keywords: ["留存", "保存期限", "不少于", "六个月"]
+            missing_judgement: "未发现日志留存期限。"
+          - id: "P2"
+            text: "明确审计记录保护要求"
+            evidence_keywords: ["保护", "防篡改", "备份", "访问控制"]
+            missing_judgement: "未发现审计记录保护要求。"
+      - id: "DOC-SAP-003"
+        title: "审计管理职责"
+        required_points:
+          - id: "P1"
+            text: "明确审计管理责任人或岗位"
+            evidence_keywords: ["审计管理员", "责任人", "岗位", "职责"]
+            missing_judgement: "未发现审计管理责任人或岗位。"
+          - id: "P2"
+            text: "明确审计策略配置、变更或审批"
+            evidence_keywords: ["审计策略", "配置", "变更", "审批"]
+            missing_judgement: "未发现审计策略配置、变更或审批要求。"
+      - id: "DOC-SAP-004"
+        title: "审计分析与处置"
+        required_points:
+          - id: "P1"
+            text: "明确审计日志定期分析要求"
+            evidence_keywords: ["定期分析", "日志分析", "审计分析", "审查"]
+            missing_judgement: "未发现审计日志定期分析要求。"
+          - id: "P2"
+            text: "明确异常审计事件处置要求"
+            evidence_keywords: ["异常", "告警", "处置", "追踪"]
+            missing_judgement: "未发现异常审计事件处置要求。"
+
+  system_security_plan:
+    name: "系统安全方案"
+    aliases: ["系统安全方案", "安全方案", "总体安全方案"]
+    controls:
+      - id: "DOC-SSP-001"
+        title: "安全架构与边界"
+        required_points:
+          - id: "P1"
+            text: "描述系统边界和资产范围"
+            evidence_keywords: ["系统边界", "资产范围", "网络边界", "保护对象"]
+            missing_judgement: "未发现系统边界或资产范围描述。"
+          - id: "P2"
+            text: "描述安全架构或防护措施"
+            evidence_keywords: ["安全架构", "防护措施", "访问控制", "边界防护"]
+            missing_judgement: "未发现安全架构或防护措施。"
+      - id: "DOC-SSP-002"
+        title: "安全能力覆盖"
+        required_points:
+          - id: "P1"
+            text: "覆盖身份鉴别和访问控制"
+            evidence_keywords: ["身份鉴别", "访问控制", "认证", "授权"]
+            missing_judgement: "未发现身份鉴别和访问控制设计。"
+          - id: "P2"
+            text: "覆盖日志审计和数据保护"
+            evidence_keywords: ["日志审计", "数据保护", "加密", "备份"]
+            missing_judgement: "未发现日志审计或数据保护设计。"
+      - id: "DOC-SSP-003"
+        title: "安全区域与通信"
+        required_points:
+          - id: "P1"
+            text: "描述网络区域划分或安全域"
+            evidence_keywords: ["区域划分", "安全域", "网络分区", "边界"]
+            missing_judgement: "未发现网络区域划分或安全域描述。"
+          - id: "P2"
+            text: "描述通信传输保护措施"
+            evidence_keywords: ["传输保护", "加密传输", "TLS", "VPN"]
+            missing_judgement: "未发现通信传输保护措施。"
+      - id: "DOC-SSP-004"
+        title: "安全运营支撑"
+        required_points:
+          - id: "P1"
+            text: "描述漏洞、补丁或配置加固方案"
+            evidence_keywords: ["漏洞", "补丁", "配置加固", "基线"]
+            missing_judgement: "未发现漏洞、补丁或配置加固方案。"
+          - id: "P2"
+            text: "描述备份恢复或应急支撑方案"
+            evidence_keywords: ["备份恢复", "应急", "容灾", "恢复"]
+            missing_judgement: "未发现备份恢复或应急支撑方案。"
+
+  security_strategy:
+    name: "信息安全策略文件"
+    aliases: ["信息安全策略文件", "安全策略", "网络安全策略"]
+    controls:
+      - id: "DOC-STR-001"
+        title: "策略目标与原则"
+        required_points:
+          - id: "P1"
+            text: "明确安全策略目标"
+            evidence_keywords: ["策略目标", "安全目标", "总体目标"]
+            missing_judgement: "未发现安全策略目标。"
+          - id: "P2"
+            text: "明确安全原则"
+            evidence_keywords: ["安全原则", "最小权限", "纵深防御", "分权制衡"]
+            missing_judgement: "未发现安全原则。"
+      - id: "DOC-STR-002"
+        title: "策略覆盖范围"
+        required_points:
+          - id: "P1"
+            text: "覆盖账号、网络或数据策略"
+            evidence_keywords: ["账号策略", "网络策略", "数据策略", "密码策略"]
+            missing_judgement: "未发现账号、网络或数据策略。"
+          - id: "P2"
+            text: "明确策略维护或评审要求"
+            evidence_keywords: ["维护", "评审", "更新", "修订"]
+            missing_judgement: "未发现策略维护或评审要求。"
+      - id: "DOC-STR-003"
+        title: "策略落地控制"
+        required_points:
+          - id: "P1"
+            text: "明确策略执行责任或责任部门"
+            evidence_keywords: ["责任部门", "执行责任", "职责", "落实"]
+            missing_judgement: "未发现策略执行责任或责任部门。"
+          - id: "P2"
+            text: "明确策略检查、审计或考核要求"
+            evidence_keywords: ["检查", "审计", "考核", "监督"]
+            missing_judgement: "未发现策略检查、审计或考核要求。"
+      - id: "DOC-STR-004"
+        title: "策略例外与风险"
+        required_points:
+          - id: "P1"
+            text: "明确策略例外或豁免审批要求"
+            evidence_keywords: ["例外", "豁免", "审批", "批准"]
+            missing_judgement: "未发现策略例外或豁免审批要求。"
+          - id: "P2"
+            text: "明确风险接受、整改或持续改进要求"
+            evidence_keywords: ["风险接受", "整改", "持续改进", "风险处置"]
+            missing_judgement: "未发现风险接受、整改或持续改进要求。"

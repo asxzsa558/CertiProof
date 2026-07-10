@@ -8,6 +8,7 @@ from app.models.finding import Finding, Severity, Judgment, JudgmentEngine, Find
 from app.models.evidence import Evidence, EvidenceType
 from app.models.remediation import RemediationTicket, RemediationStatus
 from app.models.monitoring import ScheduledScan, ScanHistory, ScheduleFrequency
+from app.models.change_snapshot import ChangeSnapshot
 from app.models.model_config import ModelProvider, ModelConfig, ModelUsage, ProviderType
 from app.models.context import (
     ConversationHistory, ActionHistory, ResultCache, ProjectMemory, UserMemory,
@@ -53,6 +54,7 @@ __all__ = [
     "ScheduledScan",
     "ScanHistory",
     "ScheduleFrequency",
+    "ChangeSnapshot",
     "ModelProvider",
     "ModelConfig",
     "ModelUsage",

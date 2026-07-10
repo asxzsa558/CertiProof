@@ -11,6 +11,7 @@ class RemediationStatus(str, enum.Enum):
     RESOLVED = "resolved"
     VERIFIED = "verified"
     CLOSED = "closed"
+    SKIPPED = "skipped"
 
 
 class RemediationTicket(Base):
@@ -33,6 +34,7 @@ class RemediationTicket(Base):
     description = Column(Text, nullable=True)
     remediation_plan = Column(Text, nullable=True)
     resolution_notes = Column(Text, nullable=True)
+    skip_reason = Column(Text, nullable=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

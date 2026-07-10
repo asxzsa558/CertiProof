@@ -388,7 +388,7 @@ function ReportCard({ data }) {
           }
         }}
       >
-        下载 PDF 报告
+        下载 HTML 报告
       </Button>
     </div>
   )

@@ -6,6 +6,16 @@ from aiohttp import web
 STATIC_DIR = '/app/static'
 BACKEND_URL = 'http://backend:8000'
 BACKEND_WS_URL = 'ws://backend:8000'
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024
+
+@web.middleware
+async def cache_headers(request, handler):
+    response = await handler(request)
+    if request.path.startswith('/assets/'):
+        response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    elif not request.path.startswith('/api/'):
+        response.headers['Cache-Control'] = 'no-store'
+    return response
 
 async def handle_index(request):
     return web.FileResponse(os.path.join(STATIC_DIR, 'index.html'))
@@ -95,7 +105,7 @@ async def proxy_websocket(request):
 async def health(request):
     return web.json_response({"status": "ok"})
 
-app = web.Application()
+app = web.Application(middlewares=[cache_headers], client_max_size=MAX_UPLOAD_SIZE)
 app.router.add_get('/health', health)
 app.router.add_get('/api/v1/ws/{path:.*}', proxy_websocket)
 app.router.add_route('*', '/api/{path:.*}', proxy_api)

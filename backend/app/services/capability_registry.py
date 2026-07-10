@@ -868,7 +868,7 @@ class CapabilityRegistry:
             parameters={
                 "type": "object",
                 "properties": {
-                    "status": {"type": "string", "description": "状态过滤：'open'、'in_progress'、'resolved'、'verified'"},
+                    "status": {"type": "string", "description": "状态过滤：'open'、'in_progress'、'resolved'、'verified'、'closed'、'skipped'"},
                 },
                 "required": []
             },
@@ -882,8 +882,9 @@ class CapabilityRegistry:
                 "type": "object",
                 "properties": {
                     "ticket_id": {"type": "integer", "description": "工单ID"},
-                    "status": {"type": "string", "description": "新状态：'in_progress'、'resolved'、'verified'、'closed'"},
+                    "status": {"type": "string", "description": "新状态：'in_progress'、'resolved'、'verified'、'closed'、'skipped'"},
                     "resolution_notes": {"type": "string", "description": "解决说明"},
+                    "skip_reason": {"type": "string", "description": "跳过原因"},
                 },
                 "required": ["ticket_id", "status"]
             },
@@ -893,8 +894,8 @@ class CapabilityRegistry:
         # ========== 报告生成类能力 ==========
         
         self.register(Capability(
-            name="generate_pdf_report",
-            description="生成 PDF 格式的等保合规报告。",
+            name="generate_html_report",
+            description="生成 HTML 格式的等保自查报告。",
             parameters={
                 "type": "object",
                 "properties": {

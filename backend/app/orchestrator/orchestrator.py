@@ -780,6 +780,13 @@ class Orchestrator:
 
                 # 更新扫描任务状态
                 completed_dt = datetime.utcnow()
+                from app.services.change_detection import record_port_snapshots
+                port_changes = await record_port_snapshots(
+                    async_db,
+                    project_id,
+                    scan_task_id,
+                    scan_results.get("port_results", {}),
+                ) if project_id and scan_task_id else []
                 await self._persist_scan_task_state(
                     async_db,
                     scan_task_id,
@@ -791,6 +798,7 @@ class Orchestrator:
                         "scan_results": scan_results,
                         "success_count": execution_result.get("success_count", 0),
                         "failed_count": execution_result.get("failed_count", 0),
+                        "change_detection": {"port_changes": port_changes},
                     },
                     completed_at=completed_dt,
                 )
@@ -1009,7 +1017,8 @@ class Orchestrator:
             "create_remediation_ticket": "创建整改工单",
             "list_remediation_tickets": "列出整改工单",
             "update_ticket_status": "更新工单状态",
-            "generate_pdf_report": "生成 PDF 报告",
+            "generate_html_report": "生成 HTML 报告",
+            "generate_pdf_report": "生成 HTML 报告",
             "generate_json_report": "生成 JSON 报告",
             "create_scheduled_scan": "创建定时扫描",
             "list_scheduled_scans": "列出定时扫描",
@@ -1781,6 +1790,7 @@ class Orchestrator:
             "composite_results": [],        # 组合工具子任务矩阵
             "baseline_results": {},         # 安全基线核查结果
             "discovered_assets": {},         # 资产发现结果
+            "port_results": {},              # 每个资产的端口快照输入
             "compliance_score": None,
             "asset_results": {},  # 按资产分组的结果
         }
@@ -1795,6 +1805,14 @@ class Orchestrator:
             if not error_detail and isinstance(data, dict):
                 error_detail = data.get("error_detail")
             is_sub_result = bool(result.get("label"))
+
+            if capability in ("scan_ports", "nmap_scan", "masscan_scan"):
+                results["port_results"][target] = {
+                    "capability": capability,
+                    "status": status,
+                    "parameters": result.get("parameters") or {},
+                    "data": data,
+                }
 
             # 初始化资产结果；组合子任务只进入详情，不单独生成资产卡
             if not is_sub_result and target not in results["asset_results"]:

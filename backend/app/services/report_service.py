@@ -1,480 +1,66 @@
-"""
-Report Service - VeriSure
-Generates PDF compliance reports.
-"""
+"""HTML/JSON report service for CertiProof self-assessment."""
 
-import io
 from datetime import datetime
-from typing import List
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import cm, mm
-from reportlab.lib.colors import HexColor, white, black
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, Image
-)
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.graphics.shapes import Drawing, Rect, String
-from reportlab.graphics.charts.piecharts import Pie
+from html import escape
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.models.project import Project
+from app.models.asset import Asset
 from app.models.scan_task import ScanTask
-from app.models.finding import Finding, Severity
+from app.models.finding import Finding
 from app.models.evidence import Evidence
 from app.models.assessment import Assessment, PhaseInstance, TaskInstance
+from app.models.remediation import RemediationTicket
+from app.models.change_snapshot import ChangeSnapshot
 
 
-# Register Chinese font
-try:
-    pdfmetrics.registerFont(TTFont('NotoSansCJK', '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', subfontIndex=0))
-    CHINESE_FONT = 'NotoSansCJK'
-except:
-    try:
-        pdfmetrics.registerFont(TTFont('NotoSansCJK', '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc', subfontIndex=0))
-        CHINESE_FONT = 'NotoSansCJK'
-    except:
-        CHINESE_FONT = 'Helvetica'
+def _value(value):
+    return value.value if hasattr(value, "value") else value
 
 
-# Colors
-PRIMARY_COLOR = HexColor('#6366f1')
-SUCCESS_COLOR = HexColor('#10b981')
-WARNING_COLOR = HexColor('#f59e0b')
-DANGER_COLOR = HexColor('#ef4444')
-CRITICAL_COLOR = HexColor('#dc2626')
-DARK_BG = HexColor('#1e293b')
-LIGHT_BG = HexColor('#f8fafc')
-GRAY_TEXT = HexColor('#64748b')
+def _dt(value):
+    return value.isoformat() if value else None
 
 
-def get_severity_color(severity: str) -> HexColor:
-    """Get color for severity level."""
-    colors = {
-        'critical': CRITICAL_COLOR,
-        'high': DANGER_COLOR,
-        'medium': WARNING_COLOR,
-        'low': HexColor('#3b82f6'),
-        'info': GRAY_TEXT,
+def _duration_days(start, end):
+    if not start or not end:
+        return None
+    return max(0, (end - start).days)
+
+
+def _finding_evidence_ids(finding: Finding) -> list[int]:
+    ids = []
+    for item in finding.evidence_ids or []:
+        try:
+            ids.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
+def _evidence_payload(evidence: Evidence) -> dict:
+    content = evidence.content or {}
+    return {
+        "id": evidence.id,
+        "file_name": evidence.file_name,
+        "source": evidence.source,
+        "mime_type": evidence.mime_type,
+        "file_size": evidence.file_size,
+        "page_count": content.get("page_count"),
+        "analysis_mode": content.get("analysis_mode"),
+        "native_blocks": content.get("native_blocks"),
+        "ocr_blocks": content.get("ocr_blocks"),
+        "vision_blocks": content.get("vision_blocks"),
+        "warnings": content.get("warnings") or [],
     }
-    return colors.get(severity, GRAY_TEXT)
-
-
-def get_severity_label(severity: str) -> str:
-    """Get Chinese label for severity."""
-    labels = {
-        'critical': '严重',
-        'high': '高危',
-        'medium': '中危',
-        'low': '低危',
-        'info': '信息',
-    }
-    return labels.get(severity, severity)
-
-
-def get_judgment_label(judgment: str) -> str:
-    """Get Chinese label for judgment."""
-    labels = {
-        'pass': '符合',
-        'fail': '不符合',
-        'partial': '部分符合',
-        'not_tested': '未检测',
-        'paper_compliant': '纸上合规',
-    }
-    return labels.get(judgment, judgment)
-
-
-async def generate_report(db: AsyncSession, project_id: int) -> io.BytesIO:
-    """Generate PDF report for a project."""
-    
-    # Fetch project data
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    project = result.scalar_one_or_none()
-    if not project:
-        raise ValueError("Project not found")
-    
-    # Fetch assessment data
-    result = await db.execute(
-        select(Assessment)
-        .where(Assessment.project_id == project_id)
-        .order_by(Assessment.created_at.desc())
-        .limit(1)
-    )
-    assessment = result.scalar_one_or_none()
-    
-    # Fetch phases and tasks if assessment exists
-    phases = []
-    if assessment:
-        result = await db.execute(
-            select(PhaseInstance)
-            .where(PhaseInstance.assessment_id == assessment.id)
-            .order_by(PhaseInstance.order)
-        )
-        phases = result.scalars().all()
-    
-    # Fetch latest scan
-    result = await db.execute(
-        select(ScanTask)
-        .where(ScanTask.project_id == project_id)
-        .order_by(ScanTask.created_at.desc())
-        .limit(1)
-    )
-    scan_task = result.scalar_one_or_none()
-    
-    # Fetch findings
-    findings = []
-    if scan_task:
-        result = await db.execute(
-            select(Finding)
-            .where(Finding.scan_task_id == scan_task.id)
-            .order_by(Finding.severity)
-        )
-        findings = result.scalars().all()
-    
-    # Create PDF
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=2*cm,
-        leftMargin=2*cm,
-        topMargin=2*cm,
-        bottomMargin=2*cm,
-    )
-    
-    # Styles
-    styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Title'],
-        fontName=CHINESE_FONT,
-        fontSize=28,
-        textColor=PRIMARY_COLOR,
-        spaceAfter=30,
-        alignment=TA_CENTER,
-    )
-    
-    heading_style = ParagraphStyle(
-        'CustomHeading',
-        parent=styles['Heading1'],
-        fontName=CHINESE_FONT,
-        fontSize=18,
-        textColor=DARK_BG,
-        spaceBefore=20,
-        spaceAfter=12,
-    )
-    
-    subheading_style = ParagraphStyle(
-        'CustomSubHeading',
-        parent=styles['Heading2'],
-        fontName=CHINESE_FONT,
-        fontSize=14,
-        textColor=DARK_BG,
-        spaceBefore=15,
-        spaceAfter=8,
-    )
-    
-    body_style = ParagraphStyle(
-        'CustomBody',
-        parent=styles['Normal'],
-        fontName=CHINESE_FONT,
-        fontSize=10,
-        textColor=GRAY_TEXT,
-        spaceBefore=6,
-        spaceAfter=6,
-        leading=16,
-    )
-    
-    # Build content
-    elements = []
-    
-    # Cover page
-    elements.append(Spacer(1, 4*cm))
-    elements.append(Paragraph('VeriSure', title_style))
-    elements.append(Spacer(1, 1*cm))
-    elements.append(Paragraph('等保合规检测报告', ParagraphStyle(
-        'Subtitle',
-        parent=styles['Title'],
-        fontName=CHINESE_FONT,
-        fontSize=20,
-        textColor=GRAY_TEXT,
-        alignment=TA_CENTER,
-    )))
-    elements.append(Spacer(1, 3*cm))
-    
-    # Project info table
-    compliance_level = str(project.compliance_level.value) if hasattr(project.compliance_level, 'value') else str(project.compliance_level)
-    scan_time = scan_task.completed_at.strftime('%Y-%m-%d %H:%M') if scan_task and scan_task.completed_at else '未检测'
-    
-    project_info = [
-        ['项目名称', project.name],
-        ['等保等级', compliance_level],
-        ['检测时间', scan_time],
-        ['合规分数', f"{project.compliance_score or 0} 分"],
-        ['报告生成时间', datetime.utcnow().strftime('%Y-%m-%d %H:%M')],
-    ]
-    
-    info_table = Table(project_info, colWidths=[4*cm, 10*cm])
-    info_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (-1, -1), CHINESE_FONT),
-        ('FONTSIZE', (0, 0), (-1, -1), 11),
-        ('TEXTCOLOR', (0, 0), (0, -1), GRAY_TEXT),
-        ('TEXTCOLOR', (1, 0), (1, -1), DARK_BG),
-        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-        ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-        ('LINEBELOW', (0, 0), (-1, -2), 0.5, HexColor('#e2e8f0')),
-    ]))
-    elements.append(info_table)
-    
-    # Assessment progress section
-    if assessment and phases:
-        elements.append(Spacer(1, 1.5*cm))
-        elements.append(Paragraph('测评流程进度', ParagraphStyle(
-            'SectionTitle',
-            parent=styles['Heading2'],
-            fontName=CHINESE_FONT,
-            fontSize=14,
-            textColor=DARK_BG,
-            alignment=TA_CENTER,
-            spaceAfter=12,
-        )))
-        
-        # Assessment status
-        status_labels = {
-            'not_started': '未开始',
-            'in_progress': '进行中',
-            'paused': '已暂停',
-            'completed': '已完成',
-            'failed': '失败',
-        }
-        assessment_status = status_labels.get(assessment.status, assessment.status)
-        
-        progress_data = [
-            ['测评名称', assessment.name or '等保测评'],
-            ['当前状态', assessment_status],
-            ['总体进度', f"{assessment.progress:.1f}%"],
-            ['完成阶段', f"{assessment.completed_phases} / {assessment.total_phases}"],
-        ]
-        
-        progress_table = Table(progress_data, colWidths=[4*cm, 10*cm])
-        progress_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), CHINESE_FONT),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('TEXTCOLOR', (0, 0), (0, -1), GRAY_TEXT),
-            ('TEXTCOLOR', (1, 0), (1, -1), DARK_BG),
-            ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ('BACKGROUND', (0, 0), (-1, -1), LIGHT_BG),
-            ('ROUNDEDCORNERS', [4, 4, 4, 4]),
-        ]))
-        elements.append(progress_table)
-        
-        # Phase details
-        elements.append(Spacer(1, 0.8*cm))
-        
-        phase_status_labels = {
-            'pending': '待执行',
-            'active': '执行中',
-            'completed': '已完成',
-            'skipped': '已跳过',
-            'failed': '失败',
-        }
-        
-        phase_data = [['阶段', '状态', '任务进度', '完成时间']]
-        for phase in phases:
-            phase_status = phase_status_labels.get(phase.status, phase.status)
-            task_progress = f"{phase.completed_tasks}/{phase.total_tasks}"
-            completed_time = phase.completed_at.strftime('%m-%d %H:%M') if phase.completed_at else '-'
-            phase_data.append([phase.name, phase_status, task_progress, completed_time])
-        
-        phase_table = Table(phase_data, colWidths=[4.5*cm, 2.5*cm, 2.5*cm, 3*cm])
-        phase_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), CHINESE_FONT),
-            ('FONTSIZE', (0, 0), (-1, 0), 9),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('TEXTCOLOR', (0, 0), (-1, 0), white),
-            ('TEXTCOLOR', (0, 1), (-1, -1), DARK_BG),
-            ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('GRID', (0, 0), (-1, -1), 0.5, HexColor('#e2e8f0')),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, LIGHT_BG]),
-        ]))
-        elements.append(phase_table)
-    
-    elements.append(PageBreak())
-    
-    # Executive Summary
-    elements.append(Paragraph('执行摘要', heading_style))
-    elements.append(Spacer(1, 0.5*cm))
-    
-    # Summary stats
-    critical_count = 0
-    high_count = 0
-    medium_count = 0
-    low_count = 0
-    
-    for f in findings:
-        severity = f.severity.value if hasattr(f.severity, 'value') else str(f.severity)
-        if severity == 'critical':
-            critical_count += 1
-        elif severity == 'high':
-            high_count += 1
-        elif severity == 'medium':
-            medium_count += 1
-        elif severity == 'low':
-            low_count += 1
-    
-    summary_text = f"""
-    本次检测共发现 <b>{len(findings)}</b> 个安全问题，其中：
-    <br/>• 严重问题：<b>{critical_count}</b> 个
-    <br/>• 高危问题：<b>{high_count}</b> 个
-    <br/>• 中危问题：<b>{medium_count}</b> 个
-    <br/>• 低危问题：<b>{low_count}</b> 个
-    <br/><br/>
-    综合合规分数为 <b>{project.compliance_score or 0}</b> 分，
-    建议优先处理严重和高危问题，尽快完成整改。
-    """
-    elements.append(Paragraph(summary_text, body_style))
-    elements.append(Spacer(1, 1*cm))
-    
-    # Score gauge
-    score = project.compliance_score or 0
-    if score >= 90:
-        score_status = '优秀'
-        score_color = SUCCESS_COLOR
-    elif score >= 75:
-        score_status = '良好'
-        score_color = PRIMARY_COLOR
-    elif score >= 60:
-        score_status = '一般'
-        score_color = WARNING_COLOR
-    else:
-        score_status = '危险'
-        score_color = DANGER_COLOR
-    
-    score_text = f"""
-    <font size="14" color="{score_color.hexval()}"><b>{score_status}</b></font>
-    <br/>
-    合规分数：<b>{score}</b> / 100
-    """
-    elements.append(Paragraph(score_text, ParagraphStyle(
-        'ScoreStyle',
-        parent=body_style,
-        alignment=TA_CENTER,
-        fontSize=12,
-    )))
-    
-    elements.append(PageBreak())
-    
-    # Findings Detail
-    elements.append(Paragraph('问题详情', heading_style))
-    elements.append(Spacer(1, 0.5*cm))
-    
-    if not findings:
-        elements.append(Paragraph('暂无检测数据', body_style))
-    else:
-        for i, finding in enumerate(findings, 1):
-            severity = finding.severity.value if hasattr(finding.severity, 'value') else str(finding.severity)
-            judgment = finding.judgment.value if hasattr(finding.judgment, 'value') else str(finding.judgment)
-            
-            # Finding header
-            elements.append(Paragraph(
-                f'{i}. [{get_severity_label(severity)}] {finding.clause_id} {finding.clause_name or ""}',
-                subheading_style
-            ))
-            
-            # Finding details table
-            finding_data = [
-                ['条款编号', finding.clause_id],
-                ['严重等级', get_severity_label(severity)],
-                ['判定结果', get_judgment_label(judgment)],
-                ['问题描述', finding.description or '无'],
-                ['整改建议', finding.remediation_suggestion or '无'],
-            ]
-            
-            finding_table = Table(finding_data, colWidths=[3*cm, 11*cm])
-            finding_table.setStyle(TableStyle([
-                ('FONTNAME', (0, 0), (-1, -1), CHINESE_FONT),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('TEXTCOLOR', (0, 0), (0, -1), GRAY_TEXT),
-                ('TEXTCOLOR', (1, 0), (1, -1), DARK_BG),
-                ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-                ('BACKGROUND', (0, 0), (-1, -1), LIGHT_BG),
-            ]))
-            elements.append(finding_table)
-            elements.append(Spacer(1, 0.8*cm))
-    
-    elements.append(PageBreak())
-    
-    # Recommendations
-    elements.append(Paragraph('整改建议', heading_style))
-    elements.append(Spacer(1, 0.5*cm))
-    
-    recommendations = """
-    <b>1. 立即整改（严重/高危问题）</b>
-    <br/>• 关闭不必要的公网端口，特别是数据库端口（3306, 5432, 6379 等）
-    <br/>• 修改所有弱口令，启用强密码策略（≥12位，含大小写+数字+特殊字符）
-    <br/>• 修复已知高危漏洞，升级相关组件到最新版本
-    <br/><br/>
-    <b>2. 短期整改（中危问题）</b>
-    <br/>• 启用 HTTPS，配置有效的 SSL 证书
-    <br/>• 禁用不安全的协议版本（TLS 1.0/1.1）
-    <br/>• 配置访问控制策略，限制管理后台访问 IP
-    <br/><br/>
-    <b>3. 长期改进</b>
-    <br/>• 建立定期安全扫描机制，建议每月至少一次
-    <br/>• 完善安全管理制度，确保人员职责明确
-    <br/>• 加强安全培训，提高全员安全意识
-    <br/>• 考虑部署 WAF、IDS 等安全防护设备
-    """
-    elements.append(Paragraph(recommendations, body_style))
-    
-    # Footer
-    elements.append(Spacer(1, 2*cm))
-    elements.append(Paragraph(
-        '本报告由 VeriSure 智能合规验证平台自动生成',
-        ParagraphStyle(
-            'Footer',
-            parent=body_style,
-            fontSize=8,
-            textColor=GRAY_TEXT,
-            alignment=TA_CENTER,
-        )
-    ))
-    
-    # Build PDF
-    doc.build(elements)
-    buffer.seek(0)
-    
-    return buffer
 
 
 async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
-    """Generate JSON report for a project."""
-    
-    # Fetch project data
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:
         raise ValueError("Project not found")
-    
-    # Fetch assessment data
+
     result = await db.execute(
         select(Assessment)
         .where(Assessment.project_id == project_id)
@@ -482,8 +68,7 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
         .limit(1)
     )
     assessment = result.scalar_one_or_none()
-    
-    # Fetch phases and tasks if assessment exists
+
     phases_data = []
     if assessment:
         result = await db.execute(
@@ -492,169 +77,334 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
             .order_by(PhaseInstance.order)
         )
         phases = result.scalars().all()
-        
         for phase in phases:
-            # Fetch tasks for this phase
-            result = await db.execute(
-                select(TaskInstance)
-                .where(TaskInstance.phase_id == phase.id)
-            )
+            result = await db.execute(select(TaskInstance).where(TaskInstance.phase_id == phase.id))
             tasks = result.scalars().all()
-            
-            tasks_data = []
-            for task in tasks:
-                tasks_data.append({
-                    'id': task.id,
-                    'task_type': task.task_type,
-                    'name': task.name,
-                    'status': task.status,
-                    'result': task.result,
-                    'started_at': task.started_at.isoformat() if task.started_at else None,
-                    'completed_at': task.completed_at.isoformat() if task.completed_at else None,
-                })
-            
             phases_data.append({
-                'id': phase.id,
-                'phase_id': phase.phase_id,
-                'name': phase.name,
-                'order': phase.order,
-                'status': phase.status,
-                'total_tasks': phase.total_tasks,
-                'completed_tasks': phase.completed_tasks,
-                'progress': phase.progress,
-                'started_at': phase.started_at.isoformat() if phase.started_at else None,
-                'completed_at': phase.completed_at.isoformat() if phase.completed_at else None,
-                'tasks': tasks_data,
+                "id": phase.id,
+                "phase_id": phase.phase_id,
+                "name": phase.name,
+                "order": phase.order,
+                "status": phase.status,
+                "total_tasks": phase.total_tasks,
+                "completed_tasks": phase.completed_tasks,
+                "progress": phase.progress,
+                "started_at": _dt(phase.started_at),
+                "completed_at": _dt(phase.completed_at),
+                "tasks": [
+                    {
+                        "id": task.id,
+                        "task_type": task.task_type,
+                        "name": task.name,
+                        "status": task.status,
+                        "result": task.result,
+                        "started_at": _dt(task.started_at),
+                        "completed_at": _dt(task.completed_at),
+                    }
+                    for task in tasks
+                ],
             })
-    
-    # Fetch all scan tasks
+
     result = await db.execute(
-        select(ScanTask)
-        .where(ScanTask.project_id == project_id)
-        .order_by(ScanTask.created_at.desc())
+        select(ScanTask).where(ScanTask.project_id == project_id).order_by(ScanTask.created_at.desc())
     )
     scan_tasks = result.scalars().all()
-    
-    # Fetch all findings
+
     result = await db.execute(
-        select(Finding)
-        .where(Finding.project_id == project_id)
-        .order_by(Finding.severity)
+        select(Asset).where(Asset.project_id == project_id).order_by(Asset.id)
+    )
+    assets = result.scalars().all()
+
+    result = await db.execute(
+        select(Finding).where(Finding.project_id == project_id).order_by(Finding.severity)
     )
     findings = result.scalars().all()
-    
-    # Fetch all evidences
-    finding_ids = [f.id for f in findings]
-    evidences = []
+
+    result = await db.execute(
+        select(RemediationTicket).where(RemediationTicket.project_id == project_id).order_by(RemediationTicket.created_at.desc())
+    )
+    tickets = result.scalars().all()
+    result = await db.execute(
+        select(ChangeSnapshot)
+        .where(ChangeSnapshot.project_id == project_id, ChangeSnapshot.changes_detected.is_(True))
+        .order_by(ChangeSnapshot.id.desc())
+        .limit(100)
+    )
+    change_snapshots = result.scalars().all()
+    ticket_by_finding = {ticket.finding_id: ticket for ticket in tickets}
+
+    finding_ids = [finding.id for finding in findings]
+    explicit_evidence_ids = sorted({evidence_id for finding in findings for evidence_id in _finding_evidence_ids(finding)})
+    evidence_by_id = {}
     if finding_ids:
-        result = await db.execute(
-            select(Evidence)
-            .where(Evidence.finding_id.in_(finding_ids))
-        )
-        evidences = result.scalars().all()
-    
-    # Build report
-    compliance_level = str(project.compliance_level.value) if hasattr(project.compliance_level, 'value') else str(project.compliance_level)
-    
-    severity_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0}
-    judgment_counts = {'pass': 0, 'fail': 0, 'partial': 0, 'not_tested': 0}
-    
+        result = await db.execute(select(Evidence).where(Evidence.finding_id.in_(finding_ids)))
+        evidence_by_id.update({evidence.id: evidence for evidence in result.scalars().all()})
+    if explicit_evidence_ids:
+        result = await db.execute(select(Evidence).where(Evidence.id.in_(explicit_evidence_ids)))
+        evidence_by_id.update({evidence.id: evidence for evidence in result.scalars().all()})
+    evidences = list(evidence_by_id.values())
+    project_evidence_count = (await db.execute(
+        select(func.count()).select_from(Evidence).where(Evidence.project_id == project_id)
+    )).scalar() or len(evidences)
+
+    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    judgment_counts = {"pass": 0, "fail": 0, "partial": 0, "not_tested": 0, "paper_compliant": 0}
     findings_data = []
-    for f in findings:
-        severity = f.severity.value if hasattr(f.severity, 'value') else str(f.severity)
-        judgment = f.judgment.value if hasattr(f.judgment, 'value') else str(f.judgment)
-        
+    for finding in findings:
+        severity = _value(finding.severity)
+        judgment = _value(finding.judgment)
+        status = _value(finding.status)
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
         judgment_counts[judgment] = judgment_counts.get(judgment, 0) + 1
-        
-        # Find related evidences
-        finding_evidences = [e for e in evidences if e.finding_id == f.id]
-        
+        related_ids = set(_finding_evidence_ids(finding))
+        related_evidence = [e for e in evidences if e.finding_id == finding.id or e.id in related_ids]
+        ticket = ticket_by_finding.get(finding.id)
         findings_data.append({
-            'id': f.id,
-            'clause_id': f.clause_id,
-            'clause_name': f.clause_name,
-            'severity': severity,
-            'judgment': judgment,
-            'judgment_engine': f.judgment_engine.value if hasattr(f.judgment_engine, 'value') else str(f.judgment_engine),
-            'description': f.description,
-            'remediation_suggestion': f.remediation_suggestion,
-            'status': f.status.value if hasattr(f.status, 'value') else str(f.status),
-            'evidence_count': len(finding_evidences),
-            'created_at': f.created_at.isoformat() if f.created_at else None,
+            "id": finding.id,
+            "clause_id": finding.clause_id,
+            "clause_name": finding.clause_name,
+            "severity": severity,
+            "judgment": judgment,
+            "judgment_engine": _value(finding.judgment_engine),
+            "description": finding.description,
+            "remediation_suggestion": finding.remediation_suggestion,
+            "status": status,
+            "ticket_status": _value(ticket.status) if ticket else None,
+            "resolution_days": _duration_days(finding.created_at, ticket.resolved_at if ticket else finding.resolved_at),
+            "evidence_count": len(related_evidence),
+            "evidences": [_evidence_payload(evidence) for evidence in related_evidence],
+            "created_at": _dt(finding.created_at),
         })
-    
-    scan_tasks_data = []
-    for st in scan_tasks:
-        scan_tasks_data.append({
-            'id': st.id,
-            'task_type': st.task_type.value if hasattr(st.task_type, 'value') else str(st.task_type),
-            'status': st.status.value if hasattr(st.status, 'value') else str(st.status),
-            'parameters': st.parameters,
-            'findings_count': st.findings_count,
-            'created_at': st.created_at.isoformat() if st.created_at else None,
-            'completed_at': st.completed_at.isoformat() if st.completed_at else None,
-        })
-    
+
     score = project.compliance_score or 0
-    if score >= 90:
-        score_status = '优秀'
-    elif score >= 75:
-        score_status = '良好'
-    elif score >= 60:
-        score_status = '一般'
-    else:
-        score_status = '危险'
-    
     report = {
-        'report_version': '1.0',
-        'generated_at': datetime.utcnow().isoformat(),
-        'project': {
-            'id': project.id,
-            'name': project.name,
-            'description': project.description,
-            'compliance_level': compliance_level,
-            'compliance_score': score,
-            'score_status': score_status,
-            'status': project.status.value if hasattr(project.status, 'value') else str(project.status),
-            'created_at': project.created_at.isoformat() if project.created_at else None,
+        "report_version": "2.1-html",
+        "generated_at": datetime.utcnow().isoformat(),
+        "project": {
+            "id": project.id,
+            "name": project.name,
+            "description": project.description,
+            "compliance_level": _value(project.compliance_level),
+            "compliance_score": score,
+            "status": _value(project.status),
+            "created_at": _dt(project.created_at),
         },
-        'assessment': {
-            'id': assessment.id if assessment else None,
-            'name': assessment.name if assessment else None,
-            'status': assessment.status if assessment else None,
-            'progress': assessment.progress if assessment else 0,
-            'total_phases': assessment.total_phases if assessment else 0,
-            'completed_phases': assessment.completed_phases if assessment else 0,
-            'started_at': assessment.started_at.isoformat() if assessment and assessment.started_at else None,
-            'completed_at': assessment.completed_at.isoformat() if assessment and assessment.completed_at else None,
-            'phases': phases_data,
+        "assessment": {
+            "id": assessment.id if assessment else None,
+            "name": assessment.name if assessment else None,
+            "status": assessment.status if assessment else None,
+            "progress": assessment.progress if assessment else 0,
+            "total_phases": assessment.total_phases if assessment else 0,
+            "completed_phases": assessment.completed_phases if assessment else 0,
+            "started_at": _dt(assessment.started_at) if assessment else None,
+            "completed_at": _dt(assessment.completed_at) if assessment else None,
+            "phases": phases_data,
         },
-        'summary': {
-            'total_findings': len(findings),
-            'severity_counts': severity_counts,
-            'judgment_counts': judgment_counts,
-            'total_scan_tasks': len(scan_tasks),
+        "summary": {
+            "total_assets": len(assets),
+            "total_findings": len(findings),
+            "severity_counts": severity_counts,
+            "judgment_counts": judgment_counts,
+            "total_scan_tasks": len(scan_tasks),
+            "total_evidences": project_evidence_count,
+            "total_tickets": len(tickets),
+            "closed_tickets": len([t for t in tickets if _value(t.status) in ("verified", "closed")]),
+            "skipped_tickets": len([t for t in tickets if _value(t.status) == "skipped"]),
         },
-        'scan_tasks': scan_tasks_data,
-        'findings': findings_data,
-        'recommendations': {
-            'immediate': [
-                '关闭不必要的公网端口，特别是数据库端口（3306, 5432, 6379 等）',
-                '修改所有弱口令，启用强密码策略（≥12位，含大小写+数字+特殊字符）',
-                '修复已知高危漏洞，升级相关组件到最新版本',
-            ],
-            'short_term': [
-                '启用 HTTPS，配置有效的 SSL 证书',
-                '禁用不安全的协议版本（TLS 1.0/1.1）',
-                '配置访问控制策略，限制管理后台访问 IP',
-            ],
-            'long_term': [
-                '建立定期安全扫描机制，建议每月至少一次',
-                '完善安全管理制度，确保人员职责明确',
-                '加强安全培训，提高全员安全意识',
-            ],
-        },
+        "assets": [
+            {
+                "id": asset.id,
+                "name": asset.name,
+                "value": asset.value,
+                "asset_type": _value(asset.asset_type),
+                "verification_status": _value(asset.verification_status),
+                "is_active": asset.is_active,
+            }
+            for asset in assets
+        ],
+        "scan_tasks": [
+            {
+                "id": task.id,
+                "task_type": _value(task.task_type),
+                "status": _value(task.status),
+                "parameters": task.parameters,
+                "result_summary": task.result_summary,
+                "error_message": task.error_message,
+                "findings_count": task.findings_count,
+                "created_at": _dt(task.created_at),
+                "completed_at": _dt(task.completed_at),
+            }
+            for task in scan_tasks
+        ],
+        "findings": findings_data,
+        "remediation_timeline": [
+            {
+                "id": ticket.id,
+                "finding_id": ticket.finding_id,
+                "title": ticket.title,
+                "status": _value(ticket.status),
+                "priority": ticket.priority,
+                "created_at": _dt(ticket.created_at),
+                "resolved_at": _dt(ticket.resolved_at),
+                "verified_at": _dt(ticket.verified_at),
+                "resolution_days": _duration_days(ticket.created_at, ticket.resolved_at or ticket.verified_at),
+                "skip_reason": getattr(ticket, "skip_reason", None),
+            }
+            for ticket in tickets
+        ],
+        "change_history": [
+            {
+                "id": item.id,
+                "type": item.snapshot_type,
+                "subject": item.subject,
+                "changes": item.changes or {},
+                "reliable": item.reliable,
+                "reassessment_required": item.reassessment_required,
+                "created_at": _dt(item.created_at),
+            }
+            for item in change_snapshots
+        ],
     }
-    
+    report["document_gaps"] = [
+        {
+            "task_id": task["id"],
+            "task_name": task["name"],
+            "document_name": (task.get("result") or {}).get("analysis", {}).get("document_name"),
+            "status": (task.get("result") or {}).get("analysis", {}).get("status"),
+            "coverage": (task.get("result") or {}).get("analysis", {}).get("coverage"),
+            "confidence": (task.get("result") or {}).get("analysis", {}).get("confidence"),
+            "gaps": (task.get("result") or {}).get("analysis", {}).get("gaps", []),
+            "files": (task.get("result") or {}).get("analysis", {}).get("files", []),
+            "analysis_mode": (task.get("result") or {}).get("analysis", {}).get("analysis_mode"),
+            "page_count": sum((file.get("page_count") or 0) for file in (task.get("result") or {}).get("analysis", {}).get("files", [])),
+            "native_blocks": sum((file.get("native_blocks") or 0) for file in (task.get("result") or {}).get("analysis", {}).get("files", [])),
+            "ocr_blocks": sum((file.get("ocr_blocks") or 0) for file in (task.get("result") or {}).get("analysis", {}).get("files", [])),
+            "vision_blocks": sum((file.get("vision_blocks") or 0) for file in (task.get("result") or {}).get("analysis", {}).get("files", [])),
+        }
+        for phase in phases_data
+        for task in phase["tasks"]
+        if (task.get("result") or {}).get("analysis", {}).get("type") == "document_control_analysis"
+    ]
+    report["retest_comparisons"] = [
+        {
+            "task_name": task["name"],
+            "document_name": analysis.get("document_name"),
+            **analysis["retest_comparison"],
+        }
+        for phase in phases_data
+        for task in phase["tasks"]
+        if (analysis := (task.get("result") or {}).get("analysis", {})).get("retest_comparison")
+    ]
     return report
+
+
+def _badge(text):
+    return f'<span class="badge">{escape(str(text or "-"))}</span>'
+
+
+def _change_text(item):
+    changes = item.get("changes") or {}
+    if item.get("type") == "asset":
+        return f"新增资产 {len(changes.get('added_assets') or [])}；移除资产 {len(changes.get('removed_assets') or [])}"
+    return (
+        f"新增端口 {len(changes.get('added_ports') or [])}；"
+        f"关闭端口 {len(changes.get('removed_ports') or [])}；"
+        f"服务变化 {len(changes.get('service_changes') or [])}"
+    )
+
+
+async def generate_html_report(db: AsyncSession, project_id: int) -> str:
+    report = await generate_json_report(db, project_id)
+    project = report["project"]
+    assessment = report["assessment"]
+    summary = report["summary"]
+
+    phase_rows = "\n".join(
+        f"<tr><td>{escape(p['name'])}</td><td>{_badge(p['status'])}</td><td>{p['completed_tasks']}/{p['total_tasks']}</td><td>{round(p['progress'] or 0)}%</td></tr>"
+        for p in assessment["phases"]
+    ) or '<tr><td colspan="4">暂无测评阶段</td></tr>'
+    finding_rows = "\n".join(
+        f"<tr><td>#{f['id']}</td><td>{escape(str(f['clause_id'] or '-'))}</td><td>{_badge(f['severity'])}</td><td>{_badge(f['status'])}</td><td>{_badge(f['ticket_status'])}</td><td>{f['evidence_count']}</td><td>{escape(str(f['description'] or '-'))}</td><td>{escape(str(f['remediation_suggestion'] or '-'))}</td></tr>"
+        for f in report["findings"]
+    ) or '<tr><td colspan="8">暂无问题</td></tr>'
+    timeline_rows = "\n".join(
+        f"<tr><td>{escape(t['title'])}</td><td>{_badge(t['status'])}</td><td>{escape(str(t['priority'] or '-'))}</td><td>{escape(str(t['resolution_days'] if t['resolution_days'] is not None else '-'))}</td><td>{escape(str(t['skip_reason'] or '-'))}</td></tr>"
+        for t in report["remediation_timeline"]
+    ) or '<tr><td colspan="5">暂无整改记录</td></tr>'
+    document_gap_rows = "\n".join(
+        f"<tr><td>{escape(str(g['document_name'] or g['task_name']))}</td><td>{escape('、'.join(f.get('file_name', '-') for f in g.get('files', [])) or '-')}</td><td>{_badge(g['status'])}</td><td>{_badge(g.get('analysis_mode') or '-')}</td><td>{g.get('page_count') or 0} 页 / 原生 {g.get('native_blocks') or 0} / OCR {g.get('ocr_blocks') or 0} / 视觉 {g.get('vision_blocks') or 0}</td><td>{round((g['coverage'] or 0) * 100)}%</td><td>{escape('；'.join((g['gaps'] or [])[:5]) or '-')}</td></tr>"
+        for g in report["document_gaps"]
+    ) or '<tr><td colspan="7">暂无文档差距结果</td></tr>'
+    asset_rows = "\n".join(
+        f"<tr><td>{escape(str(a['name'] or '-'))}</td><td>{escape(a['value'])}</td><td>{_badge(a['asset_type'])}</td><td>{_badge(a['verification_status'])}</td></tr>"
+        for a in report["assets"]
+    ) or '<tr><td colspan="4">暂无资产</td></tr>'
+    scan_rows = "\n".join(
+        f"<tr><td>#{s['id']}</td><td>{escape(str((s['parameters'] or {}).get('capability') or s['task_type'] or '-'))}</td><td>{escape(str((s['parameters'] or {}).get('target') or (s['parameters'] or {}).get('targets') or '-'))}</td><td>{_badge(s['status'])}</td><td>{s['findings_count'] or 0}</td><td>{escape(str(s['error_message'] or '-'))}</td></tr>"
+        for s in report["scan_tasks"]
+    ) or '<tr><td colspan="6">暂无技术检测记录</td></tr>'
+    retest_rows = "\n".join(
+        f"<tr><td>{escape(str(r['document_name'] or r['task_name']))}</td><td>{round((r.get('previous_coverage') or 0) * 100)}%</td><td>{round((r.get('current_coverage') or 0) * 100)}%</td><td>{_badge(r.get('status'))}</td><td>{escape('；'.join(r.get('fixed_gaps') or []) or '-')}</td><td>{escape('；'.join(r.get('new_gaps') or []) or '-')}</td></tr>"
+        for r in report["retest_comparisons"]
+    ) or '<tr><td colspan="6">暂无复测对比记录</td></tr>'
+    change_rows = "\n".join(
+        f"<tr><td>{escape(c['created_at'] or '-')}</td><td>{_badge('资产' if c['type'] == 'asset' else '端口')}</td><td>{escape(c['subject'])}</td><td>{escape(_change_text(c))}</td><td>{_badge('需重新评估' if c['reassessment_required'] else '已知晓')}</td></tr>"
+        for c in report["change_history"]
+    ) or '<tr><td colspan="5">暂无资产或端口变化</td></tr>'
+
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>CertiProof 自查报告 - {escape(project['name'])}</title>
+  <style>
+    body {{ margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #08111f; color: #e5f1ff; }}
+    main {{ max-width: 1180px; margin: 0 auto; padding: 40px 28px 64px; }}
+    h1, h2 {{ margin: 0; letter-spacing: 0; }}
+    h1 {{ font-size: 30px; }}
+    h2 {{ margin-top: 34px; font-size: 18px; color: #7dd3fc; }}
+    .muted {{ color: #91a4bd; }}
+    .grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 28px 0; }}
+    .card {{ border: 1px solid rgba(125,211,252,.22); background: rgba(15,23,42,.84); border-radius: 8px; padding: 18px; }}
+    .card strong {{ display: block; font-size: 28px; color: #fff; }}
+    table {{ width: 100%; border-collapse: collapse; margin-top: 12px; background: rgba(15,23,42,.72); border: 1px solid rgba(148,163,184,.2); }}
+    th, td {{ padding: 12px 14px; border-bottom: 1px solid rgba(148,163,184,.16); text-align: left; vertical-align: top; }}
+    th {{ color: #93c5fd; font-size: 12px; text-transform: uppercase; }}
+    .badge {{ display: inline-block; padding: 2px 8px; border-radius: 999px; background: rgba(56,189,248,.13); color: #bae6fd; border: 1px solid rgba(56,189,248,.25); }}
+    @media (max-width: 760px) {{ .grid {{ grid-template-columns: repeat(2, 1fr); }} main {{ padding: 24px 14px; overflow-x: auto; }} }}
+  </style>
+</head>
+<body>
+<main>
+  <p class="muted">CertiProof 企业等保自查报告 · HTML</p>
+  <h1>{escape(project['name'])}</h1>
+  <p class="muted">生成时间：{escape(report['generated_at'])} · 测评进度：{round(assessment['progress'] or 0)}%</p>
+  <section class="grid">
+    <div class="card"><strong>{summary['total_findings']}</strong><span class="muted">问题数</span></div>
+    <div class="card"><strong>{summary['closed_tickets']}/{summary['total_tickets']}</strong><span class="muted">整改进度</span></div>
+    <div class="card"><strong>{summary['total_evidences']}</strong><span class="muted">证据数量</span></div>
+    <div class="card"><strong>{summary['skipped_tickets']}</strong><span class="muted">跳过项</span></div>
+  </section>
+  <h2>资产范围</h2>
+  <table><thead><tr><th>资产名称</th><th>地址</th><th>类型</th><th>验证状态</th></tr></thead><tbody>{asset_rows}</tbody></table>
+  <h2>5 阶段测评进度</h2>
+  <table><thead><tr><th>阶段</th><th>状态</th><th>任务</th><th>进度</th></tr></thead><tbody>{phase_rows}</tbody></table>
+  <h2>问题清单</h2>
+  <table><thead><tr><th>ID</th><th>条款</th><th>级别</th><th>状态</th><th>工单</th><th>证据</th><th>问题</th><th>建议</th></tr></thead><tbody>{finding_rows}</tbody></table>
+  <h2>文档差距</h2>
+  <table><thead><tr><th>检查项</th><th>证据文件</th><th>结论</th><th>模式</th><th>解析来源</th><th>覆盖率</th><th>缺失项</th></tr></thead><tbody>{document_gap_rows}</tbody></table>
+  <h2>技术检测记录</h2>
+  <table><thead><tr><th>ID</th><th>检测能力</th><th>资产</th><th>状态</th><th>发现数</th><th>错误</th></tr></thead><tbody>{scan_rows}</tbody></table>
+  <h2>复测对比</h2>
+  <table><thead><tr><th>文档</th><th>整改前</th><th>整改后</th><th>变化</th><th>已修复</th><th>新增问题</th></tr></thead><tbody>{retest_rows}</tbody></table>
+  <h2>整改时间线</h2>
+  <table><thead><tr><th>事项</th><th>状态</th><th>优先级</th><th>解决时长/天</th><th>跳过原因</th></tr></thead><tbody>{timeline_rows}</tbody></table>
+  <h2>资产与端口变化</h2>
+  <table><thead><tr><th>时间</th><th>类型</th><th>资产</th><th>变化</th><th>状态</th></tr></thead><tbody>{change_rows}</tbody></table>
+</main>
+</body>
+</html>"""
+
+
+# Backward-compatible alias: old callers now receive HTML.
+generate_report = generate_html_report

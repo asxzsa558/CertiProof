@@ -4,3 +4,6 @@ pydantic
 httpx
 python-multipart
 Pillow
+paddleocr[doc-parser]>=3.5.0
+paddlepaddle
+rapidocr_onnxruntime==1.4.4

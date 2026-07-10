@@ -46,7 +46,7 @@
 
 .report-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1.25fr) 74px 108px minmax(120px, 0.9fr) 54px 64px 86px 72px;
+  grid-template-columns: minmax(180px, 1.25fr) 74px 108px minmax(120px, 0.9fr) 54px 64px 86px 116px;
   align-items: center;
   gap: 8px;
   min-height: 48px;
@@ -77,6 +77,12 @@
 .report-risk.hot {
   color: #f87171;
   font-weight: 700;
+}
+
+.report-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 @media (max-width: 1100px) {

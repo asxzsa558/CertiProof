@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
@@ -18,13 +18,14 @@ from app.models.evidence import Evidence
 from app.models.assessment import Assessment, PhaseInstance, TaskInstance, FlowEvent
 from app.models.assessment_type import AssessmentType, ProjectAssessment
 from app.models.monitoring import ScheduledScan, ScanHistory
+from app.models.change_snapshot import ChangeSnapshot
 from app.models.organization import OrganizationMember
 from app.models.context import (
     ConversationHistory, ActionHistory, ResultCache,
     ProjectMemory, ConversationArchive, ConversationThread,
 )
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse
-from app.services.report_service import generate_report, generate_json_report
+from app.services.report_service import generate_html_report, generate_json_report
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
@@ -236,6 +237,7 @@ async def delete_project(
         )
         await db.execute(delete(ScheduledScan).where(ScheduledScan.project_id == project_id))
 
+    await db.execute(delete(ChangeSnapshot).where(ChangeSnapshot.project_id == project_id))
     await db.execute(delete(ScanTask).where(ScanTask.project_id == project_id))
     await db.execute(delete(Asset).where(Asset.project_id == project_id))
 
@@ -264,19 +266,15 @@ async def download_report(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate and download PDF compliance report."""
+    """Generate and download HTML self-assessment report."""
     await get_project_for_user(db, project_id, current_user.id, "report:export")
 
     try:
-        pdf_buffer = await generate_report(db, project_id)
-        pdf_data = pdf_buffer.getvalue()
-
-        from fastapi.responses import Response
         return Response(
-            content=pdf_data,
-            media_type="application/pdf",
+            content=await generate_html_report(db, project_id),
+            media_type="text/html; charset=utf-8",
             headers={
-                "Content-Disposition": f"attachment; filename=verisure_report_{project_id}.pdf"
+                "Content-Disposition": f"attachment; filename=certiproof-report-{project_id}.html"
             }
         )
     except Exception as e:
@@ -301,7 +299,6 @@ async def download_json_report(
     try:
         report_data = await generate_json_report(db, project_id)
 
-        from fastapi.responses import JSONResponse
         return JSONResponse(
             content=report_data,
             headers={

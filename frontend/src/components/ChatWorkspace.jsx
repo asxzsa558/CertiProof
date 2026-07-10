@@ -123,6 +123,14 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96
   }
 
+  const handleMessageWheel = (event) => {
+    if (event.deltaY < 0) {
+      stickToBottomRef.current = false
+    } else {
+      updateStickToBottom()
+    }
+  }
+
   useEffect(() => {
     if (stickToBottomRef.current) scrollToBottom()
   }, [messages])
@@ -1069,6 +1077,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     setInput('')
     
     if (cmd.direct) {
+      rememberInput(cmd.command)
       if (cmd.command === '/clear') {
         handleClearHistory()
       } else if (cmd.command === '/assets') {
@@ -1525,7 +1534,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
       </Modal>
 
       {/* Messages */}
-      <div className="workspace-messages" ref={messagesContainerRef} onScroll={updateStickToBottom}>
+      <div className="workspace-messages" ref={messagesContainerRef} onScroll={updateStickToBottom} onWheel={handleMessageWheel}>
         {messages.map((msg, index) => (
           <div key={index} className={`workspace-message ${msg.role}`}>
             <div className="message-avatar">

@@ -83,8 +83,8 @@ def gateway_tools() -> set[str]:
 
 
 def frontend_capabilities() -> set[str]:
-    text = read("frontend/src/components/ChatWorkspace.jsx")
-    block = re.search(r"const TOOL_CATALOG = \[(?P<body>.*?)\n\]", text, flags=re.DOTALL)
+    text = read("frontend/src/components/toolCatalog.js")
+    block = re.search(r"TOOL_CATALOG = \[(?P<body>.*?)\n\]", text, flags=re.DOTALL)
     assert block, "TOOL_CATALOG not found"
     return set(re.findall(r"capability:\s*'([^']+)'", block.group("body")))
 

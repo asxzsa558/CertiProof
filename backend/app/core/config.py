@@ -49,9 +49,13 @@ class Settings(BaseSettings):
 
     # 文件上传
     UPLOAD_DIR: str = "/app/uploads"  # 文件上传目录
+    OCR_SERVER_URL: str = "http://ocr-server:8005"
+    DOCUMENT_MAX_TOTAL_PAGES: int = 200
+    DOCUMENT_WORKER_BATCH_SIZE: int = 2
+    DOCUMENT_ANALYSIS_MODE: str = "standard"  # standard/deep
 
     # 报告配置
-    REPORT_DEFAULT_FORMAT: str = "pdf"  # 默认报告格式
+    REPORT_DEFAULT_FORMAT: str = "html"  # 默认报告格式
     REPORT_INCLUDE_RAW_SCANS: bool = False  # 报告是否包含原始扫描数据
     REPORT_LANGUAGE: str = "zh"  # 报告语言
 
