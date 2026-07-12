@@ -168,6 +168,10 @@ async def masscan_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         # 统计
         critical_count = sum(1 for p in open_ports if p["risk_level"] == "critical")
         high_count = sum(1 for p in open_ports if p["risk_level"] == "high")
+        scan_completed = process.returncode == 0
+        tool_error = None if scan_completed else (
+            stderr_output.strip() or output.strip() or "masscan execution failed"
+        )
         
         return {
             "tool": "masscan_scan",
@@ -180,6 +184,8 @@ async def masscan_scan(params: Dict[str, Any]) -> Dict[str, Any]:
                 "total_open": len(open_ports),
                 "critical_ports": critical_count,
                 "high_risk_ports": high_count,
+                "scan_completed": scan_completed,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
@@ -187,6 +193,7 @@ async def masscan_scan(params: Dict[str, Any]) -> Dict[str, Any]:
                 "port_range": port_range,
                 "rate": rate,
                 "banner_grab": banner_grab,
+                "returncode": process.returncode,
             },
         }
     
@@ -207,6 +214,8 @@ async def masscan_scan(params: Dict[str, Any]) -> Dict[str, Any]:
                 "critical_ports": 0,
                 "high_risk_ports": 0,
                 "timed_out": True,
+                "scan_completed": False,
+                "tool_error": f"masscan timed out after {timeout}s",
             },
             "metadata": {
                 "duration_ms": duration_ms,
@@ -257,9 +266,14 @@ async def fping_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         
         # fping 输出存活的 IP 到 stdout
         output = stdout.decode("utf-8", errors="replace")
+        stderr_output = stderr.decode("utf-8", errors="replace").strip()
         duration_ms = int((time.time() - start_time) * 1000)
         
         alive_hosts = [line.strip() for line in output.split('\n') if line.strip()]
+        scan_completed = process.returncode in (0, 1)
+        tool_error = None if scan_completed else (
+            stderr_output or "fping execution failed"
+        )
         
         return {
             "tool": "fping_scan",
@@ -270,10 +284,13 @@ async def fping_scan(params: Dict[str, Any]) -> Dict[str, Any]:
                 "total_scanned": len(targets),
                 "alive_hosts": alive_hosts,
                 "alive_count": len(alive_hosts),
+                "scan_completed": scan_completed,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
+                "returncode": process.returncode,
             },
         }
     
@@ -410,6 +427,7 @@ async def run_async_masscan(task_id: str, params: Dict[str, Any]):
         progress_task.cancel()
         
         output = stdout.decode("utf-8", errors="replace")
+        stderr_output = stderr.decode("utf-8", errors="replace").strip()
         duration_ms = int((time.time() - start_time) * 1000)
         
         # 解析结果
@@ -417,6 +435,10 @@ async def run_async_masscan(task_id: str, params: Dict[str, Any]):
         
         critical_count = sum(1 for p in open_ports if p["risk_level"] == "critical")
         high_count = sum(1 for p in open_ports if p["risk_level"] == "high")
+        scan_completed = process.returncode == 0
+        tool_error = None if scan_completed else (
+            stderr_output or output.strip() or "masscan execution failed"
+        )
         
         result = {
             "tool": "masscan_scan",
@@ -429,6 +451,8 @@ async def run_async_masscan(task_id: str, params: Dict[str, Any]):
                 "total_open": len(open_ports),
                 "critical_ports": critical_count,
                 "high_risk_ports": high_count,
+                "scan_completed": scan_completed,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
@@ -436,6 +460,7 @@ async def run_async_masscan(task_id: str, params: Dict[str, Any]):
                 "port_range": port_range,
                 "rate": rate,
                 "banner_grab": banner_grab,
+                "returncode": process.returncode,
             },
         }
         

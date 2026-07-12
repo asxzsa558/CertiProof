@@ -13,13 +13,22 @@ class FakeDb:
 
     async def execute(self, statement):
         self.statements.append(statement)
+        return FakeResult()
+
+
+class FakeResult:
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
 
 
 async def main():
     db = FakeDb()
     await FlowEngine(db)._clear_project_assessment_outputs(7)
 
-    deleted_tables = [statement.table.name for statement in db.statements]
+    deleted_tables = [statement.table.name for statement in db.statements if getattr(statement, "is_delete", False)]
     assert deleted_tables == [
         "remediation_tickets",
         "evidences",

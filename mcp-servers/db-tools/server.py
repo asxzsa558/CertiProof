@@ -37,6 +37,8 @@ def no_response_result(tool: str, target: str, port: int, duration_ms: int, fiel
             "target": target,
             "port": port,
             "reachable": False,
+            "scan_completed": False,
+            "tool_error": error,
             **fields,
         },
         "metadata": {
@@ -78,10 +80,13 @@ async def redis_check(params: Dict[str, Any]) -> Dict[str, Any]:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         output = stdout.decode("utf-8", errors="replace")
+        stderr_output = stderr.decode("utf-8", errors="replace").strip()
         duration_ms = int((time.time() - start_time) * 1000)
         
         # 检查是否成功连接
         unauthorized = "redis_version" in output
+        reachable = process.returncode == 0 or unauthorized
+        tool_error = None if reachable else (stderr_output or output.strip() or "redis connection failed")
         
         return {
             "tool": "redis_check",
@@ -92,10 +97,14 @@ async def redis_check(params: Dict[str, Any]) -> Dict[str, Any]:
                 "port": port,
                 "unauthorized": unauthorized,
                 "info": output[:2000] if unauthorized else None,
+                "reachable": reachable,
+                "scan_completed": reachable,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
+                "returncode": process.returncode,
             },
         }
     
@@ -145,6 +154,7 @@ async def oracle_check(params: Dict[str, Any]) -> Dict[str, Any]:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
 
         output = stdout.decode("utf-8", errors="replace")
+        stderr_output = stderr.decode("utf-8", errors="replace").strip()
         duration_ms = int((time.time() - start_time) * 1000)
 
         # 解析 JSON 输出
@@ -162,6 +172,18 @@ async def oracle_check(params: Dict[str, Any]) -> Dict[str, Any]:
                     if len(parts) == 2:
                         version_info[parts[0].strip()] = parts[1].strip()
 
+        oracle_status = str(result_data.get("status", "")).lower()
+        reachable = (
+            process.returncode == 0
+            and bool(output.strip())
+            and oracle_status not in {"closed", "error", "failed", "timeout", "unreachable"}
+        )
+        tool_error = None if reachable else (
+            result_data.get("error")
+            or stderr_output
+            or f"oracle connection {oracle_status or 'failed'}"
+        )
+
         return {
             "tool": "oracle_check",
             "version": "2.0",
@@ -171,10 +193,14 @@ async def oracle_check(params: Dict[str, Any]) -> Dict[str, Any]:
                 "port": port,
                 "version_info": version_info,
                 "raw_output": output[:2000],
+                "reachable": reachable,
+                "scan_completed": reachable,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
+                "returncode": process.returncode,
             },
         }
 
@@ -230,10 +256,13 @@ async def mongodb_check(params: Dict[str, Any]) -> Dict[str, Any]:
         )
         
         output = stdout.decode("utf-8", errors="replace")
+        stderr_output = stderr.decode("utf-8", errors="replace").strip()
         duration_ms = int((time.time() - start_time) * 1000)
         
         # 检查是否返回版本信息
         unauthorized = "version" in output.lower() or "ok" in output.lower()
+        reachable = process.returncode == 0 and bool(output.strip())
+        tool_error = None if reachable else (stderr_output or output.strip() or "mongodb connection failed")
         
         return {
             "tool": "mongodb_check",
@@ -244,10 +273,14 @@ async def mongodb_check(params: Dict[str, Any]) -> Dict[str, Any]:
                 "port": port,
                 "unauthorized": unauthorized,
                 "raw_output": output[:2000] if unauthorized else None,
+                "reachable": reachable,
+                "scan_completed": reachable,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
+                "returncode": process.returncode,
             },
         }
     
@@ -302,10 +335,13 @@ async def memcached_check(params: Dict[str, Any]) -> Dict[str, Any]:
         )
         
         output = stdout.decode("utf-8", errors="replace")
+        stderr_output = stderr.decode("utf-8", errors="replace").strip()
         duration_ms = int((time.time() - start_time) * 1000)
         
         # 检查是否返回统计信息
         unauthorized = "STAT" in output
+        reachable = process.returncode == 0 and bool(output.strip())
+        tool_error = None if reachable else (stderr_output or output.strip() or "memcached connection failed")
         
         return {
             "tool": "memcached_check",
@@ -316,10 +352,14 @@ async def memcached_check(params: Dict[str, Any]) -> Dict[str, Any]:
                 "port": port,
                 "unauthorized": unauthorized,
                 "raw_output": output[:2000] if unauthorized else None,
+                "reachable": reachable,
+                "scan_completed": reachable,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
+                "returncode": process.returncode,
             },
         }
     
@@ -376,6 +416,8 @@ async def mysql_check(params: Dict[str, Any]) -> Dict[str, Any]:
         
         # 检查是否成功连接
         empty_password = "VERSION()" in output or "version" in output.lower()
+        reachable = process.returncode == 0 and bool(output.strip())
+        tool_error = None if reachable else (stderr_output.strip() or output.strip() or "mysql connection failed")
         
         return {
             "tool": "mysql_check",
@@ -387,10 +429,14 @@ async def mysql_check(params: Dict[str, Any]) -> Dict[str, Any]:
                 "username": username,
                 "empty_password": empty_password,
                 "version": output.strip() if empty_password else None,
+                "reachable": reachable,
+                "scan_completed": reachable,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
+                "returncode": process.returncode,
             },
         }
     
@@ -407,6 +453,8 @@ async def mysql_check(params: Dict[str, Any]) -> Dict[str, Any]:
                 "empty_password": False,
                 "version": None,
                 "reachable": False,
+                "scan_completed": False,
+                "tool_error": "mysql connection timeout",
             },
             "metadata": {
                 "duration_ms": duration_ms,

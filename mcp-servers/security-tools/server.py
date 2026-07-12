@@ -377,6 +377,7 @@ async def testssl_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("Missing required parameter: target")
     
     port = params.get("port", 443)
+    timeout = max(10, min(int(params.get("timeout", 120)), 300))
     
     import tempfile
     import os
@@ -393,6 +394,7 @@ async def testssl_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     ]
     
     start_time = time.time()
+    process = None
     
     try:
         process = await asyncio.create_subprocess_exec(
@@ -400,7 +402,7 @@ async def testssl_scan(params: Dict[str, Any]) -> Dict[str, Any]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         # 读取 JSON 文件
         output = ""
@@ -498,6 +500,8 @@ async def testssl_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         if not tls_version and not certificate and not issues and not vulnerabilities:
             scan_completed = False
             tool_error = tool_error or "未获取到 TLS 协议或证书信息，目标端口可能不可达或不是 HTTPS/TLS 服务"
+        elif not scan_completed:
+            tool_error = tool_error or "TLS 握手未完成，目标端口可能不是 HTTPS/TLS 服务或连接被中断"
         
         duration_ms = int((time.time() - start_time) * 1000)
         
@@ -523,9 +527,33 @@ async def testssl_scan(params: Dict[str, Any]) -> Dict[str, Any]:
             },
         }
     except asyncio.TimeoutError:
+        if process and process.returncode is None:
+            process.kill()
+            await process.communicate()
         if os.path.exists(json_file):
             os.remove(json_file)
-        raise ValueError("testssl scan timeout")
+        duration_ms = int((time.time() - start_time) * 1000)
+        return {
+            "tool": "testssl_scan",
+            "version": "1.0",
+            "status": "success",
+            "data": {
+                "target": target,
+                "port": port,
+                "reachable": False,
+                "scan_completed": False,
+                "tls_version": None,
+                "certificate": None,
+                "issues": [],
+                "vulnerabilities": [],
+                "tool_error": f"SSL/TLS 扫描在 {timeout} 秒后超时，目标可能限速、被过滤或响应过慢",
+            },
+            "metadata": {
+                "duration_ms": duration_ms,
+                "scan_time": datetime.utcnow().isoformat(),
+                "timed_out": True,
+            },
+        }
     except Exception as e:
         if os.path.exists(json_file):
             os.remove(json_file)

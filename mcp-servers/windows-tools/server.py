@@ -31,10 +31,16 @@ class ExecuteRequest(BaseModel):
     params: Dict[str, Any]
 
 
-def command_state(returncode: int, stderr: str, has_data: bool) -> tuple[bool, Optional[str]]:
-    if returncode == 0 or has_data:
-        return True, (stderr or "").strip() or None
-    return False, (stderr or "").strip() or f"tool exited with code {returncode}"
+def command_state(returncode: int, output: str, has_data: bool) -> tuple[bool, Optional[str]]:
+    message = (output or "").strip()
+    connection_error = any(token in message.lower() for token in (
+        "connection refused", "connection error", "timed out", "no route to host",
+    ))
+    if has_data:
+        return True, message or None
+    if returncode == 0 and not connection_error:
+        return True, None
+    return False, message or f"tool exited with code {returncode}"
 
 
 # ============== Impacket SAMR Dump (用户枚举) ==============
@@ -97,7 +103,7 @@ async def enum4linux_scan(params: Dict[str, Any]) -> Dict[str, Any]:
                         result["users"].append(user_info)
         scan_completed, tool_error = command_state(
             process.returncode,
-            stderr_output,
+            f"{stderr_output}\n{output}",
             bool(result["users"] or result["groups"]),
         )
         
@@ -180,7 +186,9 @@ async def smb_enum(params: Dict[str, Any]) -> Dict[str, Any]:
                         "type": parts[1] if len(parts) > 1 else "Unknown",
                         "comment": " ".join(parts[2:]) if len(parts) > 2 else "",
                     })
-        scan_completed, tool_error = command_state(process.returncode, stderr_output, bool(shares))
+        scan_completed, tool_error = command_state(
+            process.returncode, f"{stderr_output}\n{output}", bool(shares)
+        )
         
         return {
             "tool": "smb_enum",
@@ -272,7 +280,7 @@ async def crackmapexec_scan(params: Dict[str, Any]) -> Dict[str, Any]:
                         result["groups"].append({"name": sid_info["name"].split("\\")[-1]})
         scan_completed, tool_error = command_state(
             process.returncode,
-            stderr_output,
+            f"{stderr_output}\n{output}",
             bool(result["users"] or result["groups"] or result["sids"]),
         )
         

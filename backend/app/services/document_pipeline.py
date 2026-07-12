@@ -245,17 +245,21 @@ async def create_document_run(
     analysis_mode: str | None = None,
 ) -> ScanTask:
     mode = normalize_analysis_mode(analysis_mode)
+    previous_analysis = (task.result or {}).get("analysis") if isinstance(task.result, dict) else None
+    parameters = {
+        "source": DOCUMENT_SOURCE,
+        "task_id": task.id,
+        "user_id": user_id,
+        "analysis_mode": mode,
+    }
+    if previous_analysis and previous_analysis.get("type") == DOCUMENT_SOURCE:
+        parameters["previous_analysis"] = previous_analysis
     run = ScanTask(
         project_id=project_id,
         task_type=ScanTaskType.TARGETED,
         status=ScanTaskStatus.PENDING,
         triggered_by=TriggeredBy.MANUAL,
-        parameters={
-            "source": DOCUMENT_SOURCE,
-            "task_id": task.id,
-            "user_id": user_id,
-            "analysis_mode": mode,
-        },
+        parameters=parameters,
         orchestrator_task_id=None,
         progress={"stage": "queued", "percent": 0, "message": "等待文档分析"},
     )
@@ -285,6 +289,10 @@ async def process_document_run(db: AsyncSession, run: ScanTask) -> None:
     )).scalars().all()
     if not evidences:
         raise DocumentExtractionError("该任务尚未上传文档。")
+
+    previous_analysis = (run.parameters or {}).get("previous_analysis")
+    if not previous_analysis:
+        previous_analysis = (task.result or {}).get("analysis") if isinstance(task.result, dict) else None
 
     run.status = ScanTaskStatus.RUNNING
     run.started_at = datetime.utcnow()
@@ -330,6 +338,23 @@ async def process_document_run(db: AsyncSession, run: ScanTask) -> None:
     analysis["evidence_ids"] = [evidence.id for evidence in evidences]
     analysis["run_id"] = run.id
     analysis = await DocumentControlEngine().review_with_llm(db, user_id, analysis)
+    if previous_analysis and previous_analysis.get("type") == DOCUMENT_SOURCE:
+        before = previous_analysis.get("coverage") or 0
+        after = analysis.get("coverage") or 0
+        fixed = sorted(set(previous_analysis.get("gaps", [])) - set(analysis.get("gaps", [])))
+        new_gaps = sorted(set(analysis.get("gaps", [])) - set(previous_analysis.get("gaps", [])))
+        analysis["retest_comparison"] = {
+            "previous_status": previous_analysis.get("status"),
+            "current_status": analysis.get("status"),
+            "previous_coverage": before,
+            "current_coverage": after,
+            "delta": round(after - before, 2),
+            "status": "improved" if after > before else ("regressed" if after < before else "unchanged"),
+            "initial_gaps": previous_analysis.get("gaps", []),
+            "current_gaps": analysis.get("gaps", []),
+            "fixed_gaps": fixed,
+            "new_gaps": new_gaps,
+        }
 
     from app.api.assessments import _sync_document_gap_findings
     sync = await _sync_document_gap_findings(db, run.project_id, task, analysis, user_id)

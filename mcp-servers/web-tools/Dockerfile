@@ -37,6 +37,13 @@ COPY requirements.txt .
 RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
     pip install --no-cache-dir -r requirements.txt
 
+# Nikto loads these modules even when using its plain-text output mode.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libjson-perl \
+    libxml-writer-perl \
+    && rm -rf /var/lib/apt/lists/*
+
 # 复制代码
 COPY server.py .
 

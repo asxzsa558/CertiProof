@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from app.api.auth import router as auth_router
 from app.api.projects import router as projects_router
-from app.api.assets import router as assets_router
+from app.api.assets import inventory_router, router as assets_router
 from app.api.scans import router as scans_router
 from app.api.remediation import router as remediation_router
 from app.api.monitoring import router as monitoring_router
@@ -25,6 +25,7 @@ api_router = APIRouter()
 api_router.include_router(auth_router)
 api_router.include_router(projects_router)
 api_router.include_router(assets_router)
+api_router.include_router(inventory_router)
 api_router.include_router(scans_router)
 api_router.include_router(remediation_router)
 api_router.include_router(monitoring_router)

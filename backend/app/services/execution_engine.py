@@ -1018,6 +1018,8 @@ class ExecutionEngine:
             params["port"] = parameters["port"]
         if "ssl" in parameters:
             params["ssl"] = parameters["ssl"]
+        if "timeout" in parameters:
+            params["timeout"] = parameters["timeout"]
 
         result = await client.call("nikto_scan", params)
         return self._gateway_payload(result)
@@ -1034,6 +1036,8 @@ class ExecutionEngine:
             params["level"] = parameters["level"]
         if "risk" in parameters:
             params["risk"] = parameters["risk"]
+        if "timeout" in parameters:
+            params["timeout"] = parameters["timeout"]
 
         result = await client.call("sqlmap_scan", params)
         return self._gateway_payload(result)
@@ -1052,6 +1056,8 @@ class ExecutionEngine:
             params["extensions"] = parameters["extensions"]
         if "threads" in parameters:
             params["threads"] = parameters["threads"]
+        if "timeout" in parameters:
+            params["timeout"] = parameters["timeout"]
 
         result = await client.call("gobuster_scan", params)
         return self._gateway_payload(result)
@@ -1068,6 +1074,8 @@ class ExecutionEngine:
             params["wordlist"] = parameters["wordlist"]
         if "method" in parameters:
             params["method"] = parameters["method"]
+        if "timeout" in parameters:
+            params["timeout"] = parameters["timeout"]
 
         result = await client.call("ffuf_scan", params)
         return self._gateway_payload(result)
@@ -1075,9 +1083,12 @@ class ExecutionEngine:
     async def _web_discovery_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """Web 路径/目录发现：组合 gobuster 与 ffuf。"""
         url = self._url_param(parameters)
+        sub_params = {"url": url}
+        if "timeout" in parameters:
+            sub_params["timeout"] = parameters["timeout"]
         sub_results = await asyncio.gather(
-            self._run_subtool("gobuster_scan", {"url": url}, user_id, project_id, db, "目录爆破"),
-            self._run_subtool("ffuf_scan", {"url": url}, user_id, project_id, db, "Web 模糊测试"),
+            self._run_subtool("gobuster_scan", sub_params, user_id, project_id, db, "目录爆破"),
+            self._run_subtool("ffuf_scan", sub_params, user_id, project_id, db, "Web 模糊测试"),
         )
         return {
             "target": url,
@@ -1296,6 +1307,7 @@ class ExecutionEngine:
         result = await client.call("testssl_scan", {
             "target": parameters["target"],
             "port": parameters.get("port", 443),
+            **({"timeout": parameters["timeout"]} if "timeout" in parameters else {}),
         })
 
         return self._gateway_payload(result)

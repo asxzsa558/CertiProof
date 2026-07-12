@@ -12,7 +12,6 @@ const ResultsPage = lazy(() => import('./pages/ResultsPage'))
 const ResultDetailPage = lazy(() => import('./pages/ResultDetailPage'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const ProjectsList = lazy(() => import('./pages/ProjectsList'))
-const AssetsPage = lazy(() => import('./pages/AssetsPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const OrganizationSettings = lazy(() => import('./pages/OrganizationSettings'))
 
@@ -121,7 +120,7 @@ function App() {
               path="/assets"
               element={
                 <ProtectedRoute>
-                  <AssetsPage />
+                  <Navigate to="/projects?view=assets" replace />
                 </ProtectedRoute>
               }
             />

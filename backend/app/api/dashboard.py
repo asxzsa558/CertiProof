@@ -3,7 +3,7 @@ from datetime import datetime
 import json
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import and_, case, func, select
 from app.core.database import get_db
 from app.core.rbac import resolve_member_permissions
 from app.core.security import get_current_user
@@ -14,6 +14,8 @@ from app.models.assessment_type import ProjectAssessment, AssessmentType
 from app.models.organization import OrganizationMember, OrganizationRole, OrganizationRoleAudit
 from app.models.scan_task import ScanTask
 from app.models.evidence import Evidence
+from app.models.finding import Finding, FindingStatus
+from app.models.remediation import RemediationTicket
 from app.schemas.dashboard import (
     DashboardResponse,
     DashboardProject,
@@ -208,7 +210,6 @@ async def get_available_assessment_types(
 # ========== ARGUS Dashboard API ==========
 
 from app.models.assessment import Assessment, PhaseInstance, TaskInstance
-from app.models.finding import Finding
 
 
 @router.get("/argus/overview")
@@ -286,6 +287,128 @@ def _enum_value(value):
     return getattr(value, "value", value)
 
 
+def _topology_services(summary):
+    """Extract only observed open services from normalized scan summaries."""
+    services = []
+    seen = set()
+
+    def visit(value, depth=0):
+        if depth > 5 or not value:
+            return
+        if isinstance(value, list):
+            for item in value:
+                visit(item, depth + 1)
+            return
+        if not isinstance(value, dict):
+            return
+        for port in value.get("open_ports") or []:
+            if not isinstance(port, dict) or port.get("state") not in (None, "open"):
+                continue
+            number = port.get("port")
+            if number in (None, ""):
+                continue
+            protocol = str(port.get("protocol") or "tcp").lower()
+            service = str(port.get("service") or port.get("name") or "").strip()
+            key = f"{number}/{protocol}"
+            if key not in seen:
+                seen.add(key)
+                services.append({"id": key, "label": key, "service": service or None})
+        for key in ("data", "result", "results", "scan_results"):
+            visit(value.get(key), depth + 1)
+
+    visit(summary)
+    return services[:6]
+
+
+def _matrix_progress(assessment, phases, task_completion_rate):
+    """Use live phase/task state when the persisted assessment percentage is stale."""
+    stored_progress = round(float(assessment.progress or 0)) if assessment else 0
+    phase_progress = []
+    for phase in phases:
+        status = _enum_value(phase.status)
+        if status in ("completed", "skipped"):
+            phase_progress.append(100)
+            continue
+        task_progress = round(((phase.completed_tasks or 0) / phase.total_tasks) * 100) if phase.total_tasks else 0
+        phase_progress.append(max(round(float(phase.progress or 0)), task_progress))
+
+    derived_progress = round(sum(phase_progress) / len(phase_progress)) if phase_progress else 0
+    return min(100, max(stored_progress, derived_progress, task_completion_rate))
+
+
+TOOL_GROUPS = (
+    ("端口扫描", {"scan_ports", "nmap_scan", "port_scan", "masscan_scan"}),
+    ("漏洞扫描", {"scan_vulnerabilities", "nuclei_scan", "vuln_scan"}),
+    ("弱口令检测", {"scan_weak_passwords", "hydra_bruteforce"}),
+    ("SSL/TLS", {"scan_ssl", "testssl_scan"}),
+    ("Web 检测", {"nikto_scan", "sqlmap_scan", "gobuster_scan", "ffuf_scan", "web_discovery_scan"}),
+    ("数据库", {"database_security_scan", "redis_check", "mysql_check", "mongodb_check", "memcached_check", "oracle_check"}),
+    ("网络设备", {"network_device_scan", "snmp_walk", "snmp_scan"}),
+    ("Windows/AD", {"windows_security_scan", "smb_enum"}),
+    ("SSH 基线", {"baseline_check", "ssh_config_check"}),
+    ("文档 OCR", {"document_page_parse", "document_control_analysis"}),
+)
+
+
+def _scan_capabilities(parameters):
+    """Read capabilities recorded by direct scans, plans, and assessment tasks."""
+    if not isinstance(parameters, dict):
+        return set()
+
+    capabilities = set()
+    for value in (parameters.get("capability"), parameters.get("tool_name")):
+        if isinstance(value, str):
+            capabilities.add(value)
+    for value in parameters.get("capabilities") or []:
+        if isinstance(value, str):
+            capabilities.add(value)
+    for step in parameters.get("plan") or []:
+        if isinstance(step, dict) and isinstance(step.get("capability"), str):
+            capabilities.add(step["capability"])
+    return capabilities
+
+
+def _format_scan_latency(scan):
+    if not scan.started_at or not scan.completed_at:
+        return "未记录"
+    elapsed = max(0, round((scan.completed_at - scan.started_at).total_seconds()))
+    if elapsed < 60:
+        return f"{elapsed}s"
+    return f"{elapsed // 60}m {elapsed % 60}s"
+
+
+def _tool_health(scans):
+    """Build telemetry from persisted scans only; never invent health or latency."""
+    grouped = {name: [] for name, _ in TOOL_GROUPS}
+    for scan in scans:
+        capabilities = _scan_capabilities(scan.parameters)
+        for name, aliases in TOOL_GROUPS:
+            if capabilities.intersection(aliases):
+                grouped[name].append(scan)
+
+    records = []
+    for name, _ in TOOL_GROUPS:
+        tool_scans = grouped[name]
+        latest = tool_scans[0] if tool_scans else None
+        latest_status = _enum_value(latest.status) if latest else "idle"
+        if latest_status == "completed":
+            health = "healthy"
+        elif latest_status in ("pending", "running"):
+            health = "running"
+        elif latest:
+            health = "warning"
+        else:
+            health = "idle"
+        records.append({
+            "name": name,
+            "status": health,
+            "latency": _format_scan_latency(latest) if latest else "暂无记录",
+            "last_run": latest.created_at.isoformat() if latest and latest.created_at else None,
+            "failure_count": sum(1 for scan in tool_scans if _enum_value(scan.status) == "failed"),
+        })
+    return records
+
+
 @router.get("/organization-command")
 async def get_organization_command_dashboard(
     organization_id: Optional[int] = Query(None),
@@ -312,6 +435,7 @@ async def get_organization_command_dashboard(
     )
     projects = projects_result.scalars().all()
     project_ids = [p.id for p in projects]
+    current_risk_statuses = [FindingStatus.OPEN, FindingStatus.IN_PROGRESS]
 
     if not project_ids:
         return {
@@ -330,7 +454,7 @@ async def get_organization_command_dashboard(
                 "permission_scope": "全局权限" if "system:config" in current_permissions and "role:manage" in current_permissions else "受限权限",
             },
             "project_matrix": [],
-            "exposure_topology": {"nodes": [], "edges": [], "top_risky_assets": []},
+            "exposure_topology": {"nodes": [], "edges": [], "top_risky_assets": [], "risk_intelligence": []},
             "tool_health": [],
             "risk_queue": [],
             "rbac": {"roles": [], "members": [], "audits": []},
@@ -343,6 +467,7 @@ async def get_organization_command_dashboard(
         select(func.count(Finding.id)).where(
             Finding.project_id.in_(project_ids),
             Finding.severity.in_(["critical", "high"]),
+            Finding.status.in_(current_risk_statuses),
         )
     )
     high_risk_count = high_risk_result.scalar() or 0
@@ -374,6 +499,7 @@ async def get_organization_command_dashboard(
         )
         assessment = assessment_result.scalar_one_or_none()
         current_phase = None
+        phases = []
         evidence_count = 0
         task_total = 0
         task_done = 0
@@ -390,13 +516,17 @@ async def get_organization_command_dashboard(
 
         project_findings_result = await db.execute(select(Finding).where(Finding.project_id == project.id))
         project_findings = project_findings_result.scalars().all()
-        risk_count = len([f for f in project_findings if _enum_value(f.severity) in ("critical", "high", "medium")])
+        risk_count = len([
+            finding for finding in project_findings
+            if _enum_value(finding.severity) in ("critical", "high", "medium")
+            and finding.status in current_risk_statuses
+        ])
 
         evidence_result = await db.execute(select(func.count(Evidence.id)).where(Evidence.project_id == project.id))
         evidence_count = evidence_result.scalar() or 0
         task_completion_rate = round((task_done / task_total) * 100) if task_total else 0
 
-        progress = round(float(assessment.progress if assessment else (project.compliance_score or 0)))
+        progress = _matrix_progress(assessment, phases, task_completion_rate) if assessment else round(float(project.compliance_score or 0))
         progress_values.append(progress)
 
         owner_name = "未分配"
@@ -429,34 +559,137 @@ async def get_organization_command_dashboard(
         .order_by(Asset.updated_at.desc())
     )
     asset_rows = asset_result.all()
-    nodes = [{"id": f"org-{org_id}", "label": "当前组织", "type": "organization", "status": "normal", "size": 22}]
-    edges = []
-    for project in projects[:6]:
-        project_node = f"project-{project.id}"
-        nodes.append({"id": project_node, "label": project.name, "type": "project", "status": "normal", "size": 16})
-        edges.append({"source": f"org-{org_id}", "target": project_node})
-    top_risky_assets = []
-    for asset, project in asset_rows[:18]:
-        findings_result = await db.execute(
-            select(func.count(Finding.id)).where(
-                Finding.project_id == project.id,
+    risk_stats_result = await db.execute(
+        select(
+            ScanTask.asset_id,
+            func.count(Finding.id).label("finding_count"),
+            func.coalesce(func.sum(case((and_(
+                Finding.status.in_(current_risk_statuses),
                 Finding.severity.in_(["critical", "high", "medium"]),
-            )
+            ), 1), else_=0)), 0).label("risk_count"),
+            func.coalesce(func.sum(case((and_(
+                Finding.status.in_(current_risk_statuses),
+                Finding.severity == "critical",
+            ), 1), else_=0)), 0).label("critical_count"),
+            func.coalesce(func.sum(case((and_(
+                Finding.status.in_(current_risk_statuses),
+                Finding.severity == "high",
+            ), 1), else_=0)), 0).label("high_count"),
         )
-        risk_count = findings_result.scalar() or 0
-        status_name = "high" if risk_count >= 3 else "warning" if risk_count else "normal"
+        .select_from(ScanTask)
+        .outerjoin(Finding, Finding.scan_task_id == ScanTask.id)
+        .where(ScanTask.project_id.in_(project_ids), ScanTask.asset_id.is_not(None))
+        .group_by(ScanTask.asset_id)
+    )
+    asset_risk_stats = {
+        row.asset_id: {
+            "finding_count": int(row.finding_count or 0),
+            "risk_count": int(row.risk_count or 0),
+            "critical_count": int(row.critical_count or 0),
+            "high_count": int(row.high_count or 0),
+        }
+        for row in risk_stats_result.all()
+        if row.asset_id is not None
+    }
+
+    asset_summary_result = await db.execute(
+        select(ScanTask.asset_id, ScanTask.result_summary)
+        .where(
+            ScanTask.project_id.in_(project_ids),
+            ScanTask.asset_id.is_not(None),
+            ScanTask.result_summary.is_not(None),
+        )
+        .order_by(ScanTask.completed_at.desc().nullslast(), ScanTask.id.desc())
+    )
+    asset_services = {}
+    for asset_id, result_summary in asset_summary_result.all():
+        if asset_id in asset_services:
+            continue
+        services = _topology_services(result_summary)
+        if services:
+            asset_services[asset_id] = services
+
+    assets_by_project = {}
+    for asset, project in asset_rows:
+        assets_by_project.setdefault(project.id, []).append((asset, project))
+
+    nodes = [{"id": f"org-{org_id}", "label": "当前组织", "type": "organization", "status": "normal"}]
+    edges = []
+    for project in projects:
+        project_assets = assets_by_project.get(project.id, [])
+        project_risk_count = sum(asset_risk_stats.get(asset.id, {}).get("risk_count", 0) for asset, _ in project_assets)
+        project_node = f"project-{project.id}"
+        nodes.append({
+            "id": project_node,
+            "project_id": project.id,
+            "label": project.name,
+            "type": "project",
+            "status": "warning" if project_risk_count else "normal",
+            "asset_count": len(project_assets),
+            "risk_count": project_risk_count,
+        })
+        edges.append({"source": f"org-{org_id}", "target": project_node, "kind": "contains"})
+    top_risky_assets = []
+    for asset, project in asset_rows:
+        stats = asset_risk_stats.get(asset.id, {})
+        risk_count = stats.get("risk_count", 0)
+        if stats.get("critical_count", 0):
+            status_name = "critical"
+        elif stats.get("high_count", 0):
+            status_name = "high"
+        elif risk_count:
+            status_name = "warning"
+        else:
+            status_name = "normal"
         asset_node = f"asset-{asset.id}"
         nodes.append({
             "id": asset_node,
+            "asset_id": asset.id,
+            "project_id": project.id,
+            "project_name": project.name,
             "label": asset.value,
             "type": _enum_value(asset.asset_type),
             "status": status_name,
-            "size": min(22, 10 + risk_count * 3),
+            "verification": _enum_value(asset.verification_status),
+            "risk_count": risk_count,
+            "finding_count": stats.get("finding_count", 0),
+            "services": asset_services.get(asset.id, []),
         })
-        edges.append({"source": f"project-{project.id}", "target": asset_node})
+        edges.append({"source": f"project-{project.id}", "target": asset_node, "kind": "contains"})
         if risk_count:
-            top_risky_assets.append({"asset": asset.value, "project": project.name, "service": _enum_value(asset.asset_type), "risk_count": risk_count})
+            top_risky_assets.append({
+                "asset": asset.value,
+                "project": project.name,
+                "service": _enum_value(asset.asset_type),
+                "risk_count": risk_count,
+                "status": status_name,
+            })
     top_risky_assets = sorted(top_risky_assets, key=lambda item: item["risk_count"], reverse=True)[:5]
+
+    intelligence_result = await db.execute(
+        select(Finding, ScanTask, Asset)
+        .join(ScanTask, ScanTask.id == Finding.scan_task_id)
+        .join(Asset, Asset.id == ScanTask.asset_id)
+        .where(
+            Finding.project_id.in_(project_ids),
+            Finding.status.in_(current_risk_statuses),
+        )
+        .order_by(Finding.updated_at.desc())
+        .limit(24)
+    )
+    risk_intelligence = [
+        {
+            "id": finding.id,
+            "asset_id": f"asset-{asset.id}",
+            "asset": asset.value,
+            "project_id": asset.project_id,
+            "severity": _enum_value(finding.severity),
+            "status": _enum_value(finding.status),
+            "title": finding.clause_name or finding.description or finding.clause_id,
+            "observed_at": finding.updated_at.isoformat() if finding.updated_at else None,
+        }
+        for finding, _, asset in intelligence_result.all()
+    ]
 
     scan_result = await db.execute(
         select(ScanTask)
@@ -465,37 +698,31 @@ async def get_organization_command_dashboard(
         .limit(80)
     )
     scans = scan_result.scalars().all()
-    tool_names = ["端口扫描", "漏洞扫描", "弱口令", "Web 检测", "数据库", "网络设备", "Windows/AD", "SSH 基线", "OCR"]
-    failed_scans = len([s for s in scans if _enum_value(s.status) == "failed"])
-    tool_health = [
-        {
-            "name": name,
-            "status": "warning" if failed_scans and index < 3 else "healthy",
-            "latency": f"{180 + index * 35}ms",
-            "last_run": scans[index % len(scans)].created_at.isoformat() if scans else None,
-            "failure_count": failed_scans if index == 0 else 0,
-        }
-        for index, name in enumerate(tool_names)
-    ]
+    tool_health = _tool_health(scans)
 
     risk_result = await db.execute(
-        select(Finding, Project)
+        select(Finding, Project, RemediationTicket)
         .join(Project, Project.id == Finding.project_id)
+        .outerjoin(RemediationTicket, RemediationTicket.finding_id == Finding.id)
         .where(Finding.project_id.in_(project_ids))
         .order_by(Finding.updated_at.desc())
         .limit(80)
     )
     risk_queue = [
         {
+            "finding_id": finding.id,
+            "project_id": project.id,
             "asset": project.name,
             "risk": finding.clause_name or finding.description or finding.clause_id,
             "control": finding.clause_id,
+            "description": finding.description,
+            "remediation_plan": finding.remediation_suggestion,
             "severity": _enum_value(finding.severity),
-            "status": _enum_value(finding.status),
+            "status": _enum_value(ticket.status) if ticket else _enum_value(finding.status),
             "owner": "待分配",
-            "action": "创建整改" if _enum_value(finding.status) == "open" else "查看",
+            "action": "查看" if ticket or _enum_value(finding.status) in ("resolved", "false_positive") else "创建整改",
         }
-        for finding, project in risk_result.all()
+        for finding, project, ticket in risk_result.all()
     ]
 
     role_result = await db.execute(
@@ -533,7 +760,12 @@ async def get_organization_command_dashboard(
             "permission_scope": "全局权限" if "system:config" in current_permissions and "role:manage" in current_permissions else "受限权限",
         },
         "project_matrix": project_matrix,
-        "exposure_topology": {"nodes": nodes, "edges": edges, "top_risky_assets": top_risky_assets},
+        "exposure_topology": {
+            "nodes": nodes,
+            "edges": edges,
+            "top_risky_assets": top_risky_assets,
+            "risk_intelligence": risk_intelligence,
+        },
         "tool_health": tool_health,
         "risk_queue": risk_queue,
         "rbac": {

@@ -92,6 +92,10 @@ async def snmp_walk(params: Dict[str, Any]) -> Dict[str, Any]:
                 "results": results[:100],  # 限制返回数量
                 "total_results": len(results),
                 "success": success,
+                "scan_completed": success,
+                "tool_error": None if success else (
+                    stderr_output.strip() or "未收到 SNMP 响应，无法完成 SNMP 信息枚举"
+                ),
             },
             "metadata": {
                 "duration_ms": duration_ms,
@@ -137,6 +141,7 @@ async def snmp_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         output = stdout.decode("utf-8", errors="replace")
+        stderr_output = stderr.decode("utf-8", errors="replace").strip()
         duration_ms = int((time.time() - start_time) * 1000)
         
         # 解析 onesixtyone 输出
@@ -151,6 +156,11 @@ async def snmp_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
                         "community": match.group(2),
                         "description": match.group(3),
                     })
+
+        scan_completed = bool(found)
+        tool_error = None if scan_completed else (
+            stderr_output or "未收到 SNMP 响应，无法确认未使用弱团体字"
+        )
         
         return {
             "tool": "snmp_bruteforce",
@@ -160,11 +170,14 @@ async def snmp_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
                 "target": target,
                 "found": found,
                 "total_found": len(found),
+                "scan_completed": scan_completed,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
                 "wordlist": wordlist,
+                "returncode": process.returncode,
             },
         }
     
@@ -212,6 +225,7 @@ async def snmp_get(params: Dict[str, Any]) -> Dict[str, Any]:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         output = stdout.decode("utf-8", errors="replace")
+        stderr_output = stderr.decode("utf-8", errors="replace").strip()
         duration_ms = int((time.time() - start_time) * 1000)
         
         # 解析输出
@@ -220,6 +234,11 @@ async def snmp_get(params: Dict[str, Any]) -> Dict[str, Any]:
             parts = output.split('=', 1)
             if len(parts) == 2:
                 value = parts[1].strip()
+
+        scan_completed = value is not None and "timeout" not in stderr_output.lower()
+        tool_error = None if scan_completed else (
+            stderr_output or "未收到 SNMP 响应，无法读取指定 OID"
+        )
         
         return {
             "tool": "snmp_get",
@@ -230,10 +249,13 @@ async def snmp_get(params: Dict[str, Any]) -> Dict[str, Any]:
                 "oid": oid,
                 "community": community,
                 "value": value,
+                "scan_completed": scan_completed,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
+                "returncode": process.returncode,
             },
         }
     

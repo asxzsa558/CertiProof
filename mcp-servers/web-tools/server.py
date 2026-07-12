@@ -38,6 +38,25 @@ def completed_or_error(returncode: int, stderr: str, discovered_count: int) -> t
     return False, err or f"tool exited with code {returncode}"
 
 
+def timeout_result(tool: str, target: str, duration_ms: int, error: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    return {
+        "tool": tool,
+        "version": "1.0",
+        "status": "success",
+        "data": {
+            "target": target,
+            "scan_completed": False,
+            "tool_error": error,
+            **(data or {}),
+        },
+        "metadata": {
+            "duration_ms": duration_ms,
+            "scan_time": datetime.utcnow().isoformat(),
+            "timed_out": True,
+        },
+    }
+
+
 def parse_gobuster_soft_404(stderr: str) -> Optional[Dict[str, str]]:
     """Detect gobuster wildcard/soft-404 guard and extract retry filters."""
     match = re.search(
@@ -60,7 +79,7 @@ async def nikto_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     
     port = params.get("port", 80)
     ssl = params.get("ssl", False)
-    timeout = params.get("timeout", 600)
+    timeout = params.get("timeout", 120)
     
     # 构建 URL
     scheme = "https" if ssl else "http"
@@ -69,8 +88,7 @@ async def nikto_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     cmd = [
         "nikto",
         "-h", url,
-        "-Format", "json",
-        "-output", "-",
+        "-nointeractive",
     ]
     
     start_time = time.time()
@@ -86,30 +104,20 @@ async def nikto_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         
         output = stdout.decode("utf-8", errors="replace")
         stderr_output = stderr.decode("utf-8", errors="replace")
-        stderr_output = stderr.decode("utf-8", errors="replace")
         duration_ms = int((time.time() - start_time) * 1000)
         
-        # 解析 nikto JSON 输出
+        # Nikto standard output avoids optional Perl JSON/XML modules.
         findings = []
-        try:
-            nikto_data = json.loads(output)
-            for vuln in nikto_data.get("vulnerabilities", []):
+        for line in output.split('\n'):
+            if line.lstrip().startswith("+") and not line.startswith("+ Target"):
                 findings.append({
-                    "id": vuln.get("id", ""),
-                    "osvdb": vuln.get("osvdb", ""),
-                    "method": vuln.get("method", ""),
-                    "uri": vuln.get("uri", ""),
-                    "description": vuln.get("description", ""),
-                    "severity": "high" if "OSVDB" in vuln.get("osvdb", "") else "medium",
+                    "description": line.strip(),
+                    "severity": "medium",
                 })
-        except json.JSONDecodeError:
-            # 如果不是 JSON，尝试解析文本格式
-            for line in output.split('\n'):
-                if '+' in line and ('OSVDB' in line or 'CGI' in line):
-                    findings.append({
-                        "description": line.strip(),
-                        "severity": "medium",
-                    })
+
+        scan_completed, tool_error = completed_or_error(
+            process.returncode, stderr_output, len(findings)
+        )
         
         return {
             "tool": "nikto_scan",
@@ -119,15 +127,25 @@ async def nikto_scan(params: Dict[str, Any]) -> Dict[str, Any]:
                 "target": url,
                 "findings": findings,
                 "total_findings": len(findings),
+                "scan_completed": scan_completed,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
+                "returncode": process.returncode,
             },
         }
     
     except asyncio.TimeoutError:
-        raise ValueError("nikto scan timeout")
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+        return timeout_result(
+            "nikto_scan", url, int((time.time() - start_time) * 1000),
+            f"Web 漏洞扫描在 {timeout} 秒后超时，目标可能响应过慢、限速或被过滤",
+            {"findings": [], "total_findings": 0},
+        )
     except FileNotFoundError:
         raise ValueError("nikto not installed")
     except Exception as e:
@@ -145,7 +163,7 @@ async def sqlmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     data = params.get("data")
     level = params.get("level", 1)
     risk = params.get("risk", 1)
-    timeout = params.get("timeout", 300)
+    timeout = params.get("timeout", 120)
     
     cmd = [
         "sqlmap",
@@ -189,6 +207,10 @@ async def sqlmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
                         "description": line.strip(),
                         "type": "sql_injection",
                     })
+
+        scan_completed, tool_error = completed_or_error(
+            process.returncode, stderr_output, len(injection_points)
+        )
         
         return {
             "tool": "sqlmap_scan",
@@ -199,17 +221,27 @@ async def sqlmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
                 "vulnerable": vulnerable,
                 "injection_points": injection_points,
                 "total_injections": len(injection_points),
+                "scan_completed": scan_completed,
+                "tool_error": tool_error,
             },
             "metadata": {
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
                 "level": level,
                 "risk": risk,
+                "returncode": process.returncode,
             },
         }
     
     except asyncio.TimeoutError:
-        raise ValueError("sqlmap scan timeout")
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+        return timeout_result(
+            "sqlmap_scan", url, int((time.time() - start_time) * 1000),
+            f"SQL 注入检测在 {timeout} 秒后超时，目标可能响应过慢、限速或被过滤",
+            {"vulnerable": False, "injection_points": [], "total_injections": 0},
+        )
     except FileNotFoundError:
         raise ValueError("sqlmap not installed")
     except Exception as e:
@@ -231,7 +263,7 @@ async def gobuster_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     wordlist = params.get("wordlist", "/usr/share/wordlists/dirb/common.txt")
     extensions = params.get("extensions", "php,asp,aspx,jsp,html,txt")
     threads = params.get("threads", 10)
-    timeout = params.get("timeout", 300)
+    timeout = params.get("timeout", 120)
     
     def build_cmd(exclude_length: Optional[str] = None) -> List[str]:
         cmd = [
@@ -316,7 +348,14 @@ async def gobuster_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         }
     
     except asyncio.TimeoutError:
-        raise ValueError("gobuster scan timeout")
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+        return timeout_result(
+            "gobuster_scan", url, int((time.time() - start_time) * 1000),
+            f"目录扫描在 {timeout} 秒后超时，目标可能响应过慢、限速或被过滤",
+            {"discovered": [], "total_discovered": 0, "auto_calibration": None},
+        )
     except FileNotFoundError:
         raise ValueError("gobuster not installed")
     except Exception as e:
@@ -333,7 +372,7 @@ async def ffuf_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     
     wordlist = params.get("wordlist", "/usr/share/wordlists/dirb/common.txt")
     method = params.get("method", "GET")
-    timeout = params.get("timeout", 300)
+    timeout = params.get("timeout", 120)
     
     # 确保 URL 包含 FUZZ 占位符
     if "FUZZ" not in url:
@@ -405,7 +444,14 @@ async def ffuf_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         }
     
     except asyncio.TimeoutError:
-        raise ValueError("ffuf scan timeout")
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+        return timeout_result(
+            "ffuf_scan", url, int((time.time() - start_time) * 1000),
+            f"Web 模糊测试在 {timeout} 秒后超时，目标可能响应过慢、限速或被过滤",
+            {"discovered": [], "total_discovered": 0},
+        )
     except FileNotFoundError:
         raise ValueError("ffuf not installed")
     except Exception as e:

@@ -35,6 +35,7 @@ function ChatPage() {
   const { projectId: urlProjectId } = useParams()
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
+  const currentOrgId = useAuthStore((state) => state.currentOrgId)
   const [projects, setProjects] = useState([])
   const [selectedProject, setSelectedProject] = useState(null)
   const [selectedModel, setSelectedModel] = useState(null)
@@ -53,7 +54,7 @@ function ChatPage() {
 
   useEffect(() => {
     fetchProjects()
-  }, [urlProjectId])
+  }, [urlProjectId, currentOrgId])
 
   useEffect(() => {
     if (selectedProject) {
@@ -71,7 +72,9 @@ function ChatPage() {
 
   const fetchProjects = async () => {
     try {
-      const response = await api.get('/projects/')
+      const response = await api.get('/projects/', {
+        params: currentOrgId ? { organization_id: currentOrgId } : undefined,
+      })
       setProjects(response.data)
       
       // 如果 URL 中有 projectId，优先选择该项目
@@ -256,7 +259,11 @@ function ChatPage() {
     try {
       const values = await projectForm.validateFields()
       if (projectModalMode === 'create') {
-        const response = await api.post('/projects/', values)
+        if (!currentOrgId) {
+          message.error('未选择组织，无法创建项目')
+          return
+        }
+        const response = await api.post('/projects/', { ...values, organization_id: currentOrgId })
         message.success('项目创建成功')
         setSelectedProject(response.data)
       } else {

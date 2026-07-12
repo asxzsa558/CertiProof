@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Avatar, Button, Dropdown, Select, Tag, message } from 'antd'
+import { Avatar, Button, Dropdown, Modal, Select, Tag, message } from 'antd'
 import {
   ArrowLeftOutlined,
   BarChartOutlined,
   CheckCircleFilled,
   DownloadOutlined,
+  ExclamationCircleFilled,
   FileTextOutlined,
   LogoutOutlined,
   ProjectOutlined,
@@ -19,10 +20,16 @@ import VeriSureLogo from '../components/VeriSureLogo'
 import './Dashboard.css'
 import './ReportsPage.css'
 
-const statusText = (progress) => {
-  if (progress >= 100) return '可归档'
-  if (progress >= 60) return '待复核'
-  return '生成中'
+const reportState = (project) => {
+  const progress = Number(project.progress || 0)
+  const risks = Number(project.risk_count || 0)
+  const total = Number(project.task_total || 0)
+  const done = Number(project.task_done || 0)
+  if (risks > 0) return { label: '存在待整改风险', tone: 'attention', detail: `${risks} 项风险尚未闭环` }
+  if (!total) return { label: '尚未测评', tone: 'idle', detail: '尚无测评任务结果' }
+  if (progress >= 100 && done < total) return { label: '测评进度待校正', tone: 'attention', detail: `显示 ${progress}% ，但仅完成 ${done}/${total} 项任务` }
+  if (progress >= 100) return { label: '可生成报告', tone: 'ready', detail: '当前没有风险阻塞项' }
+  return { label: '测评进行中', tone: 'progress', detail: `${done}/${total} 项任务已完成` }
 }
 
 function ReportsPage() {
@@ -36,6 +43,7 @@ function ReportsPage() {
   const [loading, setLoading] = useState(false)
   const [downloadingId, setDownloadingId] = useState(null)
   const [previewingId, setPreviewingId] = useState(null)
+  const [preview, setPreview] = useState(null)
 
   const currentOrg = useMemo(
     () => organizations.find((org) => org.id === currentOrgId) || organizations[0],
@@ -66,8 +74,7 @@ function ReportsPage() {
 
   const reports = dashboard.project_matrix.map((project) => ({
     ...project,
-    status: statusText(project.progress || 0),
-    blocked: (project.risk_count || 0) > 0,
+    reportState: reportState(project),
   }))
 
   const handleDownloadReport = async (projectId) => {
@@ -93,10 +100,8 @@ function ReportsPage() {
   const handlePreviewReport = async (projectId) => {
     setPreviewingId(projectId)
     try {
-      const response = await api.get(`/projects/${projectId}/report`, { responseType: 'blob' })
-      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/html' }))
-      window.location.assign(url)
-      window.setTimeout(() => window.URL.revokeObjectURL(url), 60000)
+      const response = await api.get(`/projects/${projectId}/report`, { responseType: 'text' })
+      setPreview({ html: response.data, projectId })
     } catch (error) {
       console.error('Failed to preview report:', error)
       message.error('报告预览失败')
@@ -104,6 +109,8 @@ function ReportsPage() {
       setPreviewingId(null)
     }
   }
+
+  const closePreview = () => setPreview(null)
 
   const userMenu = {
     items: [
@@ -146,7 +153,7 @@ function ReportsPage() {
         <header className="org-topbar">
           <div>
             <h1>报告中心</h1>
-            <p>按项目汇总等保测评进度、测评任务、证据数量、风险阻塞项和报告导出状态。</p>
+            <p>以当前待整改风险、已执行检测和文档证据为依据生成可追溯的等保自查报告。</p>
           </div>
           <div className="org-top-actions">
             <Select
@@ -174,43 +181,30 @@ function ReportsPage() {
           </div>
           <div className="org-kpi">
             <span><CheckCircleFilled /></span>
-            <div><strong>{reports.filter((item) => item.progress >= 100).length}</strong><em>可归档</em></div>
+            <div><strong>{reports.filter((item) => item.reportState.tone === 'ready').length}</strong><em>可生成</em></div>
           </div>
           <div className="org-kpi">
-            <span><BarChartOutlined /></span>
-            <div><strong>{dashboard.risk_queue.length}</strong><em>风险阻塞</em></div>
+            <span><ExclamationCircleFilled /></span>
+            <div><strong>{reports.filter((item) => item.reportState.tone === 'attention').length}</strong><em>需整改项目</em></div>
           </div>
         </section>
 
         <section className="org-panel report-board">
           <div className="org-panel-head">
             <h2>项目报告矩阵</h2>
-            <span>{loading ? '同步中' : `${reports.length} 份`}</span>
+            <span>{loading ? '同步中' : `${reports.length} 个项目`}</span>
           </div>
 
-          <div className="report-table scroll-region">
-            <div className="report-row report-head">
-              <span>项目</span>
-              <span>等级</span>
-              <span>阶段</span>
-              <span>进度</span>
-              <span>风险</span>
-              <span>测评任务</span>
-              <span>状态</span>
-              <span>操作</span>
-            </div>
+          <div className="report-list scroll-region">
             {reports.length ? reports.map((report) => (
-              <div className="report-row" key={report.project_id}>
-                <strong>{report.name}</strong>
-                <Tag color={report.level === '三级' ? 'red' : 'blue'}>{report.level}</Tag>
-                <span>{report.stage}</span>
-                <div className="mini-progress">
-                  <b style={{ width: `${report.progress || 0}%` }} />
-                  <em>{report.progress || 0}%</em>
+              <article className={`report-item ${report.reportState.tone}`} key={report.project_id}>
+                <div className="report-item-head">
+                  <div><span className="report-id">P-{String(report.project_id).padStart(3, '0')}</span><h3>{report.name}</h3></div>
+                  <Tag color={report.level === '三级' ? 'red' : 'blue'}>{report.level || '未定级'}</Tag>
                 </div>
-                <span className={report.risk_count ? 'report-risk hot' : 'report-risk'}>{report.risk_count}</span>
-                <span>{report.task_done || 0}/{report.task_total || 0}</span>
-                <Tag color={report.blocked ? 'gold' : report.progress >= 100 ? 'green' : 'blue'}>{report.status}</Tag>
+                <div className="report-item-state"><span className={`report-state-dot ${report.reportState.tone}`} /><div><strong>{report.reportState.label}</strong><p>{report.reportState.detail}</p></div></div>
+                <div className="report-item-progress"><div><span>{report.stage || '尚未开始'}</span><em>{report.progress || 0}%</em></div><div className="mini-progress"><b style={{ width: `${report.progress || 0}%` }} /></div></div>
+                <dl className="report-item-metrics"><div><dt>测评任务</dt><dd>{report.task_done || 0}/{report.task_total || 0}</dd></div><div><dt>待处理风险</dt><dd className={report.risk_count ? 'hot' : ''}>{report.risk_count || 0}</dd></div><div><dt>报告依据</dt><dd>{report.task_total ? '已生成数据' : '等待测评'}</dd></div></dl>
                 <div className="report-actions">
                   <Button
                     size="small"
@@ -228,13 +222,16 @@ function ReportsPage() {
                     aria-label="下载 HTML 报告"
                   />
                 </div>
-              </div>
+              </article>
             )) : (
               <div className="empty-panel">暂无项目报告。创建项目并完成测评后会在这里汇总。</div>
             )}
           </div>
         </section>
       </main>
+      <Modal className="report-preview-modal" open={Boolean(preview)} title="报告预览" width="min(1280px, calc(100vw - 40px))" footer={null} onCancel={closePreview} destroyOnHidden>
+        {preview ? <iframe className="report-preview-frame" title={`报告预览-${preview.projectId}`} sandbox="" srcDoc={preview.html} /> : null}
+      </Modal>
     </div>
   )
 }

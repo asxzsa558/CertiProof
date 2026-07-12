@@ -12,7 +12,17 @@ async def main():
     async with AsyncSessionLocal() as db:
         html = await generate_html_report(db, project_id)
 
-    required = ("资产范围", "问题清单", "文档差距", "技术检测记录", "整改时间线", "复测对比", "资产与端口变化")
+    required = (
+        "自查结论",
+        "当前待整改事项",
+        "复测验证",
+        "检测覆盖与执行结果",
+        "执行状态",
+        "检测结论",
+        "文档合规核查",
+        "问题闭环明细",
+        "测评范围与变更",
+    )
     assert all(section in html for section in required)
     assert "<html" in html and "</html>" in html
     print(f"report contract ok: project={project_id}, bytes={len(html.encode())}")
