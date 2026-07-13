@@ -3,7 +3,6 @@ import {
   FileSearchOutlined,
   SafetyCertificateOutlined,
   MonitorOutlined,
-  PlusOutlined,
   ApiOutlined,
   DatabaseOutlined,
   KeyOutlined,
@@ -69,7 +68,6 @@ const MORE_SUGGESTIONS = [
 ]
 
 const SUGGESTIONS = [
-  { icon: <PlusOutlined />, title: '创建项目', text: '创建项目 ', color: '#6366f1' },
   ...PRIMARY_SUGGESTIONS,
   { icon: <RocketOutlined />, title: '等保测评', text: '', color: '#f59e0b', action: 'assessment' },
 ]

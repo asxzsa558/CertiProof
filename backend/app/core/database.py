@@ -101,6 +101,93 @@ async def _migrate_evidences_table(conn):
                 pass  # 列可能已存在
 
 
+async def _migrate_assets_table(conn):
+    """Add accountable scope-confirmation fields for existing installations."""
+    if "postgresql" in settings.DATABASE_URL:
+        await conn.execute(text(
+            "ALTER TABLE assets ADD COLUMN IF NOT EXISTS scope_confirmed_by INTEGER REFERENCES users(id)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE assets ADD COLUMN IF NOT EXISTS scope_confirmed_at TIMESTAMP WITH TIME ZONE"
+        ))
+        return
+
+    rows = (await conn.execute(text("PRAGMA table_info(assets)"))).fetchall()
+    columns = {row[1] for row in rows}
+    if "scope_confirmed_by" not in columns:
+        await conn.execute(text("ALTER TABLE assets ADD COLUMN scope_confirmed_by INTEGER"))
+    if "scope_confirmed_at" not in columns:
+        await conn.execute(text("ALTER TABLE assets ADD COLUMN scope_confirmed_at DATETIME"))
+
+
+async def _migrate_task_instances_table(conn):
+    """Add worker leases for restart-safe automated assessment tasks."""
+    if "postgresql" in settings.DATABASE_URL:
+        await conn.execute(text("ALTER TABLE task_instances ADD COLUMN IF NOT EXISTS lease_owner VARCHAR(128)"))
+        await conn.execute(text("ALTER TABLE task_instances ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMP WITH TIME ZONE"))
+        return
+
+    rows = (await conn.execute(text("PRAGMA table_info(task_instances)"))).fetchall()
+    columns = {row[1] for row in rows}
+    if "lease_owner" not in columns:
+        await conn.execute(text("ALTER TABLE task_instances ADD COLUMN lease_owner VARCHAR(128)"))
+    if "lease_expires_at" not in columns:
+        await conn.execute(text("ALTER TABLE task_instances ADD COLUMN lease_expires_at DATETIME"))
+
+
+async def _migrate_conversation_archive_tables(conn):
+    """Keep existing chat records while adding durable archive and summary state."""
+    is_postgres = "postgresql" in settings.DATABASE_URL
+
+    async def add_columns(table: str, columns: list[tuple[str, str]]) -> None:
+        if is_postgres:
+            for name, column_type in columns:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {column_type}"))
+            return
+
+        existing = {row[1] for row in (await conn.execute(text(f"PRAGMA table_info({table})"))).fetchall()}
+        for name, column_type in columns:
+            if name not in existing:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}"))
+
+    await add_columns("conversation_history", [
+        ("archive_id", "INTEGER"),
+        ("archived_at", "TIMESTAMP"),
+    ])
+    await add_columns("action_history", [
+        ("thread_id", "INTEGER"),
+    ])
+    await add_columns("conversation_archives", [
+        ("status", "VARCHAR(20) DEFAULT 'queued'"),
+        ("error_message", "TEXT"),
+        ("attempts", "INTEGER DEFAULT 0"),
+        ("lease_owner", "VARCHAR(128)"),
+        ("lease_expires_at", "TIMESTAMP"),
+        ("summary_generated_at", "TIMESTAMP"),
+        ("source_message_ids", "JSON"),
+        ("related_refs", "JSON"),
+        ("legacy_summary_only", "BOOLEAN DEFAULT FALSE"),
+    ])
+    await add_columns("conversation_threads", [
+        ("source_archive_id", "INTEGER"),
+        ("deleted_at", "TIMESTAMP"),
+    ])
+
+    # Old releases deleted messages before they could be summarized. They cannot be
+    # reconstructed, so mark them honestly instead of putting them back in the queue.
+    true_value = "TRUE" if is_postgres else "1"
+    await conn.execute(text(f"""
+        UPDATE conversation_archives
+        SET legacy_summary_only = {true_value},
+            status = CASE WHEN COALESCE(summary, '') = '' THEN 'failed' ELSE 'completed' END,
+            error_message = CASE
+                WHEN COALESCE(summary, '') = '' THEN '历史版本已删除归档原文，无法重新生成摘要。'
+                ELSE error_message
+            END
+        WHERE source_message_ids IS NULL
+    """))
+
+
 async def _migrate_questionnaire_records_table(conn):
     """迁移 questionnaire_records 表"""
     # 检查表是否存在
@@ -254,6 +341,10 @@ async def _migrate_scan_tasks_table(conn):
         ("result_summary", "JSONB" if "postgresql" in settings.DATABASE_URL else "JSON"),
         ("lease_owner", "VARCHAR(128)"),
         ("lease_expires_at", "TIMESTAMP"),
+        ("control_state", "VARCHAR(24) DEFAULT 'running'"),
+        ("checkpoint", "JSONB" if "postgresql" in settings.DATABASE_URL else "JSON"),
+        ("paused_at", "TIMESTAMP"),
+        ("cancel_requested_at", "TIMESTAMP"),
     ]
 
     for col_name, col_type in columns_to_add:
@@ -421,7 +512,12 @@ async def _migrate_existing_data(conn):
 
 async def init_db():
     """Initialize database tables."""
+    # Register every model before metadata is materialized; migration runs without
+    # importing the API modules that normally pull these models in.
+    import app.models  # noqa: F401
     async with engine.begin() as conn:
+        if "postgresql" in settings.DATABASE_URL:
+            await conn.execute(text("SELECT pg_advisory_xact_lock(hashtext('certiproof_schema_migration'))"))
         # 创建新表
         await conn.run_sync(Base.metadata.create_all)
         
@@ -432,6 +528,9 @@ async def init_db():
         await _migrate_organization_members_table(conn)
         await _migrate_scan_tasks_table(conn)
         await _migrate_remediation_tickets_table(conn)
+        await _migrate_assets_table(conn)
+        await _migrate_task_instances_table(conn)
+        await _migrate_conversation_archive_tables(conn)
         
         # 种子数据
         await _seed_assessment_types(conn)
@@ -440,9 +539,6 @@ async def init_db():
         await _migrate_existing_data(conn)
 
     async with AsyncSessionLocal() as session:
-        try:
-            from app.services.flow_engine import get_flow_engine
+        from app.services.flow_engine import get_flow_engine
 
-            await get_flow_engine(session).upsert_default_templates()
-        except Exception:
-            await session.rollback()
+        await get_flow_engine(session).upsert_default_templates()

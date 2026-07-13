@@ -26,6 +26,7 @@ from app.services.document_pipeline import (
     normalize_analysis_mode,
 )
 from app.services.file_storage import file_storage
+from app.services.upload_validation import read_limited_upload
 
 router = APIRouter(prefix="/projects/{project_id}/remediation", tags=["Remediation"])
 MAX_RETEST_UPLOAD_SIZE = 100 * 1024 * 1024
@@ -397,11 +398,11 @@ async def document_retest(
         detail = "暂不支持旧版 DOC，请转换为 DOCX 或 PDF" if suffix == ".doc" else f"不支持的文件格式：{suffix or '未知'}"
         raise HTTPException(status_code=415, detail=detail)
 
-    content = await file.read()
-    if len(content) == 0:
-        raise HTTPException(status_code=400, detail="文件为空")
-    if len(content) > MAX_RETEST_UPLOAD_SIZE:
-        raise HTTPException(status_code=413, detail="文件过大，单个文档最大支持 100MB")
+    try:
+        content = await read_limited_upload(file, MAX_RETEST_UPLOAD_SIZE, SUPPORTED_SUFFIXES)
+    except ValueError as exc:
+        detail = str(exc)
+        raise HTTPException(status_code=413 if "超过" in detail else 400, detail=detail) from exc
 
     clause_id = f"DOC-TASK-{task.id}"
     old_evidences = (await db.execute(

@@ -166,7 +166,7 @@ export default function ProjectsList() {
     event.stopPropagation()
     if (!can('project:update')) return message.warning('当前角色没有编辑项目的权限')
     setEditingProject(project)
-    form.setFieldsValue({ name: project.name, description: project.description, system_name: project.system_name, status: project.status || 'active' })
+    form.setFieldsValue({ name: project.name, description: project.description, system_name: project.system_name })
     setEditModalVisible(true)
   }
 
@@ -191,6 +191,28 @@ export default function ProjectsList() {
       await Promise.all([fetchProjects({ silent: true }), fetchAssets({ silent: true })])
     } catch (error) {
       message.error(errorMessage(error, '删除项目失败'))
+    }
+  }
+
+  const handleArchiveProject = async (projectId) => {
+    if (!can('project:update')) return message.warning('当前角色没有归档项目的权限')
+    try {
+      await api.post(`/projects/${projectId}/archive`)
+      message.success('项目已归档并切换为只读状态')
+      await fetchProjects({ silent: true })
+    } catch (error) {
+      message.error(errorMessage(error, '归档项目失败'))
+    }
+  }
+
+  const handleRestoreProject = async (projectId) => {
+    if (!can('project:update')) return message.warning('当前角色没有恢复项目的权限')
+    try {
+      await api.post(`/projects/${projectId}/restore`)
+      message.success('项目已恢复，可继续测评与整改')
+      await fetchProjects({ silent: true })
+    } catch (error) {
+      message.error(errorMessage(error, '恢复项目失败'))
     }
   }
 
@@ -258,6 +280,20 @@ export default function ProjectsList() {
     }
   }
 
+  const handleConfirmAssetScope = async (asset) => {
+    if (!can('asset:update')) return message.warning('当前角色没有确认资产授权范围的权限')
+    setAssetMutating(true)
+    try {
+      await api.post(`/projects/${asset.project_id}/assets/${asset.id}/confirm-scope`, { confirmed: true })
+      message.success('已记录扫描授权确认')
+      await Promise.all([fetchAssets({ silent: true }), fetchProjects({ silent: true })])
+    } catch (error) {
+      message.error(errorMessage(error, '确认授权范围失败'))
+    } finally {
+      setAssetMutating(false)
+    }
+  }
+
   return (
     <main className="projects-page">
       <header className="projects-topbar">
@@ -287,6 +323,8 @@ export default function ProjectsList() {
           onRetry={() => fetchProjects()}
           onEdit={handleEdit}
           onDelete={handleDeleteProject}
+          onArchive={handleArchiveProject}
+          onRestore={handleRestoreProject}
           onCreate={() => setCreateModalVisible(true)}
           canCreate={can('project:create')}
           canEdit={can('project:update')}
@@ -310,8 +348,11 @@ export default function ProjectsList() {
           onNavigate={navigate}
           onCreate={() => setAssetModalVisible(true)}
           onDelete={handleDeleteAsset}
+          onConfirmScope={handleConfirmAssetScope}
+          mutating={assetMutating}
           canCreate={can('asset:create')}
           canDelete={can('asset:delete')}
+          canUpdate={can('asset:update')}
         />
       )}
 
@@ -329,7 +370,6 @@ export default function ProjectsList() {
           <Form.Item name="name" label="项目名称" rules={[{ required: true, message: '请输入项目名称' }]}><Input /></Form.Item>
           <Form.Item name="system_name" label="系统名称"><Input /></Form.Item>
           <Form.Item name="description" label="项目说明"><Input.TextArea rows={3} /></Form.Item>
-          <Form.Item name="status" label="项目状态"><Select options={[{ value: 'active', label: '启用' }, { value: 'archived', label: '归档' }]} /></Form.Item>
         </Form>
       </Modal>
 
@@ -345,7 +385,7 @@ export default function ProjectsList() {
   )
 }
 
-function ProjectsView({ projects, summary, loading, loadError, navigate, onRetry, onEdit, onDelete, onCreate, canCreate, canEdit, canDelete }) {
+function ProjectsView({ projects, summary, loading, loadError, navigate, onRetry, onEdit, onDelete, onArchive, onRestore, onCreate, canCreate, canEdit, canDelete }) {
   return <>
     {loadError ? <LoadError text={loadError} onRetry={onRetry} /> : null}
     <section className="projects-summary" aria-label="项目摘要">
@@ -367,7 +407,7 @@ function ProjectsView({ projects, summary, loading, loadError, navigate, onRetry
           <div className="project-stage"><span>{project.command?.stage || '测评流程暂未初始化'}</span><strong>{formatProgress(progress)}</strong></div>
           <div className="project-progress"><i style={{ width: `${Math.max(0, Math.min(100, progress || 0))}%` }} /></div>
           <dl className="project-metrics"><div><dt>测评任务</dt><dd>{Number.isFinite(taskDone) ? `${taskDone}/${taskTotal || 0}` : '-'}</dd></div><div><dt>待处置风险</dt><dd className={project.command?.risk_count ? 'danger' : ''}>{Number.isFinite(project.command?.risk_count) ? project.command.risk_count : '-'}</dd></div><div><dt>合规得分</dt><dd>{Number.isFinite(project.compliance_score) ? `${Math.round(project.compliance_score)} 分` : '-'}</dd></div></dl>
-          <div className="project-card-actions" onClick={(event) => event.stopPropagation()}><Button type="text" icon={<EditOutlined />} disabled={!canEdit} title={!canEdit ? '当前角色没有编辑项目的权限' : undefined} onClick={(event) => onEdit(project, event)}>编辑</Button><Popconfirm disabled={!canDelete} title="确认删除项目？" description="项目、检测结果与整改记录将一并删除。" onConfirm={() => onDelete(project.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}><Button type="text" danger icon={<DeleteOutlined />} disabled={!canDelete} title={!canDelete ? '当前角色没有删除项目的权限' : undefined}>删除</Button></Popconfirm><Button type="primary" onClick={() => navigate(`/projects/${project.id}`)}>进入项目</Button></div>
+          <div className="project-card-actions" onClick={(event) => event.stopPropagation()}><Button type="text" icon={<EditOutlined />} disabled={!canEdit || project.status === 'archived'} title={!canEdit ? '当前角色没有编辑项目的权限' : project.status === 'archived' ? '归档项目为只读状态' : undefined} onClick={(event) => onEdit(project, event)}>编辑</Button>{project.status === 'archived' ? <Button type="text" disabled={!canEdit} onClick={() => onRestore(project.id)}>恢复</Button> : <Popconfirm disabled={!canEdit} title="归档项目？" description="归档后项目仅可查看、导出报告或恢复。" onConfirm={() => onArchive(project.id)} okText="归档" cancelText="取消"><Button type="text" disabled={!canEdit}>归档</Button></Popconfirm>}<Popconfirm disabled={!canDelete} title="确认删除项目？" description="项目、检测结果与整改记录将一并删除。" onConfirm={() => onDelete(project.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}><Button type="text" danger icon={<DeleteOutlined />} disabled={!canDelete} title={!canDelete ? '当前角色没有删除项目的权限' : undefined}>删除</Button></Popconfirm><Button type="primary" onClick={() => navigate(`/projects/${project.id}`)}>进入项目</Button></div>
         </article>
       })}
       {!loading && !projects.length ? <EmptyState icon={<ProjectOutlined />} title="还没有项目" action={canCreate ? '新建项目' : undefined} onAction={onCreate} /> : null}
@@ -375,7 +415,7 @@ function ProjectsView({ projects, summary, loading, loadError, navigate, onRetry
   </>
 }
 
-function AssetsView({ assets, assetSummary, typeCounts, pagination, selectedAsset, loading, loadError, projects, filters, onFilterChange, onRetry, onPageChange, onSelectAsset, onNavigate, onCreate, onDelete, canCreate, canDelete }) {
+function AssetsView({ assets, assetSummary, typeCounts, pagination, selectedAsset, loading, loadError, projects, filters, onFilterChange, onRetry, onPageChange, onSelectAsset, onNavigate, onCreate, onDelete, onConfirmScope, mutating, canCreate, canDelete, canUpdate }) {
   const projectOptions = [{ value: 'all', label: '全部项目' }, ...projects.map((project) => ({ value: String(project.id), label: project.name }))]
   return <>
     {loadError ? <LoadError text={loadError} onRetry={onRetry} /> : null}
@@ -420,7 +460,7 @@ function AssetsView({ assets, assetSummary, typeCounts, pagination, selectedAsse
           <div className="asset-inspector-title"><span>资产详情</span><strong>{selectedAsset.value}</strong><em>{selectedAsset.project_name}</em></div>
           <dl><div><dt>资产类型</dt><dd>{assetTypeLabel[selectedAsset.asset_type]}</dd></div><div><dt>验证状态</dt><dd className={`asset-verification ${selectedAsset.verification_status}`}>{verificationLabel(selectedAsset.verification_status)}</dd></div><div><dt>待处置风险</dt><dd className={selectedAsset.risk_count ? 'danger' : ''}>{selectedAsset.risk_count} 项</dd></div><div><dt>历史发现</dt><dd>{selectedAsset.finding_count} 项</dd></div></dl>
           <div className="asset-services"><span>已发现服务</span>{selectedAsset.services?.length ? selectedAsset.services.map((service) => <div key={service.id}><b>{service.label}</b><em>{service.service || '服务未识别'}</em></div>) : <p>尚未从扫描结果中发现开放服务。</p>}</div>
-          <div className="asset-inspector-actions"><Button onClick={() => onNavigate(`/projects/${selectedAsset.project_id}`)}>进入项目</Button><Popconfirm disabled={!canDelete} title="确认删除该资产？" description="关联资产记录将不可恢复。" onConfirm={() => onDelete(selectedAsset)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}><Button danger icon={<DeleteOutlined />} disabled={!canDelete} title={!canDelete ? '当前角色没有删除资产的权限' : undefined}>删除资产</Button></Popconfirm></div>
+          <div className="asset-inspector-actions"><Button onClick={() => onNavigate(`/projects/${selectedAsset.project_id}`)}>进入项目</Button>{selectedAsset.verification_status !== 'verified' && !selectedAsset.scope_confirmed_at ? <Popconfirm disabled={!canUpdate || mutating} title="确认已获得扫描授权？" description="确认后，该资产才可用于项目内安全检测。" onConfirm={() => onConfirmScope(selectedAsset)} okText="确认授权" cancelText="取消"><Button disabled={!canUpdate || mutating} title={!canUpdate ? '当前角色没有确认资产授权范围的权限' : undefined}>确认授权</Button></Popconfirm> : <Button disabled>已确认范围</Button>}<Popconfirm disabled={!canDelete} title="确认删除该资产？" description="关联资产记录将不可恢复。" onConfirm={() => onDelete(selectedAsset)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}><Button danger icon={<DeleteOutlined />} disabled={!canDelete} title={!canDelete ? '当前角色没有删除资产的权限' : undefined}>删除资产</Button></Popconfirm></div>
         </> : <div className="asset-inspector-empty">选择资产以查看归属、验证状态、风险和服务。</div>}
       </aside>
     </section>

@@ -334,8 +334,8 @@ function AssessmentProgress({ projectId, projectName }) {
       pollingRef.current = null
     }
     pollingPhaseIdRef.current = activePhaseId
-    
-    pollingRef.current = setInterval(async () => {
+
+    const pollTasks = async () => {
       try {
         // 同时刷新任务列表和测评进度（确保 phase progress 和 total progress 实时更新）
         const [tasksRes] = await Promise.all([
@@ -355,7 +355,10 @@ function AssessmentProgress({ projectId, projectName }) {
       } catch (error) {
         console.error('Polling error:', error)
       }
-    }, 2000)
+    }
+
+    pollTasks()
+    pollingRef.current = setInterval(pollTasks, 2000)
   }, [selectedPhase])
 
   const stopPolling = useCallback(() => {
@@ -377,14 +380,17 @@ function AssessmentProgress({ projectId, projectName }) {
         
         const phasesResponse = await api.get(`/assessments/${latestAssessment.id}/phases`)
         setPhases(phasesResponse.data)
+        return { assessment: latestAssessment, phases: phasesResponse.data }
       } else {
         setAssessment(null)
         setPhases([])
+        return null
       }
     } catch (error) {
       console.error('Failed to fetch assessment:', error)
       setAssessment(null)
       setPhases([])
+      return null
     } finally {
       if (!silent) setLoading(false)
     }
@@ -411,6 +417,44 @@ function AssessmentProgress({ projectId, projectName }) {
       setTasksLoading(false)
     }
   }
+
+  const handleOpenAssessment = async () => {
+    let current = await fetchAssessment()
+    try {
+      if (!current) {
+        const projectResponse = await api.get(`/projects/${projectId}`)
+        const project = projectResponse.data
+        const targetLevel = project.compliance_level === '二级' ? 2 : 3
+        const templatesResponse = await api.get('/assessments/templates')
+        const template = templatesResponse.data.find(item => item.compliance_level === targetLevel)
+        if (!template) throw new Error('未找到匹配的测评模板')
+
+        const created = await api.post(`/assessments/projects/${projectId}`, {
+          template_id: template.id,
+          name: `${projectName || project.name} - 等保${project.compliance_level}测评`,
+        })
+        const phasesResponse = await api.get(`/assessments/${created.data.id}/phases`)
+        current = { assessment: created.data, phases: phasesResponse.data }
+        setAssessment(current.assessment)
+        setPhases(current.phases)
+        message.success('测评流程已创建')
+      }
+
+      const phase = current.phases.find(item => item.status === 'active') || current.phases.find(item => item.status === 'pending') || current.phases[0]
+      if (phase) await handlePhaseClick(phase)
+    } catch (error) {
+      console.error('Failed to open assessment:', error)
+      message.error(error.response?.data?.detail || error.message || '打开测评失败')
+    }
+  }
+
+  useEffect(() => {
+    const openAssessment = (event) => {
+      if (event.detail?.projectId === projectId) handleOpenAssessment()
+    }
+    window.addEventListener('certiproof:open-assessment', openAssessment)
+    return () => window.removeEventListener('certiproof:open-assessment', openAssessment)
+  }, [projectId])
 
   const handleStartAssessment = async () => {
     if (!assessment) return
@@ -967,7 +1011,16 @@ function AssessmentProgress({ projectId, projectName }) {
   }
 
   if (!assessment) {
-    return null
+    return (
+      <div className="assessment-progress-container empty">
+        <div className="assessment-header">
+          <div className="assessment-title"><RocketOutlined className="assessment-icon" /><span>测评进度</span></div>
+        </div>
+        <Button type="primary" block icon={<PlayCircleFilled />} onClick={handleOpenAssessment} className="start-assessment-btn">
+          创建等保测评
+        </Button>
+      </div>
+    )
   }
 
   const statusConfig = STATUS_CONFIG[assessment.status] || STATUS_CONFIG.not_started

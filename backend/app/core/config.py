@@ -4,7 +4,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # Application
-    APP_NAME: str = "VeriSure"
+    APP_NAME: str = "CertiProof"
     APP_VERSION: str = "0.1.0"
     APP_ENV: str = "development"
     DEBUG: bool = True
@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./certiproof.db"
     
     # JWT
-    SECRET_KEY: str = "your-secret-key-change-in-production"
+    SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -70,7 +70,7 @@ class Settings(BaseSettings):
         problems = []
         if self.DEBUG:
             problems.append("DEBUG must be false in production")
-        if not self.SECRET_KEY or self.SECRET_KEY == "your-secret-key-change-in-production":
+        if not self.SECRET_KEY or len(self.SECRET_KEY) < 32:
             problems.append("SECRET_KEY must be set to a strong non-default value in production")
         if "*" in self.CORS_ORIGINS:
             problems.append("CORS_ORIGINS must not contain '*' in production")

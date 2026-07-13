@@ -152,11 +152,16 @@ class AIEngine:
             }
         """
         try:
-            # 构建归档上下文
-            archives_summary = context.get("project_archives_summary", "")
-            archive_context = ""
-            if archives_summary:
-                archive_context = f"\n\n## 项目归档上下文（之前中断的工作）\n{archives_summary}"
+            # Only continue the selected thread; unrelated project archives must not steer a plan.
+            continuity_parts = []
+            handoff_summary = context.get("thread_handoff_summary", "")
+            thread_summary = context.get("thread_summary", "")
+            if handoff_summary:
+                continuity_parts.append(f"## 接续归档上下文\n{handoff_summary}")
+            if thread_summary:
+                continuity_parts.append(f"## 当前线程分段摘要\n{thread_summary}")
+            continuity_context = "\n\n".join(continuity_parts)
+            archive_context = f"\n\n{continuity_context}" if continuity_context else ""
 
             # 构建测评状态上下文
             assessment_state = context.get("assessment_state", {})

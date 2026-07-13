@@ -14,6 +14,7 @@ from app.services.capability_registry import CapabilityRegistry, capability_regi
 from app.services.context_manager import ContextManager
 from app.core.rbac import require_org_permission_for_user_id
 from app.core.redaction import redact_sensitive
+from app.services.execution_policy import validate_execution_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +287,7 @@ class ExecutionEngine:
         progress_callback: Callable = None,
         check_stop: Callable = None,
         wait_if_paused: Callable = None,
+        step_result_callback: Callable = None,
     ) -> Dict:
         """
         执行计划中的每个步骤
@@ -313,6 +315,7 @@ class ExecutionEngine:
         failed_count = 0
 
         for i, step in enumerate(plan):
+            checkpoint_index = step.get("_checkpoint_index", i)
             if check_stop and check_stop():
                 logger.info(f"Task stopped before step {i}")
                 for remaining in range(i, len(plan)):
@@ -375,6 +378,8 @@ class ExecutionEngine:
                     "result": result,
                 })
                 success_count += 1
+                if step_result_callback:
+                    await step_result_callback(checkpoint_index, results[-1])
 
                 # 记录操作历史
                 if context_manager:
@@ -405,6 +410,8 @@ class ExecutionEngine:
                     "error": str(e),
                 })
                 failed_count += 1
+                if step_result_callback:
+                    await step_result_callback(checkpoint_index, results[-1])
 
                 # 通知执行失败
                 if progress_callback and task_id:
@@ -439,6 +446,7 @@ class ExecutionEngine:
         max_retries: int = 3,
         check_stop: Callable = None,
         wait_if_paused: Callable = None,
+        step_result_callback: Callable = None,
     ) -> Dict:
         """
         并发执行计划（多资产场景）
@@ -480,6 +488,7 @@ class ExecutionEngine:
                 max_retries=max_retries,
                 check_stop=check_stop,
                 wait_if_paused=wait_if_paused,
+                step_result_callback=step_result_callback,
             )
             tasks.append(task)
 
@@ -605,6 +614,7 @@ class ExecutionEngine:
         max_retries: int = 3,
         check_stop: Callable = None,
         wait_if_paused: Callable = None,
+        step_result_callback: Callable = None,
     ) -> Dict:
         """
         执行单个资产任务（L2 Skill Worker）
@@ -698,7 +708,7 @@ class ExecutionEngine:
             # 之前的代码会在这里调用 context_manager.add_action() 和 cache_result()
             # 现在改为只返回结果，由 Agent（主流程）统一处理 DB 写入
 
-            return {
+            outcome = {
                 "capability": capability_name,
                 "target": target,
                 "parameters": redact_sensitive(parameters),
@@ -708,6 +718,9 @@ class ExecutionEngine:
                 "error_detail": result.get("error_detail"),
                 "attempts": result.get("attempts", 1),
             }
+            if step_result_callback:
+                await step_result_callback(step.get("_checkpoint_index", asset_index), outcome)
+            return outcome
 
     async def _execute_capability(
         self,
@@ -723,6 +736,12 @@ class ExecutionEngine:
         根据能力类型调用不同的处理器
         """
         capability_name = self._normalize_capability_name(capability_name)
+        parameters = await validate_execution_parameters(
+            capability_name,
+            parameters,
+            project_id=project_id,
+            db=db,
+        )
 
         # 标准化目标地址：localhost -> host.docker.internal（容器内访问宿主机）
         if "target" in parameters:
@@ -1323,9 +1342,11 @@ class ExecutionEngine:
             params["templates"] = parameters["templates"]
         if "severity" in parameters:
             params["severity"] = parameters["severity"]
+        if "timeout" in parameters:
+            params["timeout"] = parameters["timeout"]
 
         result = await client.call("nuclei_scan", params)
-        return self._gateway_payload(result)
+        return self._gateway_payload(result, allow_tool_failed=True)
 
     async def _scan_weak_passwords(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """弱口令扫描"""

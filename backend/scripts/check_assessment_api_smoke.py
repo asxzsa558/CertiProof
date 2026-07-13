@@ -126,14 +126,18 @@ def main() -> None:
 
         status, asset = _request("POST", f"/projects/{project_id}/assets/", token, org_id, {
             "asset_type": "ip",
-            "value": "203.0.113.30",
+            "value": "127.0.0.1",
             "name": "API 烟测资产",
         })
         assert status == 201
-        status, verified_asset = _request("POST", f"/projects/{project_id}/assets/{asset['id']}/verify", token, org_id, {
-            "verification_method": "port_response",
-        })
-        assert status == 200 and verified_asset["verification_status"] == "verified"
+        status, scoped_asset = _request(
+            "POST",
+            f"/projects/{project_id}/assets/{asset['id']}/confirm-scope",
+            token,
+            org_id,
+            {"confirmed": True},
+        )
+        assert status == 200 and scoped_asset["scope_confirmed_at"]
 
         status, assessment = _request("POST", f"/assessments/projects/{project_id}", token, org_id, {
             "template_id": template["id"],
@@ -153,6 +157,20 @@ def main() -> None:
         status, tasks = _request("GET", f"/assessments/phases/{gap_phase['id']}/tasks", token, org_id)
         assert status == 200 and len(tasks) == 15
         doc_task = next(task for task in tasks if task["task_type"] == "doc_review" and "安全事件管理制度" in task["name"])
+        port_task = next(task for task in tasks if task["task_type"] == "high_risk_port_scan")
+
+        status, queued = _request("POST", f"/assessments/tasks/{port_task['id']}/start", token, org_id)
+        assert status == 200 and queued["status"] == "queued"
+        terminal_task = None
+        for _ in range(40):
+            status, task_state = _request("GET", f"/assessments/tasks/{port_task['id']}/status", token, org_id)
+            assert status == 200
+            if task_state["status"] in {"completed", "failed"}:
+                terminal_task = task_state
+                break
+            time.sleep(1)
+        assert terminal_task, "自动技术任务未由 Worker 完成"
+        assert (terminal_task["result"] or {}).get("execution", {}).get("state") == "finished"
 
         document = "\n".join([
             "安全事件管理制度",
@@ -178,7 +196,7 @@ def main() -> None:
         assert terminal and terminal["status"] == "completed", terminal
 
         status, report_html = _request("GET", f"/projects/{project_id}/report", token, org_id)
-        assert status == 200 and "5 阶段测评进度" in report_html and "文档差距" in report_html
+        assert status == 200 and "自查结论" in report_html and "文档合规核查" in report_html
 
         status, restart = _request("POST", f"/assessments/{assessment_id}/restart", token, org_id, {"mode": "reset"})
         assert status == 200 and restart["status"] == "reset"
@@ -190,6 +208,7 @@ def main() -> None:
             "project_id": project_id,
             "assessment_id": assessment_id,
             "document_run_id": run_id,
+            "technical_task_status": terminal_task["status"],
             "phases": names,
         }, ensure_ascii=False))
     finally:

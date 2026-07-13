@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.core.config import settings
 from app.core.rbac import get_project_for_user
 from app.core.security import get_current_user
 from app.models.scan_task import ScanTask, ScanTaskStatus
 from app.models.user import User
 from app.orchestrator import orchestrator
+from app.services.audit import record_audit_event
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
@@ -106,6 +106,11 @@ async def _persist_control_state(
         }.get(status_text, progress.get("current_step", "")),
     })
     scan_task.progress = progress
+    scan_task.control_state = {
+        "paused": "paused",
+        "running": "running",
+        "stopped": "cancelled",
+    }.get(status_text, status_text)
     if scan_status:
         scan_task.status = scan_status
     if scan_status in (ScanTaskStatus.CANCELLED, ScanTaskStatus.FAILED, ScanTaskStatus.COMPLETED):
@@ -113,8 +118,24 @@ async def _persist_control_state(
         scan_task.lease_owner = None
         scan_task.lease_expires_at = None
     elif status_text == "paused":
+        scan_task.paused_at = datetime.utcnow()
         scan_task.lease_owner = "paused"
         scan_task.lease_expires_at = datetime.utcnow() + timedelta(days=3650)
+    elif status_text == "running":
+        scan_task.paused_at = None
+        scan_task.lease_owner = "resumed"
+        scan_task.lease_expires_at = None
+    elif status_text == "stopped":
+        scan_task.cancel_requested_at = datetime.utcnow()
+    await record_audit_event(
+        db,
+        event_type=f"scan.{status_text}",
+        resource_type="scan_task",
+        resource_id=scan_task.id,
+        actor_user_id=current_user.id,
+        project_id=scan_task.project_id,
+        details={"orchestrator_task_id": task_id},
+    )
     await db.commit()
 
 
@@ -133,7 +154,7 @@ async def get_task_status(
     status = orchestrator.get_task_status(task_id)
     progress = orchestrator.task_progress.get(task_id, {})
     if persisted_task:
-        status = (persisted_task.progress or {}).get("status") or persisted_task.status.value
+        status = persisted_task.control_state or (persisted_task.progress or {}).get("status") or persisted_task.status.value
         progress = persisted_task.progress or {}
     
     return {
@@ -180,21 +201,10 @@ async def resume_task(
             raise HTTPException(status_code=400, detail="任务无法恢复（可能未暂停）")
         if persisted_task.status == ScanTaskStatus.PENDING:
             await _persist_control_state(task_id, db, current_user, status_text="running")
-            persisted_task.lease_owner = None
-            persisted_task.lease_expires_at = None
-            await db.commit()
         else:
             await _persist_control_state(task_id, db, current_user, status_text="running", scan_status=ScanTaskStatus.RUNNING)
-            persisted_task.lease_owner = "resumed"
-            persisted_task.lease_expires_at = datetime.utcnow() + timedelta(minutes=settings.TASK_LEASE_MINUTES)
-            await db.commit()
     else:
         await _persist_control_state(task_id, db, current_user, status_text="running", scan_status=ScanTaskStatus.RUNNING)
-        persisted_task = await _get_persisted_task(task_id, db, current_user, "scan:cancel")
-        if persisted_task:
-            persisted_task.lease_owner = None
-            persisted_task.lease_expires_at = None
-            await db.commit()
     
     return {
         "task_id": task_id,
@@ -273,7 +283,7 @@ async def list_running_tasks(
             continue
         running_tasks.append({
             "task_id": task_id,
-            "status": (scan_task.progress or {}).get("status") or scan_task.status.value,
+            "status": scan_task.control_state or (scan_task.progress or {}).get("status") or scan_task.status.value,
             "progress": scan_task.progress or {},
             "scan_task_id": scan_task.id,
         })

@@ -18,6 +18,7 @@ from app.schemas.asset import (
     AssetBase,
     AssetCreate,
     AssetVerify,
+    AssetScopeConfirmation,
     AssetResponse,
     AssetListResponse,
 )
@@ -70,6 +71,7 @@ __all__ = [
     "AssetBase",
     "AssetCreate",
     "AssetVerify",
+    "AssetScopeConfirmation",
     "AssetResponse",
     "AssetListResponse",
     "ScanTaskBase",

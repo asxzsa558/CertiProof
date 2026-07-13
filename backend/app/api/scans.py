@@ -9,12 +9,14 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.scan_task import ScanTaskType
-from app.models.asset import Asset, VerificationStatus
+from app.models.asset import Asset
 from app.schemas.scan_task import ScanTaskCreate, ScanTaskResponse, ScanTaskListResponse
 from app.schemas.finding import FindingResponse
 from app.services.scan_service import scan_service
 from app.api.projects import get_project_for_user
 from app.orchestrator import orchestrator
+from app.services.asset_scope import list_scannable_assets
+from app.services.audit import record_audit_event
 
 router = APIRouter(prefix="/projects/{project_id}/scans", tags=["Scans"])
 
@@ -32,8 +34,11 @@ async def _build_scan_plan(db: AsyncSession, project_id: int, scan_data: ScanTas
     assets = result.scalars().all()
     if scan_data.asset_id and not assets:
         raise ValueError("Asset not found")
-    if scan_data.asset_id and assets[0].verification_status != VerificationStatus.VERIFIED:
-        raise ValueError("Asset must be verified before scanning")
+    scannable_ids = {asset.id for asset in await list_scannable_assets(db, project_id)}
+    if scan_data.asset_id and assets[0].id not in scannable_ids:
+        raise ValueError("Asset is inactive and cannot be scanned")
+    if not scan_data.asset_id:
+        assets = [asset for asset in assets if asset.id in scannable_ids]
     if not assets:
         raise ValueError("No assets found for this project")
 
@@ -152,6 +157,16 @@ async def cancel_scan(
     await get_project_for_user(db, project_id, current_user.id, "scan:cancel")
     try:
         scan_task = await scan_service.cancel_scan_task(db, project_id, scan_id)
+        await record_audit_event(
+            db,
+            event_type="scan.cancelled",
+            resource_type="scan_task",
+            resource_id=scan_task.id,
+            actor_user_id=current_user.id,
+            project_id=project_id,
+            outcome="cancelled",
+        )
+        await db.commit()
         return scan_task
     except ValueError as e:
         raise HTTPException(

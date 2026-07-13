@@ -39,6 +39,8 @@ class Asset(Base):
     verification_status = Column(SQLEnum(VerificationStatus), default=VerificationStatus.PENDING, nullable=False)
     verification_method = Column(SQLEnum(VerificationMethod), nullable=True)
     verification_token = Column(String(200), nullable=True)  # Token for DNS TXT or file verification
+    scope_confirmed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    scope_confirmed_at = Column(DateTime(timezone=True), nullable=True)
     
     # Status
     is_active = Column(Boolean, default=True, nullable=False)

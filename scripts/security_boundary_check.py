@@ -57,6 +57,17 @@ def assert_source_guards() -> None:
     assert "TASK_LEASE_MINUTES" in config
     assert "MONITORING_WORKER_BATCH_SIZE" in config
 
+    scope = (ROOT / "backend/app/services/asset_scope.py").read_text(encoding="utf-8")
+    assert "list_scannable_assets" in scope
+    assert "require_scannable_target" in scope
+    assert 'parameters.get("targets")' in scope
+    assessments_api = (ROOT / "backend/app/api/assessments.py").read_text(encoding="utf-8")
+    assert "queue_assessment_task" in assessments_api
+    assert "asyncio.create_task" not in assessments_api
+    task_queue = (ROOT / "backend/app/services/assessment_task_queue.py").read_text(encoding="utf-8")
+    assert "lease_expires_at" in task_queue
+    assert "process_pending_assessment_tasks" in task_queue
+
     scan_service = (ROOT / "backend/app/services/scan_service.py").read_text(encoding="utf-8")
     assert "Project.user_id == user_id" not in scan_service
     assert "ScanTask.project_id == project_id" in scan_service
@@ -87,6 +98,19 @@ def assert_source_guards() -> None:
     assert "async def run_worker" in worker
     assert "await orchestrator.recover_incomplete_scan_tasks(db)" in worker
     assert "run_due_scheduled_scans" in worker
+    assert "process_pending_assessment_tasks" in worker
+
+    security_tools = (ROOT / "mcp-servers/security-tools/server.py").read_text(encoding="utf-8")
+    assert "MAX_NMAP_HOST_TIMEOUT = 180" in security_tools
+    assert "MAX_COMMAND_TIMEOUT = 300" in security_tools
+    assert '"-C", credential_file.name' in security_tools
+
+    gateway = (ROOT / "mcp-servers/gateway/server.py").read_text(encoding="utf-8")
+    assert "asyncio.gather" in gateway
+    assert '"status": "healthy" if status in {"healthy", "running"} else "degraded"' in gateway
+
+    backend_dockerfile = (ROOT / "backend/Dockerfile").read_text(encoding="utf-8")
+    assert '"--reload"' not in backend_dockerfile
     tasks_api = (ROOT / "backend/app/api/tasks.py").read_text(encoding="utf-8")
     assert 'lease_owner = "paused"' in tasks_api
     assert 'lease_owner = "resumed"' in tasks_api

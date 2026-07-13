@@ -19,6 +19,7 @@ from app.models.user import User
 from app.models.project import Project
 from app.models.scan_task import ScanTask
 from app.orchestrator import orchestrator
+from app.services.audit import record_audit_event
 
 router = APIRouter(prefix="/chat", tags=["AI Chat"])
 
@@ -200,16 +201,19 @@ async def chat(
         capability_name = CAPABILITY_DISPLAY_NAMES.get(capability, capability)
         response = f"好的，我将对项目中的 {len(assets)} 个资产执行{capability_name}{ssh_info}：{', '.join(asset_names)}"
         
-        task_info = await orchestrator.start_async_plan(
-            plan=plan,
-            user_id=current_user.id,
-            project_id=project_id,
-            db=db,
-            context_manager=None,
-            ai_response=response,
-            user_input=message,
-            thread_id=msg.thread_id,
-        )
+        try:
+            task_info = await orchestrator.start_async_plan(
+                plan=plan,
+                user_id=current_user.id,
+                project_id=project_id,
+                db=db,
+                context_manager=None,
+                ai_response=response,
+                user_input=message,
+                thread_id=msg.thread_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         task_id = task_info["task_id"]
         
         return ChatResponse(
@@ -222,14 +226,17 @@ async def chat(
         )
     
     # 使用 Orchestrator 处理
-    result = await orchestrator.handle_user_input(
-        user_input=message,
-        project_id=project_id,
-        user_id=current_user.id,
-        asset=asset,
-        db=db,
-        thread_id=msg.thread_id,
-    )
+    try:
+        result = await orchestrator.handle_user_input(
+            user_input=message,
+            project_id=project_id,
+            user_id=current_user.id,
+            asset=asset,
+            db=db,
+            thread_id=msg.thread_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     
     return ChatResponse(
         response=result["message"],
@@ -355,6 +362,7 @@ async def get_agent_status(
 @router.get("/history")
 async def get_chat_history(
     project_id: Optional[int] = Query(None, description="项目ID"),
+    thread_id: Optional[int] = Query(None, description="对话线程ID；省略时仅返回默认线程"),
     limit: int = Query(50, description="返回数量限制"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -367,7 +375,9 @@ async def get_chat_history(
     from app.models.context import ConversationHistory
     
     query = select(ConversationHistory).where(
-        ConversationHistory.user_id == current_user.id
+        ConversationHistory.user_id == current_user.id,
+        ConversationHistory.archive_id.is_(None),
+        ConversationHistory.thread_id.is_(None) if thread_id is None else ConversationHistory.thread_id == thread_id,
     )
     
     # 按项目过滤（仅当明确传入了 project_id 时）
@@ -375,6 +385,13 @@ async def get_chat_history(
         from app.api.projects import get_project_for_user
         await get_project_for_user(db, project_id, current_user.id, "project:read")
         query = query.where(ConversationHistory.project_id == project_id)
+    else:
+        query = query.where(ConversationHistory.project_id.is_(None))
+
+    if thread_id is not None:
+        from app.services.context_manager import ContextManager
+        if not await ContextManager(db, current_user.id, project_id=project_id).get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="线程不存在")
     
     query = query.order_by(ConversationHistory.created_at.desc()).limit(limit)
     
@@ -395,31 +412,35 @@ async def get_chat_history(
 
 @router.post("/clear")
 async def clear_history(
+    thread_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """清理当前用户所有对话历史 + 操作历史"""
-    from app.models.context import ConversationHistory, ActionHistory
+    """Clear only active messages in the current default/thread context."""
+    from app.models.context import ConversationHistory
     
     await db.execute(
-        delete(ConversationHistory).where(ConversationHistory.user_id == current_user.id)
-    )
-    await db.execute(
-        delete(ActionHistory).where(ActionHistory.user_id == current_user.id)
+        delete(ConversationHistory).where(
+            ConversationHistory.user_id == current_user.id,
+            ConversationHistory.project_id.is_(None),
+            ConversationHistory.archive_id.is_(None),
+            ConversationHistory.thread_id.is_(None) if thread_id is None else ConversationHistory.thread_id == thread_id,
+        )
     )
     await db.commit()
     
-    return {"message": "已清理所有对话和操作历史"}
+    return {"message": "已清理当前未归档对话"}
 
 
 @router.post("/clear/{project_id}")
 async def clear_project_history(
     project_id: int,
+    thread_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """清理指定项目的对话/操作/缓存"""
-    from app.models.context import ConversationHistory, ActionHistory, ResultCache
+    """清理指定项目当前线程的未归档对话。"""
+    from app.models.context import ConversationHistory
     from app.api.projects import get_project_for_user
     
     await get_project_for_user(db, project_id, current_user.id, "project:read")
@@ -428,23 +449,13 @@ async def clear_project_history(
         delete(ConversationHistory).where(
             ConversationHistory.user_id == current_user.id,
             ConversationHistory.project_id == project_id,
-        )
-    )
-    await db.execute(
-        delete(ActionHistory).where(
-            ActionHistory.user_id == current_user.id,
-            ActionHistory.project_id == project_id,
-        )
-    )
-    await db.execute(
-        delete(ResultCache).where(
-            ResultCache.user_id == current_user.id,
-            ResultCache.project_id == project_id,
+            ConversationHistory.archive_id.is_(None),
+            ConversationHistory.thread_id.is_(None) if thread_id is None else ConversationHistory.thread_id == thread_id,
         )
     )
     await db.commit()
     
-    return {"message": f"已清理项目 {project_id} 的所有历史数据"}
+    return {"message": f"已清理项目 {project_id} 当前线程的未归档对话"}
 
 
 # --- Legacy Endpoints ---
@@ -476,43 +487,44 @@ class ArchiveResponse(BaseModel):
 @router.post("/archives", response_model=ArchiveResponse)
 async def create_archive(
     req: ArchiveRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     创建对话归档（异步）
     
-    1. 立即创建归档记录并删除对话历史
-    2. 后台异步生成 LLM 摘要
+    1. 立即创建归档记录并保留原始对话
+    2. 持久化 Worker 异步生成 LLM 摘要
     3. 前端轮询 /archives/{id} 获取完整结果
     """
     from app.services.context_manager import ContextManager
-    from app.core.database import AsyncSessionLocal
     
+    project = None
     if req.project_id is not None:
         from app.api.projects import get_project_for_user
-        await get_project_for_user(db, req.project_id, current_user.id, "project:read")
+        project = await get_project_for_user(db, req.project_id, current_user.id, "project:read")
 
     context_manager = ContextManager(db, current_user.id, project_id=req.project_id, thread_id=req.thread_id)
     
-    # 1. 立即创建归档占位记录并删除对话历史
     archive_id = await context_manager.create_archive_placeholder(title=req.title)
     
     if not archive_id:
         raise HTTPException(status_code=400, detail="没有可归档的对话")
-    
-    # 2. 后台异步生成 LLM 摘要
-    async def generate_summary():
-        async with AsyncSessionLocal() as async_db:
-            cm = ContextManager(async_db, current_user.id)
-            await cm.generate_archive_summary(archive_id)
-    
-    background_tasks.add_task(generate_summary)
+    await record_audit_event(
+        db,
+        event_type="conversation.archive_created",
+        resource_type="conversation_archive",
+        resource_id=archive_id,
+        actor_user_id=current_user.id,
+        organization_id=project.organization_id if project else None,
+        project_id=req.project_id,
+        details={"thread_id": req.thread_id},
+    )
+    await db.commit()
     
     return ArchiveResponse(
         archive_id=archive_id,
-        message="归档已创建，正在生成摘要...",
+        message="归档已创建，正在由后台任务生成摘要...",
         status="pending"
     )
 
@@ -559,6 +571,7 @@ async def get_archive(
 async def delete_archive(
     archive_id: int,
     project_id: Optional[int] = None,
+    permanent: bool = Query(False, description="明确确认永久删除归档和原文"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -566,12 +579,73 @@ async def delete_archive(
     from app.services.context_manager import ContextManager
     
     context_manager = ContextManager(db, current_user.id, project_id=project_id)
-    success = await context_manager.delete_archive(archive_id)
+    try:
+        success = await context_manager.delete_archive(archive_id, permanent=permanent)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     
     if not success:
         raise HTTPException(status_code=404, detail="归档不存在")
+    await record_audit_event(
+        db,
+        event_type="conversation.archive_deleted",
+        resource_type="conversation_archive",
+        resource_id=archive_id,
+        actor_user_id=current_user.id,
+        project_id=project_id,
+        details={"permanent": permanent},
+    )
+    await db.commit()
     
     return {"message": "归档已删除"}
+
+
+@router.post("/archives/{archive_id}/retry")
+async def retry_archive(
+    archive_id: int,
+    project_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.services.context_manager import ContextManager
+    context_manager = ContextManager(db, current_user.id, project_id=project_id)
+    if not await context_manager.retry_archive(archive_id):
+        raise HTTPException(status_code=400, detail="归档无法重试：可能为旧版摘要或不存在")
+    await record_audit_event(
+        db,
+        event_type="conversation.archive_retried",
+        resource_type="conversation_archive",
+        resource_id=archive_id,
+        actor_user_id=current_user.id,
+        project_id=project_id,
+    )
+    await db.commit()
+    return {"message": "归档摘要已重新加入队列", "status": "queued"}
+
+
+@router.post("/archives/{archive_id}/continue")
+async def continue_from_archive(
+    archive_id: int,
+    project_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.services.context_manager import ContextManager
+    context_manager = ContextManager(db, current_user.id, project_id=project_id)
+    result = await context_manager.continue_from_archive(archive_id)
+    if not result:
+        raise HTTPException(status_code=400, detail="归档未完成、不可接续或不存在")
+    await record_audit_event(
+        db,
+        event_type="conversation.archive_continued",
+        resource_type="conversation_archive",
+        resource_id=archive_id,
+        actor_user_id=current_user.id,
+        project_id=project_id,
+        details={"thread_id": result["thread_id"]},
+    )
+    await db.commit()
+    return {"thread_id": result["thread_id"], "message": "已创建接续线程"}
 
 
 # --- Thread Endpoints ---

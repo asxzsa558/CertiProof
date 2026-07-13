@@ -5,8 +5,9 @@
 
 import json
 import logging
+import re
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func, update
 
@@ -18,6 +19,7 @@ from app.models.context import (
     UserMemory,
     ConversationArchive,
     ConversationThread,
+    ConversationSummary,
 )
 from app.core.redaction import redact_sensitive
 
@@ -28,8 +30,11 @@ class ContextManager:
     """统一的上下文管理器"""
     
     # 上下文 token 限制
-    MAX_CONVERSATION_TOKENS = 200000  # 对话历史最大 token 数（增加到 200k）
-    HARD_TOKEN_LIMIT = 500000  # 硬限制，超过则强制归档（增加到 500k）
+    MAX_CONVERSATION_TOKENS = 200000
+    HARD_TOKEN_LIMIT = 500000
+    SUMMARY_SEGMENT_MESSAGES = 40  # 约 20 轮
+    SUMMARY_SEGMENT_TOKENS = 20000
+    ACTIVE_HISTORY_RETENTION_DAYS = 90
     MAX_ACTION_HISTORY = 200  # 最大操作历史记录数（增加到 200）
     MAX_CACHE_ENTRIES = 100  # 最大缓存条目数
     
@@ -38,6 +43,23 @@ class ContextManager:
         self.user_id = user_id
         self.project_id = project_id
         self.thread_id = thread_id
+
+    def _thread_condition(self, column):
+        """A missing thread means the legacy/default thread, never every thread."""
+        return column.is_(None) if self.thread_id is None else column == self.thread_id
+
+    def _history_conditions(self, *, include_archived: bool = False):
+        conditions = [
+            ConversationHistory.user_id == self.user_id,
+            self._thread_condition(ConversationHistory.thread_id),
+        ]
+        if self.project_id is None:
+            conditions.append(ConversationHistory.project_id.is_(None))
+        else:
+            conditions.append(ConversationHistory.project_id == self.project_id)
+        if not include_archived:
+            conditions.append(ConversationHistory.archive_id.is_(None))
+        return conditions
     
     async def build_context(self) -> Dict:
         """
@@ -69,7 +91,8 @@ class ContextManager:
             "user_memory": await self._get_user_memory(),
             "current_project": await self._get_current_project(),
             "project_assets": await self._get_project_assets(),
-            "project_archives_summary": await self.get_project_archives_summary(),
+            "thread_handoff_summary": await self.get_thread_handoff_summary(),
+            "thread_summary": await self.get_thread_summary(),
             "assessment_state": await self._get_assessment_state(),
             "history_turns": history_turns,
         }
@@ -95,8 +118,15 @@ class ContextManager:
         """获取最近 N 轮对话，用于 LLM 调用"""
         if turns <= 0:
             return []
-        # 每轮 = 1 user + 1 assistant = 2 messages
-        messages = await self._get_conversation_history(limit=turns * 2)
+        latest_summary = await self._get_latest_completed_summary()
+        query = select(ConversationHistory).where(*self._history_conditions())
+        if latest_summary:
+            query = query.where(ConversationHistory.id > latest_summary.source_end_message_id)
+        result = await self.db.execute(query.order_by(ConversationHistory.created_at.desc()).limit(turns * 2))
+        messages = [
+            {"role": h.role, "content": h.content}
+            for h in reversed(result.scalars().all())
+        ]
         # 转换为 LLM 格式
         return [
             {"role": m["role"], "content": m["content"]}
@@ -174,15 +204,7 @@ class ContextManager:
     
     async def _get_conversation_history(self, limit: int = 20) -> List[Dict]:
         """获取最近的对话历史"""
-        query = select(ConversationHistory).where(ConversationHistory.user_id == self.user_id)
-        
-        # 按项目过滤
-        if self.project_id is not None:
-            query = query.where(ConversationHistory.project_id == self.project_id)
-        
-        # 如果有 thread_id，按线程过滤
-        if self.thread_id:
-            query = query.where(ConversationHistory.thread_id == self.thread_id)
+        query = select(ConversationHistory).where(*self._history_conditions())
         
         query = query.order_by(ConversationHistory.created_at.desc()).limit(limit)
         result = await self.db.execute(query)
@@ -199,10 +221,11 @@ class ContextManager:
     
     async def _get_action_history(self, limit: int = 20) -> List[Dict]:
         """获取最近的操作历史"""
-        query = select(ActionHistory).where(ActionHistory.user_id == self.user_id)
-        
-        if self.project_id:
-            query = query.where(ActionHistory.project_id == self.project_id)
+        query = select(ActionHistory).where(
+            ActionHistory.user_id == self.user_id,
+            ActionHistory.project_id.is_(None) if self.project_id is None else ActionHistory.project_id == self.project_id,
+            self._thread_condition(ActionHistory.thread_id),
+        )
         
         result = await self.db.execute(
             query.order_by(ActionHistory.created_at.desc()).limit(limit)
@@ -345,11 +368,12 @@ class ContextManager:
         action = ActionHistory(
             user_id=self.user_id,
             project_id=self.project_id,
+            thread_id=self.thread_id,
             action_type=action_type,
             parameters=redact_sensitive(parameters),
             result=result,
             status=status,
-            completed_at=datetime.utcnow() if status in ["success", "failed"] else None,
+            completed_at=datetime.now(timezone.utc) if status in ["success", "failed"] else None,
         )
         self.db.add(action)
         await self.db.flush()
@@ -375,7 +399,7 @@ class ContextManager:
         if existing:
             # 更新现有缓存
             existing.result_data = result_data
-            existing.expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+            existing.expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
         else:
             # 创建新缓存
             cache = ResultCache(
@@ -383,7 +407,7 @@ class ContextManager:
                 project_id=self.project_id,
                 cache_key=cache_key,
                 result_data=result_data,
-                expires_at=datetime.utcnow() + timedelta(seconds=expires_in),
+                expires_at=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
             )
             self.db.add(cache)
         
@@ -397,7 +421,7 @@ class ContextManager:
         ]
         conditions.extend([
             ResultCache.cache_key == cache_key,
-            (ResultCache.expires_at > datetime.utcnow()) | (ResultCache.expires_at == None),
+            (ResultCache.expires_at > datetime.now(timezone.utc)) | (ResultCache.expires_at == None),
         ])
         result = await self.db.execute(
             select(ResultCache)
@@ -465,110 +489,89 @@ class ContextManager:
         """清理过期缓存"""
         await self.db.execute(
             delete(ResultCache).where(
-                ResultCache.expires_at < datetime.utcnow()
+                ResultCache.expires_at < datetime.now(timezone.utc)
             )
         )
         await self.db.flush()
     
     async def _compress_conversation_if_needed(self):
-        """如果对话历史过长，进行压缩"""
+        """Queue an immutable source-backed summary; never delete conversation rows."""
         result = await self.db.execute(
             select(ConversationHistory)
-            .where(ConversationHistory.user_id == self.user_id)
-            .where(ConversationHistory.project_id == self.project_id)
-            .order_by(ConversationHistory.created_at.desc())
+            .where(*self._history_conditions())
+            .order_by(ConversationHistory.id.asc())
         )
-        histories = result.scalars().all()
-        
-        total_tokens = sum(h.tokens_used or 0 for h in histories)
-        
-        if total_tokens <= self.MAX_CONVERSATION_TOKENS:
+        histories = list(result.scalars().all())
+        if not histories:
             return
-        
-        logger.info(f"Conversation history exceeds limit ({total_tokens} tokens), compressing...")
-        
-        # 广播压缩开始
-        await self._broadcast_compression_status("started", total_tokens)
-        
-        old_histories = histories[-50:] if len(histories) >= 50 else histories[:-20]
-        if not old_histories:
-            await self._broadcast_compression_status("completed", 0)
-            return
-        
-        old_histories = sorted(old_histories, key=lambda h: h.created_at)
-        
-        conversation_text = "\n".join(
-            f"{'用户' if h.role == 'user' else '助手'}: {h.content}"
-            for h in old_histories
+
+        latest = await self._get_latest_completed_summary()
+        pending = await self.db.execute(
+            select(ConversationSummary.id).where(
+                ConversationSummary.user_id == self.user_id,
+                self._thread_condition(ConversationSummary.thread_id),
+                ConversationSummary.project_id.is_(None) if self.project_id is None else ConversationSummary.project_id == self.project_id,
+                ConversationSummary.status.in_(["queued", "processing"]),
+            ).limit(1)
         )
-        
-        try:
-            from app.services.llm_service import llm_service
-            import asyncio
-            
-            summary_response = await asyncio.wait_for(
-                llm_service.chat_with_fallback(
-                    db=self.db,
-                    user_id=self.user_id,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "你是一个对话摘要助手。请将以下对话历史压缩为简洁的摘要，保留关键信息（用户需求、执行的操作、重要结果）。用中文输出，控制在 500 字以内。"
-                        },
-                        {
-                            "role": "user",
-                            "content": f"请压缩以下对话历史：\n\n{conversation_text}"
-                        }
-                    ],
-                    task_type="chat",
-                ),
-                timeout=30.0
-            )
-            summary = summary_response.get("content", "")
-        except asyncio.TimeoutError:
-            logger.warning("LLM summarization timed out (30s), using fallback")
-            summary = f"[历史对话摘要] 共 {len(old_histories)} 条对话，涉及{len(set(h.role for h in old_histories))}个角色。"
-        except Exception as e:
-            logger.warning(f"LLM summarization failed, using simple truncation: {e}")
-            summary = f"[历史对话摘要] 共 {len(old_histories)} 条对话，涉及{len(set(h.role for h in old_histories))}个角色。"
-        
-        if not summary:
-            await self._broadcast_compression_status("completed", 0)
+        if pending.scalar_one_or_none() is not None:
             return
-        
-        if self.project_id:
-            await self.add_project_memory(
-                memory_type="conversation_summary",
-                content=summary,
-                extra_data={
-                    "compressed_at": datetime.utcnow().isoformat(),
-                    "message_count": len(old_histories),
-                    "tokens_freed": sum(h.tokens_used or 0 for h in old_histories),
-                }
+
+        candidates = [h for h in histories if not latest or h.id > latest.source_end_message_id]
+        token_count = sum(h.tokens_used or 0 for h in candidates)
+        if len(candidates) < self.SUMMARY_SEGMENT_MESSAGES and token_count < self.SUMMARY_SEGMENT_TOKENS:
+            return
+
+        segment, segment_tokens = [], 0
+        for history in candidates:
+            next_tokens = segment_tokens + (history.tokens_used or 0)
+            if segment and (len(segment) >= self.SUMMARY_SEGMENT_MESSAGES or next_tokens > self.SUMMARY_SEGMENT_TOKENS):
+                break
+            segment.append(history)
+            segment_tokens = next_tokens
+
+        summary = ConversationSummary(
+            user_id=self.user_id,
+            project_id=self.project_id,
+            thread_id=self.thread_id,
+            source_start_message_id=segment[0].id,
+            source_end_message_id=segment[-1].id,
+            message_count=len(segment),
+            token_count=segment_tokens,
+            status="queued",
+        )
+        self.db.add(summary)
+        await self.db.flush()
+        await self._broadcast_compression_status("started", segment_tokens, len(segment))
+
+    async def _get_latest_completed_summary(self) -> Optional[ConversationSummary]:
+        result = await self.db.execute(
+            select(ConversationSummary)
+            .where(
+                ConversationSummary.user_id == self.user_id,
+                self._thread_condition(ConversationSummary.thread_id),
+                ConversationSummary.project_id.is_(None) if self.project_id is None else ConversationSummary.project_id == self.project_id,
+                ConversationSummary.status == "completed",
             )
-        else:
-            await self.add_user_memory(
-                memory_type="conversation_summary",
-                content=summary,
-                extra_data={
-                    "compressed_at": datetime.utcnow().isoformat(),
-                    "message_count": len(old_histories),
-                    "tokens_freed": sum(h.tokens_used or 0 for h in old_histories),
-                }
+            .order_by(ConversationSummary.source_end_message_id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_thread_summary(self) -> str:
+        result = await self.db.execute(
+            select(ConversationSummary)
+            .where(
+                ConversationSummary.user_id == self.user_id,
+                self._thread_condition(ConversationSummary.thread_id),
+                ConversationSummary.project_id.is_(None) if self.project_id is None else ConversationSummary.project_id == self.project_id,
+                ConversationSummary.status == "completed",
             )
-        
-        old_ids = [h.id for h in old_histories]
-        if old_ids:
-            await self.db.execute(
-                delete(ConversationHistory).where(ConversationHistory.id.in_(old_ids))
-            )
-            await self.db.flush()
-        
-        # 广播压缩完成
-        tokens_freed = sum(h.tokens_used or 0 for h in old_histories)
-        await self._broadcast_compression_status("completed", tokens_freed, len(old_histories))
-        
-        logger.info(f"Compressed {len(old_ids)} old conversation records")
+            .order_by(ConversationSummary.source_end_message_id.desc())
+            .limit(3)
+        )
+        summaries = list(reversed(result.scalars().all()))
+        return "\n\n".join(item.summary for item in summaries if item.summary)
     
     async def _broadcast_compression_status(self, status: str, tokens_freed: int = 0, message_count: int = 0):
         """广播压缩状态到前端"""
@@ -589,34 +592,20 @@ class ContextManager:
             logger.debug(f"Failed to broadcast compression status: {e}")
     
     async def _auto_cleanup(self):
-        """自动清理过旧的历史记录"""
-        conv_count = await self.db.execute(
-            select(func.count(ConversationHistory.id))
-            .where(ConversationHistory.user_id == self.user_id)
-            .where(ConversationHistory.project_id == self.project_id)
-        )
-        conv_total = conv_count.scalar() or 0
-        
-        # 增加阈值到 1000 条，避免过度删除
-        if conv_total > 1000:
-            excess = conv_total - 1000
-            oldest = await self.db.execute(
-                select(ConversationHistory.id)
-                .where(ConversationHistory.user_id == self.user_id)
-                .where(ConversationHistory.project_id == self.project_id)
-                .order_by(ConversationHistory.created_at.asc())
-                .limit(excess)
+        """Expire only active, unarchived chat after the explicit retention window."""
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self.ACTIVE_HISTORY_RETENTION_DAYS)
+        await self.db.execute(
+            delete(ConversationHistory).where(
+                *self._history_conditions(),
+                ConversationHistory.created_at < cutoff,
             )
-            old_ids = [row[0] for row in oldest.all()]
-            if old_ids:
-                await self.db.execute(
-                    delete(ConversationHistory).where(ConversationHistory.id.in_(old_ids))
-                )
-                logger.info(f"Auto-cleaned {len(old_ids)} old conversation records")
+        )
         
-        action_query = select(func.count(ActionHistory.id)).where(ActionHistory.user_id == self.user_id)
-        if self.project_id:
-            action_query = action_query.where(ActionHistory.project_id == self.project_id)
+        action_query = select(func.count(ActionHistory.id)).where(
+            ActionHistory.user_id == self.user_id,
+            ActionHistory.project_id.is_(None) if self.project_id is None else ActionHistory.project_id == self.project_id,
+            self._thread_condition(ActionHistory.thread_id),
+        )
         
         action_count = await self.db.execute(action_query)
         action_total = action_count.scalar() or 0
@@ -624,9 +613,11 @@ class ContextManager:
         # 增加阈值到 500 条
         if action_total > 500:
             excess = action_total - 500
-            oldest_query = select(ActionHistory.id).where(ActionHistory.user_id == self.user_id)
-            if self.project_id:
-                oldest_query = oldest_query.where(ActionHistory.project_id == self.project_id)
+            oldest_query = select(ActionHistory.id).where(
+                ActionHistory.user_id == self.user_id,
+                ActionHistory.project_id.is_(None) if self.project_id is None else ActionHistory.project_id == self.project_id,
+                self._thread_condition(ActionHistory.thread_id),
+            )
             oldest_query = oldest_query.order_by(ActionHistory.created_at.asc()).limit(excess)
             
             oldest = await self.db.execute(oldest_query)
@@ -685,165 +676,18 @@ class ContextManager:
         Returns:
             归档 ID
         """
-        # 获取当前线程（如果有）的对话历史
-        query = select(ConversationHistory).where(ConversationHistory.user_id == self.user_id)
-        if self.project_id is not None:
-            query = query.where(ConversationHistory.project_id == self.project_id)
-        if self.thread_id:
-            query = query.where(ConversationHistory.thread_id == self.thread_id)
-        query = query.order_by(ConversationHistory.created_at.asc())
-        
-        result = await self.db.execute(query)
-        histories = result.scalars().all()
-        
-        if not histories:
-            return None
-        
-        # 获取操作历史（用于提取任务状态）
-        action_query = select(ActionHistory).where(ActionHistory.user_id == self.user_id)
-        if self.project_id:
-            action_query = action_query.where(ActionHistory.project_id == self.project_id)
-        action_query = action_query.order_by(ActionHistory.created_at.desc()).limit(50)
-        
-        action_result = await self.db.execute(action_query)
-        actions = action_result.scalars().all()
-        
-        # 计算统计信息
-        total_tokens = sum(h.tokens_used or 0 for h in histories)
-        message_count = len(histories)
-        
-        # 构建 LLM 输入：对话历史 + 操作历史
-        conversation_text = "\n".join(
-            f"{'用户' if h.role == 'user' else '助手'}: {h.content}"
-            for h in histories[-30:]  # 只取最近 30 条，避免过长
-        )
-        
-        actions_text = "\n".join(
-            f"- {a.action_type}: {a.status} ({self._summarize_result(a.result)})"
-            for a in actions[:20]
-        ) if actions else "无操作记录"
-        
-        # 用 LLM 生成结构化交接摘要
-        completed_tasks = []
-        current_task = None
-        interrupt_point = ""
-        key_findings = []
-        summary = ""
-        
-        try:
-            from app.services.llm_service import llm_service
-            import asyncio
-            
-            llm_response = await asyncio.wait_for(
-                llm_service.chat_with_fallback(
-                    db=self.db,
-                    user_id=self.user_id,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": """你是一个任务交接摘要助手。根据对话历史，生成简洁的交接摘要，让新线程能接续工作。
-
-返回 JSON 格式：
-{
-    "summary": "一句话概括当前工作状态",
-    "completed_tasks": [{"task": "已完成的任务名", "result": "关键结果"}],
-    "current_task": {"task": "进行中的任务名", "progress": "当前进度"},
-    "interrupt_point": "从哪里继续（具体描述）",
-    "key_findings": ["关键发现1", "关键发现2"]
-}
-
-注意：
-- 只保留关键信息，不要冗余描述
-- completed_tasks 最多 5 个
-- key_findings 最多 5 个
-- 如果没有进行中的任务，current_task 为 null"""
-                        },
-                        {
-                            "role": "user",
-                            "content": f"对话历史：\n{conversation_text}\n\n操作历史：\n{actions_text}"
-                        }
-                    ],
-                    task_type="chat",
-                ),
-                timeout=30.0
-            )
-            
-            content = llm_response.get("content", "")
-            # 清理 <think> 标签
-            import re
-            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
-            
-            # 提取 JSON
-            json_match = re.search(r'\{[\s\S]*\}', content)
-            if json_match:
-                parsed = json.loads(json_match.group())
-                summary = parsed.get("summary", "")
-                completed_tasks = parsed.get("completed_tasks", [])
-                current_task = parsed.get("current_task")
-                interrupt_point = parsed.get("interrupt_point", "")
-                key_findings = parsed.get("key_findings", [])
-        except asyncio.TimeoutError:
-            logger.warning("LLM archive summary timed out (30s), using fallback")
-            # Fallback: 简单截取
-            first_msg = histories[0].content[:50] if histories else ""
-            last_msg = histories[-1].content[:50] if histories else ""
-            summary = f"从「{first_msg}...」到「{last_msg}...」共 {message_count} 条对话"
-        except Exception as e:
-            logger.warning(f"LLM archive summary failed, using fallback: {e}")
-            # Fallback: 简单截取
-            first_msg = histories[0].content[:50] if histories else ""
-            last_msg = histories[-1].content[:50] if histories else ""
-            summary = f"从「{first_msg}...」到「{last_msg}...」共 {message_count} 条对话"
-        
-        # 生成标题
-        if not title:
-            title = f"对话归档 {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
-        
-        # 创建归档记录
-        archive = ConversationArchive(
-            user_id=self.user_id,
-            project_id=self.project_id,
-            thread_id=self.thread_id,
-            title=title,
-            summary=summary,
-            message_count=message_count,
-            token_count=total_tokens,
-            completed_tasks=completed_tasks,
-            current_task=current_task,
-            interrupt_point=interrupt_point,
-            key_findings=key_findings,
-        )
-        self.db.add(archive)
-        await self.db.flush()
-        
-        # 删除已归档的对话历史
-        history_ids = [h.id for h in histories]
-        if history_ids:
-            await self.db.execute(
-                delete(ConversationHistory).where(ConversationHistory.id.in_(history_ids))
-            )
-        
-        await self.db.commit()
-        logger.info(f"Archived {message_count} conversations with structured summary")
-        
-        return archive.id
+        return await self.create_archive_placeholder(title)
     
     async def create_archive_placeholder(self, title: str = None) -> Optional[int]:
         """
-        创建归档占位记录并删除对话历史（同步部分）
+        创建归档记录并逻辑归档原始对话（同步部分）
         
         用于异步归档流程的第一步：立即返回 archive_id，后台再生成摘要。
         
         Returns:
             归档 ID
         """
-        # 获取当前线程（如果有）的对话历史
-        query = select(ConversationHistory).where(ConversationHistory.user_id == self.user_id)
-        if self.project_id is not None:
-            query = query.where(ConversationHistory.project_id == self.project_id)
-        if self.thread_id:
-            query = query.where(ConversationHistory.thread_id == self.thread_id)
-        query = query.order_by(ConversationHistory.created_at.asc())
+        query = select(ConversationHistory).where(*self._history_conditions()).order_by(ConversationHistory.created_at.asc())
         
         result = await self.db.execute(query)
         histories = result.scalars().all()
@@ -857,7 +701,7 @@ class ContextManager:
         
         # 生成简单标题
         if not title:
-            title = f"对话归档 {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+            title = f"对话归档 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
         
         # 创建归档占位记录（无摘要）
         archive = ConversationArchive(
@@ -865,22 +709,27 @@ class ContextManager:
             project_id=self.project_id,
             thread_id=self.thread_id,
             title=title,
-            summary="",  # 空摘要，稍后由 generate_archive_summary 填充
+            summary="",
             message_count=message_count,
             token_count=total_tokens,
+            status="queued",
+            source_message_ids=[history.id for history in histories],
+            related_refs=self._collect_message_refs(histories),
         )
         self.db.add(archive)
         await self.db.flush()
         
-        # 删除已归档的对话历史
+        # Preserve the full source transcript. Active history queries exclude it.
         history_ids = [h.id for h in histories]
         if history_ids:
             await self.db.execute(
-                delete(ConversationHistory).where(ConversationHistory.id.in_(history_ids))
+                update(ConversationHistory)
+                .where(ConversationHistory.id.in_(history_ids))
+                .values(archive_id=archive.id, archived_at=datetime.now(timezone.utc))
             )
         
         await self.db.commit()
-        logger.info(f"Created archive placeholder {archive.id} with {message_count} messages")
+        logger.info("Queued archive %s with %s source messages", archive.id, message_count)
         
         return archive.id
     
@@ -891,110 +740,194 @@ class ContextManager:
         Args:
             archive_id: 归档 ID
         """
-        # 获取归档记录
-        result = await self.db.execute(
-            select(ConversationArchive).where(ConversationArchive.id == archive_id)
+        return await self._generate_archive_summary_from_sources(archive_id)
+
+    @staticmethod
+    def _collect_message_refs(histories: List[ConversationHistory]) -> Dict[str, List[int]]:
+        refs = {"task_ids": [], "scan_task_ids": [], "finding_ids": [], "evidence_ids": []}
+        key_map = {
+            "task_id": "task_ids",
+            "scan_task_id": "scan_task_ids",
+            "finding_id": "finding_ids",
+            "evidence_id": "evidence_ids",
+        }
+
+        def collect(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    target = key_map.get(str(key))
+                    if target and isinstance(item, int) and item not in refs[target]:
+                        refs[target].append(item)
+                    collect(item)
+            elif isinstance(value, list):
+                for item in value:
+                    collect(item)
+
+        for history in histories:
+            collect(history.context_snapshot or {})
+        return {key: value for key, value in refs.items() if value}
+
+    @staticmethod
+    def _redact_summary_text(value: str) -> str:
+        value = re.sub(
+            r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key|private[_-]?key|key[_-]?file)\b\s*[:=]\s*[^\s,;]+",
+            r"\1=[REDACTED]",
+            value or "",
         )
-        archive = result.scalar_one_or_none()
-        
+        return re.sub(r"\bsk-[A-Za-z0-9_-]{12,}\b", "[REDACTED]", value)
+
+    @staticmethod
+    def _format_messages_for_summary(histories: List[ConversationHistory], limit: int = 80) -> str:
+        selected = histories[-limit:]
+        return "\n".join(
+            f"{'用户' if history.role == 'user' else '助手'}: {ContextManager._redact_summary_text(history.content)}"
+            for history in selected
+        )
+
+    async def _generate_archive_summary_from_sources(self, archive_id: int) -> bool:
+        archive = (await self.db.execute(
+            select(ConversationArchive).where(
+                ConversationArchive.id == archive_id,
+                ConversationArchive.user_id == self.user_id,
+                ConversationArchive.project_id.is_(None) if self.project_id is None else ConversationArchive.project_id == self.project_id,
+            )
+        )).scalar_one_or_none()
         if not archive:
-            logger.error(f"Archive {archive_id} not found")
-            return
-        
-        # 获取操作历史（用于提取任务状态）
-        action_query = select(ActionHistory).where(ActionHistory.user_id == self.user_id)
-        if archive.project_id:
-            action_query = action_query.where(ActionHistory.project_id == archive.project_id)
-        action_query = action_query.order_by(ActionHistory.created_at.desc()).limit(50)
-        
-        action_result = await self.db.execute(action_query)
-        actions = action_result.scalars().all()
-        
-        actions_text = "\n".join(
-            f"- {a.action_type}: {a.status} ({self._summarize_result(a.result)})"
-            for a in actions[:20]
-        ) if actions else "无操作记录"
-        
-        # 构建 LLM 输入
-        # 注意：对话历史已被删除，只能从操作历史推断
-        conversation_text = f"（对话历史已归档，共 {archive.message_count} 条消息）\n\n操作历史：\n{actions_text}"
-        
-        # 用 LLM 生成结构化交接摘要
-        completed_tasks = []
-        current_task = None
-        interrupt_point = ""
-        key_findings = []
-        summary = ""
-        
+            return False
+        if archive.legacy_summary_only:
+            archive.status = "failed"
+            archive.error_message = "历史归档没有保留原始对话，无法重新生成摘要。"
+            await self.db.commit()
+            return False
+
+        histories = list((await self.db.execute(
+            select(ConversationHistory)
+            .where(
+                ConversationHistory.archive_id == archive.id,
+                ConversationHistory.user_id == self.user_id,
+                ConversationHistory.project_id.is_(None) if self.project_id is None else ConversationHistory.project_id == self.project_id,
+            )
+            .order_by(ConversationHistory.created_at.asc())
+        )).scalars().all())
+        if not histories:
+            archive.status = "failed"
+            archive.error_message = "归档原始对话不存在，未生成摘要。"
+            await self.db.commit()
+            return False
+
         try:
             from app.services.llm_service import llm_service
             import asyncio
-            
-            llm_response = await asyncio.wait_for(
+
+            response = await asyncio.wait_for(
                 llm_service.chat_with_fallback(
                     db=self.db,
                     user_id=self.user_id,
                     messages=[
                         {
                             "role": "system",
-                            "content": """你是一个任务交接摘要助手。根据操作历史，生成简洁的交接摘要，让新线程能接续工作。
-
-返回 JSON 格式：
-{
-    "summary": "一句话概括当前工作状态",
-    "completed_tasks": [{"task": "已完成的任务名", "result": "关键结果"}],
-    "current_task": {"task": "进行中的任务名", "progress": "当前进度"},
-    "interrupt_point": "从哪里继续（具体描述）",
-    "key_findings": ["关键发现1", "关键发现2"]
-}
-
-注意：
-- 只保留关键信息，不要冗余描述
-- completed_tasks 最多 5 个
-- key_findings 最多 5 个
-- 如果没有进行中的任务，current_task 为 null"""
+                            "content": """你是任务交接摘要助手。仅根据提供的原始对话生成 JSON：
+{"summary":"一句话状态","completed_tasks":[{"task":"任务","result":"结果"}],"current_task":{"task":"任务","progress":"进度"},"interrupt_point":"下一步","key_findings":["发现"]}
+不要补造事实；completed_tasks 和 key_findings 最多 5 项；无进行中任务时 current_task 为 null；不得输出密码、令牌、密钥或其他凭据。""",
                         },
-                        {
-                            "role": "user",
-                            "content": conversation_text
-                        }
+                        {"role": "user", "content": self._format_messages_for_summary(histories)},
                     ],
                     task_type="chat",
                 ),
-                timeout=30.0
+                timeout=60.0,
             )
-            
-            content = llm_response.get("content", "")
-            # 清理 <think> 标签
-            import re
-            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
-            
-            # 提取 JSON
-            json_match = re.search(r'\{[\s\S]*\}', content)
-            if json_match:
-                parsed = json.loads(json_match.group())
-                summary = parsed.get("summary", "")
-                completed_tasks = parsed.get("completed_tasks", [])
-                current_task = parsed.get("current_task")
-                interrupt_point = parsed.get("interrupt_point", "")
-                key_findings = parsed.get("key_findings", [])
-        except asyncio.TimeoutError:
-            logger.warning(f"Archive summary LLM timed out (30s) for archive {archive_id}")
-            summary = f"归档包含 {archive.message_count} 条对话，请查看操作历史了解详情。"
-        except Exception as e:
-            logger.warning(f"Archive summary LLM failed for archive {archive_id}: {e}")
-            summary = f"归档包含 {archive.message_count} 条对话，请查看操作历史了解详情。"
-        
-        # 更新归档记录
+            content = re.sub(r"<think>.*?</think>", "", response.get("content", ""), flags=re.DOTALL).strip()
+            match = re.search(r"\{[\s\S]*\}", content)
+            parsed = json.loads(match.group()) if match else {}
+            summary = self._redact_summary_text(str(parsed.get("summary") or "").strip())
+            if not summary:
+                raise ValueError("摘要服务未返回有效摘要")
+        except Exception as exc:
+            archive.status = "failed"
+            archive.error_message = f"摘要生成失败：{str(exc)[:500]}"
+            archive.lease_owner = None
+            archive.lease_expires_at = None
+            await self.db.commit()
+            logger.warning("Archive %s summary failed: %s", archive_id, exc)
+            return False
+
         archive.summary = summary
-        archive.completed_tasks = completed_tasks
-        archive.current_task = current_task
-        archive.interrupt_point = interrupt_point
-        archive.key_findings = key_findings
-        
+        archive.completed_tasks = redact_sensitive(parsed.get("completed_tasks") or [])[:5]
+        archive.current_task = redact_sensitive(parsed.get("current_task"))
+        archive.interrupt_point = self._redact_summary_text(str(parsed.get("interrupt_point") or ""))
+        archive.key_findings = [self._redact_summary_text(str(item)) for item in (parsed.get("key_findings") or [])[:5]]
+        archive.status = "completed"
+        archive.error_message = None
+        archive.summary_generated_at = datetime.now(timezone.utc)
+        archive.lease_owner = None
+        archive.lease_expires_at = None
         await self.db.commit()
-        logger.info(f"Generated archive summary for archive {archive_id}")
-    
+        return True
+
+    async def generate_conversation_summary(self, summary_id: int) -> bool:
+        summary = (await self.db.execute(
+            select(ConversationSummary).where(
+                ConversationSummary.id == summary_id,
+                ConversationSummary.user_id == self.user_id,
+            )
+        )).scalar_one_or_none()
+        if not summary:
+            return False
+        histories = list((await self.db.execute(
+            select(ConversationHistory)
+            .where(
+                ConversationHistory.user_id == summary.user_id,
+                ConversationHistory.project_id.is_(None) if self.project_id is None else ConversationHistory.project_id == self.project_id,
+                ConversationHistory.id >= summary.source_start_message_id,
+                ConversationHistory.id <= summary.source_end_message_id,
+                ConversationHistory.archive_id.is_(None),
+            )
+            .order_by(ConversationHistory.id.asc())
+        )).scalars().all())
+        if len(histories) != summary.message_count:
+            summary.status = "failed"
+            summary.error_message = "分段原文已变化，未生成摘要。"
+            summary.lease_owner = None
+            summary.lease_expires_at = None
+            await self.db.commit()
+            return False
+        try:
+            from app.services.llm_service import llm_service
+            import asyncio
+
+            response = await asyncio.wait_for(
+                llm_service.chat_with_fallback(
+                    db=self.db,
+                    user_id=self.user_id,
+                    messages=[
+                        {"role": "system", "content": "将以下同一线程的原始对话压缩为不超过 500 字的中文事实摘要。不得补造事实，且不得保留密码、令牌或密钥。"},
+                        {"role": "user", "content": self._format_messages_for_summary(histories, limit=self.SUMMARY_SEGMENT_MESSAGES)},
+                    ],
+                    task_type="chat",
+                ),
+                timeout=60.0,
+            )
+            content = self._redact_summary_text(str(response.get("content") or "").strip())
+            if not content:
+                raise ValueError("摘要服务未返回内容")
+        except Exception as exc:
+            summary.status = "failed"
+            summary.error_message = f"分段摘要失败：{str(exc)[:500]}"
+            summary.lease_owner = None
+            summary.lease_expires_at = None
+            await self.db.commit()
+            return False
+
+        summary.summary = content[:4000]
+        summary.status = "completed"
+        summary.error_message = None
+        summary.completed_at = datetime.now(timezone.utc)
+        summary.lease_owner = None
+        summary.lease_expires_at = None
+        await self.db.commit()
+        await self._broadcast_compression_status("completed", summary.token_count, summary.message_count)
+        return True
+
     async def list_archives(self, limit: int = 20) -> List[Dict]:
         """列出用户的归档"""
         query = select(ConversationArchive).where(ConversationArchive.user_id == self.user_id)
@@ -1017,24 +950,45 @@ class ContextManager:
                 "interrupt_point": a.interrupt_point or "",
                 "key_findings": a.key_findings or [],
                 "thread_id": a.thread_id,
+                "status": a.status,
+                "error_message": a.error_message,
+                "legacy_summary_only": bool(a.legacy_summary_only),
+                "has_raw_messages": not bool(a.legacy_summary_only),
                 "archived_at": a.archived_at.isoformat() if a.archived_at else None,
             }
             for a in archives
         ]
     
-    async def delete_archive(self, archive_id: int) -> bool:
-        """删除归档"""
-        query = delete(ConversationArchive).where(
+    async def delete_archive(self, archive_id: int, *, permanent: bool = False) -> bool:
+        """Permanently remove an archive only after explicit confirmation."""
+        if not permanent:
+            raise ValueError("永久删除归档必须明确确认")
+        query = select(ConversationArchive).where(
             ConversationArchive.id == archive_id,
-            ConversationArchive.user_id == self.user_id
+            ConversationArchive.user_id == self.user_id,
         )
-        if self.project_id is not None:
+        if self.project_id is None:
+            query = query.where(ConversationArchive.project_id.is_(None))
+        else:
             query = query.where(ConversationArchive.project_id == self.project_id)
-        result = await self.db.execute(
-            query
-        )
+        archive = (await self.db.execute(query)).scalar_one_or_none()
+        if not archive:
+            return False
+
+        source_ids = list(archive.source_message_ids or [])
+        if source_ids:
+            await self.db.execute(delete(ConversationSummary).where(
+                ConversationSummary.user_id == self.user_id,
+                ConversationSummary.source_start_message_id <= max(source_ids),
+                ConversationSummary.source_end_message_id >= min(source_ids),
+            ))
+        await self.db.execute(update(ConversationThread).where(
+            ConversationThread.source_archive_id == archive.id
+        ).values(source_archive_id=None))
+        await self.db.execute(delete(ConversationHistory).where(ConversationHistory.archive_id == archive.id))
+        await self.db.delete(archive)
         await self.db.commit()
-        return result.rowcount > 0
+        return True
     
     async def get_archive(self, archive_id: int) -> Optional[Dict]:
         """获取单个归档的完整信息"""
@@ -1062,48 +1016,66 @@ class ContextManager:
             "interrupt_point": a.interrupt_point or "",
             "key_findings": a.key_findings or [],
             "thread_id": a.thread_id,
+            "status": a.status,
+            "error_message": a.error_message,
+            "legacy_summary_only": bool(a.legacy_summary_only),
+            "related_refs": a.related_refs or {},
+            "messages": [
+                {
+                    "id": history.id,
+                    "role": history.role,
+                    "content": history.content,
+                    "created_at": history.created_at.isoformat() if history.created_at else None,
+                }
+                for history in (await self.db.execute(
+                    select(ConversationHistory)
+                    .where(ConversationHistory.archive_id == a.id)
+                    .order_by(ConversationHistory.created_at.asc())
+                )).scalars().all()
+            ],
             "archived_at": a.archived_at.isoformat() if a.archived_at else None,
         }
-    
-    async def get_project_archives_summary(self) -> str:
-        """获取项目归档摘要（用于注入 AI 上下文）"""
-        if not self.project_id:
-            return ""
-        
-        result = await self.db.execute(
-            select(ConversationArchive)
-            .where(ConversationArchive.project_id == self.project_id)
-            .order_by(ConversationArchive.archived_at.desc())
-            .limit(3)
+
+    async def retry_archive(self, archive_id: int) -> bool:
+        query = select(ConversationArchive).where(
+            ConversationArchive.id == archive_id,
+            ConversationArchive.user_id == self.user_id,
         )
-        archives = result.scalars().all()
-        
-        if not archives:
+        query = query.where(ConversationArchive.project_id.is_(None) if self.project_id is None else ConversationArchive.project_id == self.project_id)
+        archive = (await self.db.execute(query)).scalar_one_or_none()
+        if not archive or archive.legacy_summary_only:
+            return False
+        archive.status = "queued"
+        archive.error_message = None
+        archive.lease_owner = None
+        archive.lease_expires_at = None
+        await self.db.commit()
+        return True
+
+    async def get_thread_handoff_summary(self) -> str:
+        """Only expose a source archive for this thread, never unrelated project history."""
+        if self.thread_id is None:
             return ""
-        
-        parts = []
-        for a in archives:
-            lines = [f"【{a.title}】{a.summary}"]
-            if a.completed_tasks:
-                tasks_str = "; ".join(
-                    f"{t.get('task', '')}({t.get('result', '')})" 
-                    for t in a.completed_tasks[:3]
-                )
-                lines.append(f"  已完成: {tasks_str}")
-            if a.current_task:
-                ct = a.current_task
-                lines.append(f"  进行中: {ct.get('task', '')} - {ct.get('progress', '')}")
-            if a.interrupt_point:
-                lines.append(f"  中断点: {a.interrupt_point}")
-            if a.key_findings:
-                lines.append(f"  关键发现: {', '.join(a.key_findings[:3])}")
-            parts.append("\n".join(lines))
-        
-        return "\n\n".join(parts)
+        thread = (await self.db.execute(select(ConversationThread).where(
+            ConversationThread.id == self.thread_id,
+            ConversationThread.user_id == self.user_id,
+        ))).scalar_one_or_none()
+        if not thread:
+            return ""
+        query = select(ConversationArchive).where(
+            ConversationArchive.user_id == self.user_id,
+            ConversationArchive.status == "completed",
+        )
+        if thread.source_archive_id:
+            query = query.where(ConversationArchive.id == thread.source_archive_id)
+        else:
+            query = query.where(ConversationArchive.thread_id == thread.id)
+        archive = (await self.db.execute(query.order_by(ConversationArchive.archived_at.desc()).limit(1))).scalar_one_or_none()
+        return archive.summary if archive and archive.summary else ""
     
     # ==================== 线程管理 ====================
     
-    async def create_thread(self, title: str = None, parent_thread_id: int = None) -> int:
+    async def create_thread(self, title: str = None, parent_thread_id: int = None, source_archive_id: int = None) -> int:
         """
         创建新的对话线程
         
@@ -1117,8 +1089,9 @@ class ContextManager:
         thread = ConversationThread(
             user_id=self.user_id,
             project_id=self.project_id,
-            title=title or f"对话 {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            title=title or f"对话 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
             parent_thread_id=parent_thread_id,
+            source_archive_id=source_archive_id,
             is_active=True,
         )
         self.db.add(thread)
@@ -1130,7 +1103,10 @@ class ContextManager:
     
     async def list_threads(self, limit: int = 20) -> List[Dict]:
         """列出用户的线程"""
-        query = select(ConversationThread).where(ConversationThread.user_id == self.user_id)
+        query = select(ConversationThread).where(
+            ConversationThread.user_id == self.user_id,
+            ConversationThread.deleted_at.is_(None),
+        )
         if self.project_id is not None:
             query = query.where(ConversationThread.project_id == self.project_id)
         result = await self.db.execute(
@@ -1145,6 +1121,7 @@ class ContextManager:
                 "id": t.id,
                 "title": t.title,
                 "parent_thread_id": t.parent_thread_id,
+                "source_archive_id": t.source_archive_id,
                 "is_active": t.is_active,
                 "is_archived": t.is_archived,
                 "created_at": t.created_at.isoformat() if t.created_at else None,
@@ -1157,7 +1134,8 @@ class ContextManager:
         """获取线程详情"""
         query = select(ConversationThread).where(
             ConversationThread.id == thread_id,
-            ConversationThread.user_id == self.user_id
+            ConversationThread.user_id == self.user_id,
+            ConversationThread.deleted_at.is_(None),
         )
         if self.project_id is not None:
             query = query.where(ConversationThread.project_id == self.project_id)
@@ -1173,6 +1151,7 @@ class ContextManager:
             "id": thread.id,
             "title": thread.title,
             "parent_thread_id": thread.parent_thread_id,
+            "source_archive_id": thread.source_archive_id,
             "is_active": thread.is_active,
             "is_archived": thread.is_archived,
             "created_at": thread.created_at.isoformat() if thread.created_at else None,
@@ -1180,16 +1159,15 @@ class ContextManager:
         }
     
     async def delete_thread(self, thread_id: int) -> bool:
-        """删除线程"""
-        query = delete(ConversationThread).where(
+        """Soft-delete a thread without destroying its archive or transcripts."""
+        query = update(ConversationThread).where(
             ConversationThread.id == thread_id,
-            ConversationThread.user_id == self.user_id
+            ConversationThread.user_id == self.user_id,
+            ConversationThread.deleted_at.is_(None),
         )
         if self.project_id is not None:
             query = query.where(ConversationThread.project_id == self.project_id)
-        result = await self.db.execute(
-            query
-        )
+        result = await self.db.execute(query.values(is_active=False, deleted_at=datetime.now(timezone.utc)))
         await self.db.commit()
         return result.rowcount > 0
     
@@ -1209,7 +1187,8 @@ class ContextManager:
             select(ConversationHistory)
             .where(
                 ConversationHistory.thread_id == thread_id,
-                ConversationHistory.user_id == self.user_id
+                ConversationHistory.user_id == self.user_id,
+                ConversationHistory.archive_id.is_(None),
             )
             .order_by(ConversationHistory.created_at.asc())
         )
@@ -1225,16 +1204,15 @@ class ContextManager:
             for h in histories
         ]
         
-        # 获取该线程的归档摘要（如果有）
-        archive_result = await self.db.execute(
-            select(ConversationArchive)
-            .where(
-                ConversationArchive.thread_id == thread_id,
-                ConversationArchive.user_id == self.user_id
-            )
-            .order_by(ConversationArchive.archived_at.desc())
-            .limit(1)
+        archive_query = select(ConversationArchive).where(
+            ConversationArchive.user_id == self.user_id,
+            ConversationArchive.status == "completed",
         )
+        if thread.get("source_archive_id"):
+            archive_query = archive_query.where(ConversationArchive.id == thread["source_archive_id"])
+        else:
+            archive_query = archive_query.where(ConversationArchive.thread_id == thread_id)
+        archive_result = await self.db.execute(archive_query.order_by(ConversationArchive.archived_at.desc()).limit(1))
         archive = archive_result.scalar_one_or_none()
         
         return {
@@ -1243,6 +1221,23 @@ class ContextManager:
             "archive_summary": archive.summary if archive else None,
             "message_count": len(histories),
         }
+
+    async def continue_from_archive(self, archive_id: int) -> Optional[Dict]:
+        query = select(ConversationArchive).where(
+            ConversationArchive.id == archive_id,
+            ConversationArchive.user_id == self.user_id,
+            ConversationArchive.status == "completed",
+        )
+        query = query.where(ConversationArchive.project_id.is_(None) if self.project_id is None else ConversationArchive.project_id == self.project_id)
+        archive = (await self.db.execute(query)).scalar_one_or_none()
+        if not archive:
+            return None
+        thread_id = await self.create_thread(
+            title=f"接续: {archive.title}",
+            parent_thread_id=archive.thread_id,
+            source_archive_id=archive.id,
+        )
+        return {"thread_id": thread_id, "archive_id": archive.id, "summary": archive.summary}
 
 
 # 全局单例工厂函数

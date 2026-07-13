@@ -39,6 +39,8 @@ DEFAULT_TCP_VERIFY_PORTS = [
     1521, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 8888, 27017,
 ]
 HIGH_RISK_PORT_RANGE = ",".join(str(port) for port in DEFAULT_TCP_VERIFY_PORTS)
+MAX_NMAP_HOST_TIMEOUT = 180
+MAX_COMMAND_TIMEOUT = 300
 
 COMMON_SERVICES = {
     21: "ftp",
@@ -145,7 +147,7 @@ async def nmap_scan(params: Dict[str, Any], progress_callback: Optional[callable
     if str(port_range).lower() in {"high-risk", "high_risk", "critical"}:
         port_range = HIGH_RISK_PORT_RANGE
     service_detection = params.get("service_detection", False)  # 默认禁用服务检测以提高速度
-    host_timeout = params.get("host_timeout", 600)  # 主机超时600秒（全端口扫描需要更长时间）
+    host_timeout = max(15, min(int(params.get("host_timeout", 120)), MAX_NMAP_HOST_TIMEOUT))
     
     cmd = [
         "nmap",
@@ -588,7 +590,8 @@ async def nuclei_scan(params: Dict[str, Any]) -> Dict[str, Any]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=600)
+        timeout = max(30, min(int(params.get("timeout", 180)), MAX_COMMAND_TIMEOUT))
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         output = stdout.decode("utf-8", errors="replace")
         stderr_text = stderr.decode("utf-8", errors="replace").strip()
@@ -647,7 +650,30 @@ async def nuclei_scan(params: Dict[str, Any]) -> Dict[str, Any]:
             },
         }
     except asyncio.TimeoutError:
-        raise ValueError("nuclei scan timeout")
+        if "process" in locals() and process.returncode is None:
+            process.kill()
+            await process.wait()
+        duration_ms = int((time.time() - start_time) * 1000)
+        return {
+            "tool": "nuclei_scan",
+            "version": "1.0",
+            "status": "failed",
+            "error": f"nuclei 扫描超过 {timeout} 秒仍未完成，已停止；可缩小目标范围或提高 timeout 后重试",
+            "data": {
+                "target": target,
+                "findings": [],
+                "total_findings": 0,
+                "scan_completed": False,
+                "templates": templates,
+                "severity_filter": severity,
+                "tool_error": "nuclei scan timeout",
+            },
+            "metadata": {
+                "duration_ms": duration_ms,
+                "scan_time": datetime.utcnow().isoformat(),
+                "timeout_seconds": timeout,
+            },
+        }
     except Exception as e:
         raise ValueError(f"nuclei scan error: {e}")
 
@@ -668,33 +694,32 @@ async def hydra_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
     
     service = params.get("service", "ssh")
     port = params.get("port", 22)
-    usernames = params.get("usernames", COMMON_USERNAMES)
-    passwords = params.get("passwords", COMMON_PASSWORDS)
-    max_attempts = params.get("max_attempts", 3)
+    usernames = [str(value) for value in (params.get("usernames") or COMMON_USERNAMES)]
+    passwords = [str(value) for value in (params.get("passwords") or COMMON_PASSWORDS)]
+    max_attempts = max(1, min(int(params.get("max_attempts", 48)), 100))
+    credentials = [
+        (username, password)
+        for username in usernames
+        for password in passwords
+    ][:max_attempts]
+    if not credentials:
+        raise ValueError("至少提供一个用户名和密码组合")
     
     # 写入临时文件
-    user_file = None
-    pass_file = None
+    credential_file = None
     output_file = None
     
     try:
-        # 创建用户名文件
-        user_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt')
-        user_file.write('\n'.join(usernames))
-        user_file.close()
-        
-        # 创建密码文件
-        pass_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt')
-        pass_file.write('\n'.join(passwords))
-        pass_file.close()
+        credential_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt')
+        credential_file.write('\n'.join(f"{username}:{password}" for username, password in credentials))
+        credential_file.close()
         output_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt')
         output_file.close()
         
         # 构建 hydra 命令（批量模式）
         cmd = [
             "hydra",
-            "-L", user_file.name,
-            "-P", pass_file.name,
+            "-C", credential_file.name,
             "-s", str(port),
             "-t", "2",           # 2 个并发线程（减少以避免触发防火墙）
             "-u",                # 每个用户找到密码后停止
@@ -712,7 +737,8 @@ async def hydra_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
             stderr=asyncio.subprocess.PIPE,
         )
         
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=600)
+        timeout = max(30, min(int(params.get("timeout", 180)), MAX_COMMAND_TIMEOUT))
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         output = stdout.decode("utf-8", errors="replace")
         stderr_output = stderr.decode("utf-8", errors="replace")
@@ -781,9 +807,9 @@ async def hydra_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
                 "service": service,
                 "port": port,
                 "found": found,
-                "tested_users": len(usernames),
-                "tested_passwords": len(passwords),
-                "total_combinations": len(usernames) * len(passwords),
+                "tested_users": len({username for username, _ in credentials}),
+                "tested_passwords": len({password for _, password in credentials}),
+                "total_combinations": len(credentials),
                 "scan_completed": scan_completed,
                 "tool_error": tool_error,
             },
@@ -796,10 +822,8 @@ async def hydra_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
         
     finally:
         # 清理临时文件
-        if user_file and os.path.exists(user_file.name):
-            os.remove(user_file.name)
-        if pass_file and os.path.exists(pass_file.name):
-            os.remove(pass_file.name)
+        if credential_file and os.path.exists(credential_file.name):
+            os.remove(credential_file.name)
         if output_file and os.path.exists(output_file.name):
             os.remove(output_file.name)
 

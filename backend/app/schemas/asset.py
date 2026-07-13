@@ -18,6 +18,10 @@ class AssetVerify(BaseModel):
     verification_method: VerificationMethod
 
 
+class AssetScopeConfirmation(BaseModel):
+    confirmed: bool
+
+
 class AssetResponse(AssetBase):
     id: int
     project_id: int
@@ -28,6 +32,8 @@ class AssetResponse(AssetBase):
     created_at: datetime
     updated_at: datetime
     verified_at: Optional[datetime] = None
+    scope_confirmed_by: Optional[int] = None
+    scope_confirmed_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
@@ -41,6 +47,7 @@ class AssetListResponse(BaseModel):
     verification_status: VerificationStatus
     is_active: bool
     created_at: datetime
+    scope_confirmed_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True

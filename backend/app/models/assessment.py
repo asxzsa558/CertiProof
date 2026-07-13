@@ -170,6 +170,8 @@ class TaskInstance(Base):
     # 执行结果
     result = Column(JSON)  # 任务结果
     evidence_ids = Column(JSON)  # 关联的证据ID列表
+    lease_owner = Column(String(128), nullable=True, index=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     
     # 时间
     estimated_hours = Column(Float)  # 预估工时

@@ -7,7 +7,7 @@ services:
     container_name: certiproof-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-certiproof}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-certiproof}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-certiproof}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -56,9 +56,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certiproof}:${POSTGRES_PASSWORD:-certiproof}@db:5432/${POSTGRES_DB:-certiproof}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certiproof}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-certiproof}
       REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: ${DEBUG:-false}
       MCP_GATEWAY_URL: http://mcp-gateway:9000
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       TASK_EXECUTION_MODE: ${TASK_EXECUTION_MODE:-worker}
@@ -67,13 +69,30 @@ services:
       - ./reference:/reference
       - uploads_data:/app/uploads
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       mcp-gateway:
         condition: service_started
     restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.migrate"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certiproof}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-certiproof}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: ${DEBUG:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
     networks:
       - certiproof-net
 
@@ -85,9 +104,11 @@ services:
     container_name: certiproof-worker
     command: ["python", "-m", "app.worker"]
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certiproof}:${POSTGRES_PASSWORD:-certiproof}@db:5432/${POSTGRES_DB:-certiproof}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certiproof}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-certiproof}
       REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: ${DEBUG:-false}
       MCP_GATEWAY_URL: http://mcp-gateway:9000
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       TASK_EXECUTION_MODE: worker
@@ -99,8 +120,8 @@ services:
       - ./reference:/reference
       - uploads_data:/app/uploads
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       mcp-gateway:

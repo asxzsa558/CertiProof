@@ -11,11 +11,11 @@ def test_matrix_progress_uses_task_completion_when_assessment_progress_is_stale(
     assert _matrix_progress(assessment, phases, 26) == 26
 
 
-def test_matrix_progress_preserves_completed_assessment_progress():
+def test_matrix_progress_rejects_stale_completed_assessment_progress():
     assessment = SimpleNamespace(progress=100)
     phases = [SimpleNamespace(status="active", total_tasks=25, completed_tasks=22, progress=88)]
 
-    assert _matrix_progress(assessment, phases, 88) == 100
+    assert _matrix_progress(assessment, phases, 88) == 88
 
 
 def test_tool_health_uses_real_scan_status_and_duration():

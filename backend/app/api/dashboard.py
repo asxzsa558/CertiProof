@@ -322,18 +322,18 @@ def _topology_services(summary):
 
 def _matrix_progress(assessment, phases, task_completion_rate):
     """Use live phase/task state when the persisted assessment percentage is stale."""
-    stored_progress = round(float(assessment.progress or 0)) if assessment else 0
     phase_progress = []
     for phase in phases:
         status = _enum_value(phase.status)
-        if status in ("completed", "skipped"):
+        if phase.total_tasks:
+            phase_progress.append(round(((phase.completed_tasks or 0) / phase.total_tasks) * 100))
+        elif status in ("completed", "skipped"):
             phase_progress.append(100)
-            continue
-        task_progress = round(((phase.completed_tasks or 0) / phase.total_tasks) * 100) if phase.total_tasks else 0
-        phase_progress.append(max(round(float(phase.progress or 0)), task_progress))
+        else:
+            phase_progress.append(round(float(phase.progress or 0)))
 
     derived_progress = round(sum(phase_progress) / len(phase_progress)) if phase_progress else 0
-    return min(100, max(stored_progress, derived_progress, task_completion_rate))
+    return min(100, max(derived_progress, task_completion_rate))
 
 
 TOOL_GROUPS = (

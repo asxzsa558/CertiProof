@@ -43,7 +43,6 @@ function ChatPage() {
   const [showManager, setShowManager] = useState(false)
   const [managerProject, setManagerProject] = useState(null)
   const [projectModalVisible, setProjectModalVisible] = useState(false)
-  const [projectModalMode, setProjectModalMode] = useState('create')
   const [projectForm] = Form.useForm()
   const [assets, setAssets] = useState([])
   const [assetModalVisible, setAssetModalVisible] = useState(false)
@@ -239,40 +238,23 @@ function ChatPage() {
     }
   }
 
-  const handleNewProject = () => {
-    projectForm.resetFields()
-    setProjectModalMode('create')
-    setProjectModalVisible(true)
-  }
-
   const handleEditProject = (project) => {
     projectForm.setFieldsValue({
       name: project.name,
       description: project.description,
       compliance_level: project.compliance_level,
     })
-    setProjectModalMode('edit')
     setProjectModalVisible(true)
   }
 
   const handleSubmitProject = async () => {
     try {
       const values = await projectForm.validateFields()
-      if (projectModalMode === 'create') {
-        if (!currentOrgId) {
-          message.error('未选择组织，无法创建项目')
-          return
-        }
-        const response = await api.post('/projects/', { ...values, organization_id: currentOrgId })
-        message.success('项目创建成功')
-        setSelectedProject(response.data)
-      } else {
-        await api.put(`/projects/${managerProject.id}`, values)
-        message.success('项目更新成功')
-        const updated = { ...managerProject, ...values }
-        setManagerProject(updated)
-        setSelectedProject(updated)
-      }
+      await api.put(`/projects/${managerProject.id}`, values)
+      message.success('项目更新成功')
+      const updated = { ...managerProject, ...values }
+      setManagerProject(updated)
+      setSelectedProject(updated)
       setProjectModalVisible(false)
       fetchProjects()
     } catch (error) {
@@ -392,7 +374,7 @@ function ChatPage() {
         <div className="sider-header">
           <div className="sider-logo">
             <VeriSureLogo size={56} />
-            <span className="logo-text">VeriSure</span>
+            <span className="logo-text">CertiProof</span>
           </div>
         </div>
 
@@ -644,13 +626,13 @@ function ChatPage() {
         </Content>
       </Layout>
 
-      {/* Project Modal (Create/Edit) */}
+      {/* Project settings belong to the current project; creation lives in 项目工作台. */}
       <Modal
-        title={projectModalMode === 'create' ? '新建项目' : '编辑项目'}
+        title="编辑项目"
         open={projectModalVisible}
         onOk={handleSubmitProject}
         onCancel={() => setProjectModalVisible(false)}
-        okText={projectModalMode === 'create' ? '创建' : '保存'}
+        okText="保存"
         cancelText="取消"
       >
         <Form form={projectForm} layout="vertical">

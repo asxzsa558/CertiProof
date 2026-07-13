@@ -56,6 +56,7 @@ def load_orchestrator_class():
     module("app.mcp.gateway_client", MCPGatewayClient=Dummy)
     module("app.services")
     module("app.services.ai_engine", ai_engine=Dummy())
+    module("app.services.audit", record_audit_event=lambda *args, **kwargs: None)
     module("app.services.execution_engine", execution_engine=Dummy())
     module("app.services.context_manager", ContextManager=Dummy)
     module("app.services.llm_service", llm_service=Dummy())
@@ -71,6 +72,7 @@ def load_orchestrator_class():
     module("app.core")
     module("app.core.database", AsyncSessionLocal=Dummy)
     module("app.core.config", settings=types.SimpleNamespace(TASK_EXECUTION_MODE="inline", TASK_LEASE_MINUTES=10))
+    module("app.core.redaction", redact_sensitive=lambda value: value)
 
     path = Path(__file__).resolve().parents[1] / "backend/app/orchestrator/orchestrator.py"
     spec = importlib.util.spec_from_file_location("contract_orchestrator", path)

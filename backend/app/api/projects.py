@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.rbac import require_org_permission_for_user_id
 from app.core.security import get_current_user
 from app.models.user import User
-from app.models.project import Project, ComplianceLevel
+from app.models.project import Project, ComplianceLevel, ProjectStatus
 from app.models.asset import Asset, AssetType, VerificationMethod, VerificationStatus
 from app.models.scan_task import ScanTask, ScanTaskStatus, ScanTaskType, TriggeredBy
 from app.models.finding import Finding, FindingStatus, Judgment, JudgmentEngine, Severity
@@ -28,6 +28,7 @@ from app.models.context import (
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse
 from app.services.report_service import generate_html_report, generate_json_report
 from app.services.flow_engine import get_flow_engine
+from app.services.audit import record_audit_event
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
@@ -42,6 +43,7 @@ async def get_project_for_user(
     project_id: int,
     user_id: int,
     permission: str = "project:read",
+    allow_archived: bool = False,
 ) -> Project:
     """获取项目并验证用户有权限访问（通过组织成员关系）"""
     result = await db.execute(select(Project).where(Project.id == project_id))
@@ -55,6 +57,13 @@ async def get_project_for_user(
         # Fallback: old projects without org
         if project.user_id != user_id:
             raise HTTPException(status_code=403, detail="No access to this project")
+
+    read_only_permissions = {"project:read", "scan:read", "assessment:read", "report:export"}
+    if project.status == ProjectStatus.ARCHIVED and not allow_archived and permission not in read_only_permissions:
+        raise HTTPException(
+            status_code=409,
+            detail="项目已归档并处于只读状态。请先恢复项目后再执行扫描、上传或整改操作。",
+        )
 
     return project
 
@@ -297,9 +306,53 @@ async def update_project(
         project.description = project_data.description
     if project_data.system_name is not None:
         project.system_name = project_data.system_name
-    if project_data.status is not None:
-        project.status = project_data.status
+    if project_data.status is not None and project_data.status != project.status:
+        raise HTTPException(status_code=400, detail="请使用项目归档或恢复操作变更项目状态")
 
+    await db.commit()
+    await db.refresh(project)
+    return project
+
+
+@router.post("/{project_id}/archive", response_model=ProjectResponse)
+async def archive_project(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await get_project_for_user(db, project_id, current_user.id, "project:update", allow_archived=True)
+    project.status = ProjectStatus.ARCHIVED
+    await record_audit_event(
+        db,
+        event_type="project.archived",
+        resource_type="project",
+        resource_id=project.id,
+        actor_user_id=current_user.id,
+        organization_id=project.organization_id,
+        project_id=project.id,
+    )
+    await db.commit()
+    await db.refresh(project)
+    return project
+
+
+@router.post("/{project_id}/restore", response_model=ProjectResponse)
+async def restore_project(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await get_project_for_user(db, project_id, current_user.id, "project:update", allow_archived=True)
+    project.status = ProjectStatus.ACTIVE
+    await record_audit_event(
+        db,
+        event_type="project.restored",
+        resource_type="project",
+        resource_id=project.id,
+        actor_user_id=current_user.id,
+        organization_id=project.organization_id,
+        project_id=project.id,
+    )
     await db.commit()
     await db.refresh(project)
     return project

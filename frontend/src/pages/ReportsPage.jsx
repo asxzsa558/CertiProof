@@ -131,7 +131,7 @@ function ReportsPage() {
         </button>
         <div className="org-brand">
           <VeriSureLogo size={52} />
-          <span>VeriSure</span>
+          <span>CertiProof</span>
         </div>
         <nav className="org-nav">
           <div className="org-nav-group">

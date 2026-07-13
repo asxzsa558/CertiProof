@@ -1,3 +1,7 @@
+import asyncio
+from urllib.error import URLError
+from urllib.request import urlopen
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, case, func, or_, select
@@ -11,7 +15,7 @@ from app.models.project import Project
 from app.models.asset import Asset, AssetType, VerificationStatus
 from app.models.finding import Finding, FindingStatus
 from app.models.scan_task import ScanTask
-from app.schemas.asset import AssetCreate, AssetResponse, AssetListResponse, AssetVerify
+from app.schemas.asset import AssetCreate, AssetResponse, AssetListResponse, AssetScopeConfirmation, AssetVerify
 
 router = APIRouter(prefix="/projects/{project_id}/assets", tags=["Assets"])
 inventory_router = APIRouter(prefix="/assets", tags=["Assets"])
@@ -204,6 +208,7 @@ async def get_asset_inventory(
             "name": asset.name,
             "verification_status": _enum_value(asset.verification_status),
             "is_active": asset.is_active,
+            "scope_confirmed_at": asset.scope_confirmed_at.isoformat() if asset.scope_confirmed_at else None,
             "created_at": asset.created_at.isoformat() if asset.created_at else None,
             "risk_count": metrics.get("risk_count", 0),
             "finding_count": metrics.get("finding_count", 0),
@@ -353,20 +358,60 @@ async def verify_asset(
                 asset.verified_at = datetime.utcnow()
             else:
                 asset.verification_status = VerificationStatus.FAILED
-        except ImportError:
-            asset.verification_status = VerificationStatus.VERIFIED
-            asset.verification_method = verify_data.verification_method
-            asset.verified_at = datetime.utcnow()
+        except ImportError as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="DNS 验证组件不可用，无法确认资产归属") from exc
+        except HTTPException:
+            raise
         except Exception:
             asset.verification_status = VerificationStatus.FAILED
+    elif verify_data.verification_method.value == "file":
+        if asset.asset_type.value != "domain":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件验证仅支持域名资产")
+        url = f"https://{asset.value}/.well-known/certiproof-verification-{asset.verification_token}.txt"
+        try:
+            body = await asyncio.to_thread(lambda: urlopen(url, timeout=8).read(512).decode("utf-8", errors="replace"))
+        except URLError:
+            asset.verification_status = VerificationStatus.FAILED
+        else:
+            if asset.verification_token in body:
+                asset.verification_status = VerificationStatus.VERIFIED
+                asset.verification_method = verify_data.verification_method
+                asset.verified_at = datetime.utcnow()
+            else:
+                asset.verification_status = VerificationStatus.FAILED
     else:
-        asset.verification_status = VerificationStatus.VERIFIED
-        asset.verification_method = verify_data.verification_method
-        asset.verified_at = datetime.utcnow()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该验证方式不能自动证明资产归属，请使用 DNS/文件验证，或在资产详情中确认已获得扫描授权",
+        )
     
     await db.commit()
     await db.refresh(asset)
     
+    return asset
+
+
+@router.post("/{asset_id}/confirm-scope", response_model=AssetResponse)
+async def confirm_asset_scope(
+    project_id: int,
+    asset_id: int,
+    confirmation: AssetScopeConfirmation,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Record an accountable authorization confirmation when technical proof is unavailable."""
+    if not confirmation.confirmed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="必须明确确认已获得该资产的扫描授权")
+    from app.api.projects import get_project_for_user
+    await get_project_for_user(db, project_id, current_user.id, "asset:update")
+    result = await db.execute(select(Asset).where(Asset.id == asset_id, Asset.project_id == project_id))
+    asset = result.scalar_one_or_none()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    asset.scope_confirmed_by = current_user.id
+    asset.scope_confirmed_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(asset)
     return asset
 
 

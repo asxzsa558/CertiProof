@@ -274,7 +274,7 @@ function Dashboard() {
         <div className="org-brand">
           <div className="org-brand-mark"><VeriSureLogo size={46} /></div>
           <div>
-            <span>VeriSure</span>
+            <span>CertiProof</span>
             <em>安全合规运营</em>
           </div>
         </div>

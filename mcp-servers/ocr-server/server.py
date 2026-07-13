@@ -482,9 +482,9 @@ async def root():
 async def health():
     """Health check"""
     api_configured = bool(OPENAI_API_KEY)
-    local_status = "failed" if (_document_pipeline_error and _rapidocr_error) else "lazy"
+    local_status = "failed" if (_document_pipeline_error and _rapidocr_error) else "unverified"
     return {
-        "status": "degraded" if local_status == "failed" and not api_configured else "healthy",
+        "status": "degraded" if local_status in {"failed", "unverified"} and not api_configured else "healthy",
         "tools": ["ocr_analyze", "screenshot_analyze", "document_page_parse"],
         "openai_api_configured": api_configured,
         "document_model": DOCUMENT_OCR_ENGINE,

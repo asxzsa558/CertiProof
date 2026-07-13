@@ -11,7 +11,7 @@ function VeriSureLogo({ size = 56, className = '' }) {
         <div className="coin-edge coin-edge-4" />
         {/* 正面 - Logo */}
         <div className="coin-face">
-          <img src="/verisure-logo.svg" alt="VeriSure" className="logo-img" />
+          <img src="/verisure-logo.svg" alt="CertiProof" className="logo-img" />
         </div>
       </div>
     </div>

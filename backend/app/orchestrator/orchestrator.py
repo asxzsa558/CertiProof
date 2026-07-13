@@ -24,6 +24,8 @@ from app.models.finding import Finding
 from app.models.project import Project
 from app.core.database import AsyncSessionLocal
 from app.core.config import settings
+from app.core.redaction import redact_sensitive
+from app.services.audit import record_audit_event
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +196,8 @@ class Orchestrator:
                 "total_steps": len(plan),
                 "steps": [],
             },
+            control_state="queued" if status == ScanTaskStatus.PENDING else "running",
+            checkpoint={"completed_results": [], "updated_at": datetime.utcnow().isoformat()},
             started_at=datetime.utcnow() if status == ScanTaskStatus.RUNNING else None,
         )
         db.add(scan_task)
@@ -215,6 +219,9 @@ class Orchestrator:
         asset_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Create one tracked async execution and return its identifiers."""
+        if project_id:
+            from app.services.asset_scope import scope_plan_to_project_assets
+            plan = await scope_plan_to_project_assets(db, project_id, plan)
         task_id = str(uuid.uuid4())
         worker_mode = settings.TASK_EXECUTION_MODE == "worker"
         scan_task_id = await self._create_scan_task_record(
@@ -230,6 +237,17 @@ class Orchestrator:
             task_type=task_type,
             asset_id=asset_id,
         )
+        if scan_task_id:
+            await record_audit_event(
+                db,
+                event_type="scan.queued",
+                resource_type="scan_task",
+                resource_id=scan_task_id,
+                actor_user_id=user_id,
+                project_id=project_id,
+                details={"orchestrator_task_id": task_id, "step_count": len(plan)},
+            )
+            await db.commit()
         self.task_stop_flags[task_id] = False
         self.task_status[task_id] = "running"
         self._update_task_metadata(
@@ -270,6 +288,8 @@ class Orchestrator:
         result_summary: Optional[Dict[str, Any]] = None,
         error_message: Optional[str] = None,
         completed_at: Optional[datetime] = None,
+        checkpoint: Optional[Dict[str, Any]] = None,
+        control_state: Optional[str] = None,
     ) -> None:
         if not scan_task_id:
             return
@@ -283,14 +303,67 @@ class Orchestrator:
             scan_task.progress = progress
         if result_summary is not None:
             scan_task.result_summary = result_summary
+        if checkpoint is not None:
+            scan_task.checkpoint = checkpoint
         if error_message is not None:
             scan_task.error_message = error_message
         if completed_at is not None:
             scan_task.completed_at = completed_at
+        if control_state is not None:
+            scan_task.control_state = control_state
+        elif status == ScanTaskStatus.RUNNING and scan_task.control_state in (None, "queued", "running"):
+            scan_task.control_state = "running"
         if status in (ScanTaskStatus.COMPLETED, ScanTaskStatus.FAILED, ScanTaskStatus.CANCELLED):
             scan_task.lease_owner = None
             scan_task.lease_expires_at = None
+            scan_task.control_state = {
+                ScanTaskStatus.COMPLETED: "completed",
+                ScanTaskStatus.FAILED: "failed",
+                ScanTaskStatus.CANCELLED: "cancelled",
+            }[status]
+        elif status == ScanTaskStatus.RUNNING and scan_task.control_state != "paused":
+            scan_task.lease_owner = self.worker_id
+            scan_task.lease_expires_at = datetime.utcnow() + timedelta(minutes=settings.TASK_LEASE_MINUTES)
         await db.commit()
+
+    async def _persist_step_outcome(
+        self,
+        scan_task_id: Optional[int],
+        step_index: int,
+        outcome: Dict[str, Any],
+    ) -> None:
+        """Persist successful substeps so a restarted worker does not rerun them."""
+        if not scan_task_id:
+            return
+        async with AsyncSessionLocal() as checkpoint_db:
+            result = await checkpoint_db.execute(select(ScanTask).where(ScanTask.id == scan_task_id))
+            scan_task = result.scalar_one_or_none()
+            if not scan_task or scan_task.status not in (ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING):
+                return
+            checkpoint = dict(scan_task.checkpoint or {})
+            completed = [item for item in checkpoint.get("completed_results", []) if item.get("index") != step_index]
+            completed.append({
+                "index": step_index,
+                "capability": outcome.get("capability"),
+                "target": outcome.get("target"),
+                "parameters": redact_sensitive(outcome.get("parameters") or {}),
+                "status": outcome.get("status"),
+                "result": redact_sensitive(outcome.get("result") or {}),
+                "error": outcome.get("error"),
+            })
+            checkpoint["completed_results"] = sorted(completed, key=lambda item: item["index"])
+            checkpoint["updated_at"] = datetime.utcnow().isoformat()
+            scan_task.checkpoint = checkpoint
+            progress = dict(scan_task.progress or {})
+            progress.update({
+                "status": "running",
+                "step_index": step_index,
+                "current_step": f"已记录检查点: {outcome.get('capability') or '安全检测'}",
+            })
+            scan_task.progress = progress
+            scan_task.lease_owner = self.worker_id
+            scan_task.lease_expires_at = datetime.utcnow() + timedelta(minutes=settings.TASK_LEASE_MINUTES)
+            await checkpoint_db.commit()
 
     async def recover_incomplete_scan_tasks(self, db: AsyncSession, limit: int = 20) -> int:
         """Restart persisted orchestrator tasks left running by a process restart."""
@@ -300,6 +373,7 @@ class Orchestrator:
             .where(
                 ScanTask.orchestrator_task_id.is_not(None),
                 ScanTask.status.in_([ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING]),
+                or_(ScanTask.control_state.is_(None), ScanTask.control_state.notin_(["paused", "cancelled"])),
                 or_(ScanTask.lease_expires_at.is_(None), ScanTask.lease_expires_at < now),
             )
             .order_by(ScanTask.created_at.asc())
@@ -315,6 +389,7 @@ class Orchestrator:
                 .where(
                     ScanTask.id == scan_task.id,
                     ScanTask.status.in_([ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING]),
+                    or_(ScanTask.control_state.is_(None), ScanTask.control_state.notin_(["paused", "cancelled"])),
                     or_(ScanTask.lease_expires_at.is_(None), ScanTask.lease_expires_at < now),
                 )
                 .values(
@@ -331,22 +406,39 @@ class Orchestrator:
             plan = parameters.get("plan") or []
             if not isinstance(plan, list) or not plan:
                 scan_task.status = ScanTaskStatus.FAILED
+                scan_task.control_state = "failed"
                 scan_task.error_message = "任务缺少可恢复的执行计划"
                 scan_task.completed_at = datetime.utcnow()
+                scan_task.lease_owner = None
+                scan_task.lease_expires_at = None
                 continue
 
             project_result = await db.execute(select(Project).where(Project.id == scan_task.project_id))
             project = project_result.scalar_one_or_none()
             if not project:
                 scan_task.status = ScanTaskStatus.FAILED
+                scan_task.control_state = "failed"
                 scan_task.error_message = "任务所属项目不存在，无法恢复"
                 scan_task.completed_at = datetime.utcnow()
+                scan_task.lease_owner = None
+                scan_task.lease_expires_at = None
                 continue
 
             user_id = parameters.get("user_id") or project.owner_id or project.user_id
             thread_id = parameters.get("thread_id")
             ai_response = parameters.get("ai_response") or "任务已从持久化队列恢复执行"
             user_input = parameters.get("user_input") or "恢复执行未完成的安全检测任务"
+            checkpoint = dict(scan_task.checkpoint or {})
+            prior_results = [
+                item for item in checkpoint.get("completed_results", [])
+                if item.get("status") == "success" and isinstance(item.get("index"), int)
+            ]
+            completed_indexes = {item["index"] for item in prior_results}
+            plan = [
+                {**step, "_checkpoint_index": index}
+                for index, step in enumerate(plan)
+                if index not in completed_indexes
+            ]
 
             self.task_stop_flags[task_id] = False
             self.task_status[task_id] = "running"
@@ -359,6 +451,7 @@ class Orchestrator:
                 recovered=True,
             )
             scan_task.status = ScanTaskStatus.RUNNING
+            scan_task.control_state = "running"
             progress = dict(scan_task.progress or {})
             progress.update({
                 "task_id": task_id,
@@ -382,6 +475,7 @@ class Orchestrator:
                 user_input=user_input,
                 thread_id=thread_id,
                 scan_task_id=scan_task.id,
+                checkpoint_results=prior_results,
             ))
             self.active_tasks[task_id] = task
             recovered += 1
@@ -620,6 +714,7 @@ class Orchestrator:
         user_input: str = "",
         thread_id: int = None,
         scan_task_id: int = None,
+        checkpoint_results: Optional[List[Dict[str, Any]]] = None,
     ):
         """异步执行计划，完成后用 AI 生成结果描述"""
         # 初始化任务控制状态
@@ -641,21 +736,25 @@ class Orchestrator:
             if scan_task_id:
                 status_result = await async_db.execute(select(ScanTask).where(ScanTask.id == scan_task_id))
                 persisted_task = status_result.scalar_one_or_none()
+                if persisted_task:
+                    await async_db.refresh(persisted_task)
                 if persisted_task and persisted_task.status == ScanTaskStatus.CANCELLED:
                     self.task_stop_flags[task_id] = True
                     self.task_status[task_id] = "stopped"
                     return True
-                if persisted_task and (persisted_task.progress or {}).get("status") == "paused":
+                if persisted_task and persisted_task.control_state == "paused":
                     self.task_status[task_id] = "paused"
             while self.task_status.get(task_id) == "paused":
                 if scan_task_id:
                     status_result = await async_db.execute(select(ScanTask).where(ScanTask.id == scan_task_id))
                     persisted_task = status_result.scalar_one_or_none()
+                    if persisted_task:
+                        await async_db.refresh(persisted_task)
                     if persisted_task and persisted_task.status == ScanTaskStatus.CANCELLED:
                         self.task_stop_flags[task_id] = True
                         self.task_status[task_id] = "stopped"
                         return True
-                    if persisted_task and (persisted_task.progress or {}).get("status") != "paused":
+                    if persisted_task and persisted_task.control_state != "paused":
                         self.task_status[task_id] = "running"
                         return False
                 if self.is_task_stopped(task_id):
@@ -715,6 +814,9 @@ class Orchestrator:
                 
                 # 创建新的上下文管理器使用新的数据库会话
                 async_context_manager = ContextManager(async_db, user_id, project_id, thread_id)
+
+                async def checkpoint_step(step_index: int, outcome: Dict[str, Any]) -> None:
+                    await self._persist_step_outcome(scan_task_id, step_index, outcome)
                 
                 # 检测是否为多资产扫描
                 is_multi_asset = self._is_multi_asset_scan(plan)
@@ -730,6 +832,7 @@ class Orchestrator:
                         dynamic_concurrent = 10
                     else:
                         dynamic_concurrent = 12
+                    dynamic_concurrent = min(dynamic_concurrent, max(1, settings.ASSESSMENT_MAX_CONCURRENT))
                     logger.info(f"Multi-asset scan: {asset_count} assets, max_concurrent={dynamic_concurrent}")
 
                     execution_result = await self.execution_engine.execute_plan_concurrent(
@@ -744,6 +847,7 @@ class Orchestrator:
                         max_retries=3,
                         check_stop=check_stop,
                         wait_if_paused=wait_if_paused,
+                        step_result_callback=checkpoint_step,
                     )
                 else:
                     # 单资产串行执行 - 保留原有逻辑
@@ -757,6 +861,22 @@ class Orchestrator:
                         progress_callback=self._update_task_progress,
                         check_stop=check_stop,
                         wait_if_paused=wait_if_paused,
+                        step_result_callback=checkpoint_step,
+                    )
+
+                # A tool may finish after a stop request. Never let its late
+                # result overwrite the durable cancelled state during summary.
+                if self.is_task_stopped(task_id):
+                    raise asyncio.CancelledError("任务已停止")
+
+                if checkpoint_results:
+                    prior = [dict(item) for item in checkpoint_results]
+                    execution_result["results"] = prior + execution_result.get("results", [])
+                    execution_result["success_count"] = sum(
+                        1 for item in execution_result["results"] if item.get("status") == "success"
+                    )
+                    execution_result["failed_count"] = sum(
+                        1 for item in execution_result["results"] if item.get("status") in {"failed", "cancelled"}
                     )
 
                 # L1 Agent 统一汇总结果，写入 DB（design-v2.md 核心原则）
@@ -801,6 +921,20 @@ class Orchestrator:
                         "change_detection": {"port_changes": port_changes},
                     },
                     completed_at=completed_dt,
+                )
+                await record_audit_event(
+                    async_db,
+                    event_type="scan.completed",
+                    resource_type="scan_task",
+                    resource_id=scan_task_id,
+                    actor_user_id=user_id,
+                    project_id=project_id,
+                    outcome="success",
+                    details={
+                        "orchestrator_task_id": task_id,
+                        "success_count": execution_result.get("success_count", 0),
+                        "failed_count": execution_result.get("failed_count", 0),
+                    },
                 )
 
                 # 计算合规分数并更新 Project
@@ -870,12 +1004,14 @@ class Orchestrator:
                 logger.info(f"Task {task_id} completed: {result_description[:100]}")
                 
             except (Exception, asyncio.CancelledError) as e:
-                if isinstance(e, asyncio.CancelledError):
+                cancelled = isinstance(e, asyncio.CancelledError) or self.task_status.get(task_id) == "stopped"
+                if cancelled:
                     logger.info(f"Task {task_id} was cancelled")
                 else:
                     logger.error(f"Task {task_id} failed: {str(e)}", exc_info=True)
-                failed_status = "stopped" if self.task_status.get(task_id) == "stopped" else "failed"
+                failed_status = "stopped" if cancelled else "failed"
                 failed_at = datetime.utcnow().isoformat()
+                result_description = "任务已停止" if cancelled else f"任务执行失败：{str(e)}"
                 
                 # 记录失败
                 self.completed_tasks.append({
@@ -883,10 +1019,10 @@ class Orchestrator:
                     "user_id": user_id,
                     "project_id": project_id,
                     "agent_name": "AI 执行任务",
-                    "result": {"error": str(e)},
+                    "result": {"cancelled": True} if cancelled else {"error": str(e)},
                     "evidence_count": 0,
                     "scan_results": {},
-                    "result_description": f"任务执行失败：{str(e)}",
+                    "result_description": result_description,
                     "completed_at": failed_at,
                 })
                 self.task_status[task_id] = failed_status
@@ -916,12 +1052,23 @@ class Orchestrator:
                     progress=None,
                     result_summary={
                         "task_id": task_id,
-                        "result_description": f"任务执行失败：{str(e)}",
+                        "result_description": result_description,
                         "scan_results": {},
                     },
-                    error_message=str(e),
+                    error_message=None if cancelled else str(e),
                     completed_at=datetime.utcnow(),
                 )
+                await record_audit_event(
+                    async_db,
+                    event_type="scan.cancelled" if failed_status == "stopped" else "scan.failed",
+                    resource_type="scan_task",
+                    resource_id=scan_task_id,
+                    actor_user_id=user_id,
+                    project_id=project_id,
+                    outcome="cancelled" if failed_status == "stopped" else "failed",
+                    details={"orchestrator_task_id": task_id, **({} if cancelled else {"error": str(e)} )},
+                )
+                await async_db.commit()
 
     def _expand_project_asset_targets(self, plan: List[Dict], context: Dict) -> List[Dict]:
         """Expand the LLM's project-asset placeholder into concrete asset targets."""

@@ -45,6 +45,12 @@ class ScanTask(Base):
     result_summary = Column(JSON, nullable=True)
     lease_owner = Column(String(128), nullable=True, index=True)
     lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    # Control state remains durable across API/worker restarts.  Status stays
+    # compatible with the public scan lifecycle while this captures pause intent.
+    control_state = Column(String(24), nullable=False, default="running", index=True)
+    checkpoint = Column(JSON, nullable=True)
+    paused_at = Column(DateTime(timezone=True), nullable=True)
+    cancel_requested_at = Column(DateTime(timezone=True), nullable=True)
     
     # Results summary
     findings_count = Column(Integer, default=0)

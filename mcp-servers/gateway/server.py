@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
+import asyncio
 import httpx
 import os
 
@@ -165,27 +166,25 @@ async def health():
     """
     健康检查 - 聚合所有 Tool Server 的状态
     """
-    results = {}
-    
-    async with httpx.AsyncClient(timeout=5) as client:
-        for server_name, server_url in SERVER_ROUTES.items():
-            try:
+    async def check_server(server_name: str, server_url: str):
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
                 response = await client.get(f"{server_url}/health")
-                if response.status_code == 200:
-                    results[server_name] = {
-                        "status": "healthy",
-                        "details": response.json(),
-                    }
-                else:
-                    results[server_name] = {
-                        "status": "unhealthy",
-                        "error": f"HTTP {response.status_code}",
-                    }
-            except Exception as e:
-                results[server_name] = {
-                    "status": "unhealthy",
-                    "error": str(e),
+            if response.status_code == 200:
+                details = response.json()
+                status = details.get("status", "healthy") if isinstance(details, dict) else "healthy"
+                return server_name, {
+                    "status": "healthy" if status in {"healthy", "running"} else "degraded",
+                    "details": details,
                 }
+            return server_name, {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
+        except Exception as exc:
+            return server_name, {"status": "unhealthy", "error": str(exc)}
+
+    checked = await asyncio.gather(
+        *(check_server(server_name, server_url) for server_name, server_url in SERVER_ROUTES.items())
+    )
+    results = dict(checked)
     
     # 判断整体状态
     all_healthy = all(r["status"] == "healthy" for r in results.values())

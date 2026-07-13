@@ -11,18 +11,18 @@ export const useAuthStore = create(
       organizations: [],
       currentOrgId: null,
 
-      setAuth: (token, refreshToken, user, organizations = []) => set({
+      setAuth: (token, refreshToken, user, organizations = []) => set((state) => ({
         token,
         refreshToken,
         user,
         organizations,
-        currentOrgId: organizations.length > 0 ? organizations[0].id : null,
-      }),
+        currentOrgId: organizations.some((org) => org.id === state.currentOrgId) ? state.currentOrgId : organizations[0]?.id || null,
+      })),
 
-      setOrganizations: (organizations) => set({
+      setOrganizations: (organizations) => set((state) => ({
         organizations,
-        currentOrgId: organizations.length > 0 ? organizations[0].id : null,
-      }),
+        currentOrgId: organizations.some((org) => org.id === state.currentOrgId) ? state.currentOrgId : organizations[0]?.id || null,
+      })),
 
       setCurrentOrg: (orgId) => set({ currentOrgId: orgId }),
 
@@ -34,7 +34,7 @@ export const useAuthStore = create(
           const orgs = res.data?.organizations || []
           set({
             organizations: orgs,
-            currentOrgId: state.currentOrgId || (orgs.length > 0 ? orgs[0].id : null),
+            currentOrgId: orgs.some((org) => org.id === state.currentOrgId) ? state.currentOrgId : orgs[0]?.id || null,
           })
         } catch (err) {
           console.error('Failed to fetch organizations:', err)

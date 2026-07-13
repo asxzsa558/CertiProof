@@ -12,13 +12,14 @@ from app.models.change_snapshot import ChangeSnapshot
 from app.models.model_config import ModelProvider, ModelConfig, ModelUsage, ProviderType
 from app.models.context import (
     ConversationHistory, ActionHistory, ResultCache, ProjectMemory, UserMemory,
-    ConversationArchive, ConversationThread
+    ConversationArchive, ConversationThread, ConversationSummary
 )
 from app.models.assessment import (
     FlowTemplate, Assessment, PhaseInstance, TaskInstance, FlowEvent
 )
 from app.models.config import SystemConfig
 from app.models.questionnaire import QuestionnaireRecord
+from app.models.audit import AuditEvent
 
 __all__ = [
     "User",
@@ -66,10 +67,12 @@ __all__ = [
     "UserMemory",
     "ConversationArchive",
     "ConversationThread",
+    "ConversationSummary",
     "FlowTemplate",
     "Assessment",
     "PhaseInstance",
     "TaskInstance",
     "FlowEvent",
     "QuestionnaireRecord",
+    "AuditEvent",
 ]

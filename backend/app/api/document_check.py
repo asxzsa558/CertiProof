@@ -11,8 +11,10 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.document_check_service import DocumentCheckService
+from app.services.upload_validation import read_limited_upload
 
 logger = logging.getLogger(__name__)
+MAX_DOCUMENT_CHECK_UPLOAD_SIZE = 100 * 1024 * 1024
 
 router = APIRouter(prefix="/document-check", tags=["Document Check"])
 
@@ -46,8 +48,10 @@ async def upload_document(
     try:
         service = DocumentCheckService(db)
 
-        # 读取文件内容
-        file_content = await file.read()
+        try:
+            file_content = await read_limited_upload(file, MAX_DOCUMENT_CHECK_UPLOAD_SIZE)
+        except ValueError as exc:
+            raise HTTPException(status_code=413 if "超过" in str(exc) else 400, detail=str(exc)) from exc
 
         # 上传文档
         evidence = await service.upload_document(
@@ -68,6 +72,8 @@ async def upload_document(
             "file_size": evidence.file_size,
             "message": f"文档 {doc_name} 上传成功"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to upload document: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")

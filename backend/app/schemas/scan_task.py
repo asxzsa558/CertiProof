@@ -20,6 +20,8 @@ class ScanTaskResponse(ScanTaskBase):
     status: ScanTaskStatus
     triggered_by: TriggeredBy
     orchestrator_task_id: Optional[str] = None
+    control_state: Optional[str] = None
+    checkpoint: Optional[Dict[str, Any]] = None
     progress: Optional[Dict[str, Any]] = None
     result_summary: Optional[Dict[str, Any]] = None
     findings_count: int = 0
@@ -41,6 +43,7 @@ class ScanTaskListResponse(BaseModel):
     status: ScanTaskStatus
     triggered_by: TriggeredBy
     orchestrator_task_id: Optional[str] = None
+    control_state: Optional[str] = None
     progress: Optional[Dict[str, Any]] = None
     result_summary: Optional[Dict[str, Any]] = None
     findings_count: int = 0

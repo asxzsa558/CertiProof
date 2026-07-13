@@ -644,6 +644,52 @@ class FlowEngine:
             assessment.completed_at = None
         
         await self.db.commit()
+
+    async def reconcile_all_assessment_progress(self) -> int:
+        """Repair persisted phase/assessment progress from the authoritative task states."""
+        assessments = (await self.db.execute(select(Assessment))).scalars().all()
+        repaired = 0
+        for assessment in assessments:
+            phases = await self.get_phases(assessment.id)
+            all_tasks = []
+            for phase in phases:
+                tasks = await self.get_tasks(phase.id, official_only=True)
+                all_tasks.extend(tasks)
+                if phase.status == "skipped":
+                    continue
+                total = len(tasks)
+                completed = sum(task.status in {"completed", "cancelled"} for task in tasks)
+                if phase.total_tasks != total or phase.completed_tasks != completed:
+                    phase.total_tasks = total
+                    phase.completed_tasks = completed
+                    phase.progress = (completed / total * 100) if total else 0
+                    repaired += 1
+                if total and completed == total and phase.status != "completed":
+                    phase.status = "completed"
+                    repaired += 1
+                elif total and completed < total and phase.status == "completed":
+                    phase.status = "pending"
+                    phase.completed_at = None
+                    repaired += 1
+
+            completed_phases = sum(phase.status in {"completed", "skipped"} for phase in phases)
+            progress = (completed_phases / assessment.total_phases * 100) if assessment.total_phases else 0
+            if assessment.completed_phases != completed_phases or assessment.progress != progress:
+                assessment.completed_phases = completed_phases
+                assessment.progress = progress
+                repaired += 1
+            if phases and completed_phases == len(phases):
+                assessment.status = "completed"
+            elif any(task.status != "todo" for task in all_tasks):
+                assessment.status = "in_progress"
+                assessment.completed_at = None
+            else:
+                assessment.status = "not_started"
+                assessment.started_at = None
+                assessment.completed_at = None
+            await self._sync_project_assessment(assessment)
+        await self.db.commit()
+        return repaired
     
     async def _sync_project_assessment(self, assessment):
         """同步 ProjectAssessment 状态和分数"""

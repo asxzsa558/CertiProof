@@ -60,7 +60,7 @@ function Register() {
           <div className="brand-header">
             <div className="logo">
               <div className="logo-mark"></div>
-              <span className="logo-text">VeriSure</span>
+              <span className="logo-text">CertiProof</span>
             </div>
             <div className="brand-badge">Intelligence · Compliance · Assurance</div>
           </div>

@@ -38,7 +38,7 @@ function Login() {
           <div className="brand-header">
             <div className="logo">
               <VeriSureLogo size={72} />
-              <span className="logo-text">VeriSure</span>
+              <span className="logo-text">CertiProof</span>
             </div>
             <div className="brand-badge">Intelligence · Compliance · Assurance</div>
           </div>

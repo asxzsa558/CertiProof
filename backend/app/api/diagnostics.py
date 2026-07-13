@@ -2,16 +2,115 @@
 Diagnostics API - 诊断和连通性测试
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.core.rbac import require_any_org_permission
+from app.core.rbac import require_any_org_permission, require_org_permission
 from app.core.security import get_current_user
 from app.models.user import User
+from app.models.project import Project
+from app.models.scan_task import ScanTask, ScanTaskStatus
+from app.models.context import ConversationArchive, ConversationSummary
+from app.models.audit import AuditEvent
 from app.mcp.gateway_client import MCPGatewayClient
 import httpx
 
 router = APIRouter(prefix="/diagnostics", tags=["Diagnostics"])
+
+
+@router.get("/operations")
+async def get_operations_snapshot(
+    organization_id: int | None = Query(None),
+    hours: int = Query(24, ge=1, le=168),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persisted queue health, failure rate and the latest security audit events."""
+    if organization_id is None:
+        member = await require_any_org_permission(db, current_user, "tool:diagnose")
+        organization_id = member.organization_id
+    else:
+        await require_org_permission(db, organization_id, current_user, "tool:diagnose")
+
+    since = datetime.utcnow() - timedelta(hours=hours)
+    project_ids = list((await db.execute(
+        select(Project.id).where(Project.organization_id == organization_id)
+    )).scalars().all())
+    scans = list((await db.execute(
+        select(ScanTask).where(ScanTask.project_id.in_(project_ids), ScanTask.created_at >= since)
+    )).scalars().all()) if project_ids else []
+    status_counts: dict[str, int] = {}
+    control_counts: dict[str, int] = {}
+    for scan in scans:
+        status_name = scan.status.value if hasattr(scan.status, "value") else str(scan.status)
+        status_counts[status_name] = status_counts.get(status_name, 0) + 1
+        control = scan.control_state or status_name
+        control_counts[control] = control_counts.get(control, 0) + 1
+    terminal = status_counts.get("completed", 0) + status_counts.get("failed", 0) + status_counts.get("cancelled", 0)
+    failures = status_counts.get("failed", 0) + status_counts.get("cancelled", 0)
+    stale_before = datetime.utcnow() - timedelta(minutes=5)
+    stale_leases = sum(
+        1 for scan in scans
+        if scan.status in (ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING)
+        and scan.control_state != "paused"
+        and scan.lease_expires_at is not None
+        and scan.lease_expires_at < stale_before
+    )
+
+    archive_queue = 0
+    summary_queue = 0
+    if project_ids:
+        archive_queue = (await db.execute(
+            select(ConversationArchive).where(
+                ConversationArchive.project_id.in_(project_ids),
+                ConversationArchive.status.in_(["queued", "processing"]),
+            )
+        )).scalars().all()
+        archive_queue = len(archive_queue)
+        summary_queue = len((await db.execute(
+            select(ConversationSummary).where(
+                ConversationSummary.project_id.in_(project_ids),
+                ConversationSummary.status.in_(["queued", "processing"]),
+            )
+        )).scalars().all())
+
+    events = (await db.execute(
+        select(AuditEvent)
+        .where(or_(
+            AuditEvent.organization_id == organization_id,
+            AuditEvent.project_id.in_(project_ids),
+        ))
+        .order_by(AuditEvent.created_at.desc())
+        .limit(40)
+    )).scalars().all()
+    return {
+        "window_hours": hours,
+        "scan_tasks": {
+            "total": len(scans),
+            "by_status": status_counts,
+            "by_control_state": control_counts,
+            "failure_rate": round(failures / terminal, 4) if terminal else 0,
+            "stale_leases": stale_leases,
+        },
+        "queues": {"archives": archive_queue, "conversation_summaries": summary_queue},
+        "recent_audit_events": [
+            {
+                "id": event.id,
+                "event_type": event.event_type,
+                "resource_type": event.resource_type,
+                "resource_id": event.resource_id,
+                "outcome": event.outcome,
+                "project_id": event.project_id,
+                "actor_user_id": event.actor_user_id,
+                "details": event.details or {},
+                "created_at": event.created_at.isoformat() if event.created_at else None,
+            }
+            for event in events
+        ],
+    }
 
 
 @router.get("/mcp/health")

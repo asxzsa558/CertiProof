@@ -17,9 +17,11 @@ from app.models.evidence import Evidence, EvidenceType
 from app.models.finding import Finding
 from app.models.questionnaire import QuestionnaireRecord
 from app.services.evidence_service import EvidenceService
+from app.services.upload_validation import read_limited_upload
 
 router = APIRouter(prefix="/evidences", tags=["Evidences"])
 logger = logging.getLogger(__name__)
+MAX_EVIDENCE_UPLOAD_SIZE = 100 * 1024 * 1024
 
 
 # ========== Response Models ==========
@@ -87,14 +89,13 @@ async def upload_evidence(
                 detail="Questionnaire record does not belong to this project",
             )
     
-    # 读取文件内容
-    content = await file.read()
-    
-    if len(content) == 0:
+    try:
+        content = await read_limited_upload(file, MAX_EVIDENCE_UPLOAD_SIZE)
+    except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Empty file"
-        )
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE if "超过" in str(exc) else status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     
     # 验证 evidence_type
     try:

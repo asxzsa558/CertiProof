@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.project import Project
-from app.models.asset import Asset, VerificationStatus
+from app.models.asset import Asset
 from app.models.scan_task import ScanTask, ScanTaskType, ScanTaskStatus, TriggeredBy
 from app.models.finding import Finding
 from app.orchestrator import orchestrator
@@ -61,8 +61,6 @@ class ScanService:
             asset = result.scalar_one_or_none()
             if not asset:
                 raise ValueError("Asset not found")
-            if asset.verification_status != VerificationStatus.VERIFIED:
-                raise ValueError("Asset must be verified before scanning")
         
         # Create scan task
         scan_task = ScanTask(
@@ -70,6 +68,7 @@ class ScanService:
             asset_id=asset_id,
             task_type=task_type,
             status=ScanTaskStatus.PENDING,
+            control_state="queued",
             triggered_by=TriggeredBy.MANUAL,
             parameters=redact_sensitive(parameters),
         )
@@ -200,6 +199,8 @@ class ScanService:
             raise ValueError("Can only cancel pending or running tasks")
         
         scan_task.status = ScanTaskStatus.CANCELLED
+        scan_task.control_state = "cancelled"
+        scan_task.cancel_requested_at = datetime.utcnow()
         scan_task.completed_at = datetime.utcnow()
         await db.commit()
         

@@ -14,6 +14,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import re
 
+MAX_FPING_TARGETS = 1024
+MAX_MASSCAN_RATE = 10_000
+MAX_MASSCAN_TIMEOUT = 180
+
 app = FastAPI(title="Fast Scanner MCP Server", version="1.0.0")
 
 app.add_middleware(
@@ -74,6 +78,30 @@ def classify_port_risk(port: int) -> str:
     return "medium"
 
 
+def _validate_masscan_params(params: Dict[str, Any]) -> tuple[str, int, int]:
+    port_range = str(params.get("port_range", "1-65535"))
+    if port_range.lower() in {"high-risk", "high_risk", "critical"}:
+        port_range = ",".join(str(port) for port in sorted({*CRITICAL_PORTS, *HIGH_RISK_PORTS, 80, 443}))
+    rate = int(params.get("rate", 10_000))
+    timeout = int(params.get("timeout", 30))
+    ports = set()
+    try:
+        for part in port_range.split(","):
+            start, _, end = part.strip().partition("-")
+            first = int(start)
+            last = int(end or start)
+            if not 1 <= first <= last <= 65535:
+                raise ValueError
+            ports.update(range(first, last + 1))
+    except (TypeError, ValueError):
+        raise ValueError("port_range 必须是 1-65535 内的端口或范围")
+    if not 1 <= rate <= MAX_MASSCAN_RATE:
+        raise ValueError(f"rate 必须介于 1 和 {MAX_MASSCAN_RATE}")
+    if not 5 <= timeout <= MAX_MASSCAN_TIMEOUT:
+        raise ValueError(f"timeout 必须介于 5 和 {MAX_MASSCAN_TIMEOUT} 秒")
+    return port_range, rate, timeout
+
+
 def parse_masscan_output(output: str, target: str) -> List[Dict]:
     """解析 masscan JSON 输出"""
     open_ports = []
@@ -130,10 +158,8 @@ async def masscan_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     if not target:
         raise ValueError("Missing required parameter: target")
     
-    port_range = params.get("port_range", "1-65535")  # 默认全端口扫描
-    rate = params.get("rate", 10000)  # 每秒发包数
+    port_range, rate, timeout = _validate_masscan_params(params)
     banner_grab = params.get("banner_grab", False)
-    timeout = params.get("timeout", 30)
     
     # 构建 masscan 命令
     cmd = [
@@ -244,12 +270,18 @@ async def fping_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         import ipaddress
         try:
             network_obj = ipaddress.ip_network(network, strict=False)
+            if network_obj.num_addresses > MAX_FPING_TARGETS:
+                raise ValueError(f"单次批量存活检测最多支持 {MAX_FPING_TARGETS} 个地址")
             targets = [str(ip) for ip in network_obj.hosts()] or [str(network_obj.network_address)]
         except ValueError:
             if "/" in str(network):
                 raise ValueError(f"Invalid CIDR network: {network}")
             targets = [str(network)]
     
+    if not isinstance(targets, list) or not targets:
+        raise ValueError("targets 必须是非空地址列表")
+    if len(targets) > MAX_FPING_TARGETS:
+        raise ValueError(f"单次批量存活检测最多支持 {MAX_FPING_TARGETS} 个地址")
     cmd = ["fping", "-a", "-q", "-r", "1"]
     cmd.extend(targets)
     
@@ -371,8 +403,7 @@ async def execute(request: ExecuteRequest):
 async def run_async_masscan(task_id: str, params: Dict[str, Any]):
     """异步执行 masscan 扫描 - 带真实进度更新"""
     target = params.get("target")
-    port_range = params.get("port_range", "1-65535")
-    rate = params.get("rate", 10000)
+    port_range, rate, timeout = _validate_masscan_params(params)
     banner_grab = params.get("banner_grab", False)
     
     # 解析端口范围估算时长
@@ -422,7 +453,7 @@ async def run_async_masscan(task_id: str, params: Dict[str, Any]):
         
         progress_task = asyncio.create_task(estimate_progress())
         
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         progress_task.cancel()
         

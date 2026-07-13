@@ -1,17 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
-import { Input, Button, Avatar, Spin, Empty, Typography, Progress, Tag, message, Modal, Checkbox, Dropdown, Popconfirm, Drawer, Steps, Form } from 'antd'
+import { Input, Button, Avatar, Spin, Empty, Typography, Tag, message, Modal, Checkbox, Dropdown, Popconfirm, Form } from 'antd'
 import {
   SendOutlined,
   UserOutlined,
   RobotOutlined,
   CheckCircleOutlined,
-  CheckCircleFilled,
-  PlayCircleOutlined,
   HistoryOutlined,
   SwapOutlined,
   DeleteOutlined,
   FolderOutlined,
-  RocketOutlined,
   FileTextOutlined,
   DownOutlined,
 } from '@ant-design/icons'
@@ -38,6 +35,7 @@ import './ChatWorkspace.css'
 import './ScanAnimation.css'
 
 const { TextArea } = Input
+const { Text } = Typography
 
 const assetKey = (asset) => String(asset?.value || asset?.target || '').trim().toLowerCase()
 
@@ -84,14 +82,11 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
   const [compressionStatus, setCompressionStatus] = useState(null) // null | 'started' | 'completed'
   const [compressionInfo, setCompressionInfo] = useState(null) // { tokens_freed, message_count }
   const [archives, setArchives] = useState([])
+  const [archiveDetail, setArchiveDetail] = useState(null)
   const [threads, setThreads] = useState([])
   const [currentThreadId, setCurrentThreadId] = useState(null)
   const [showArchivePanel, setShowArchivePanel] = useState(false)
   const [showThreadPanel, setShowThreadPanel] = useState(false)
-  const [assessment, setAssessment] = useState(null)
-  const [assessmentPhases, setAssessmentPhases] = useState([])
-  const [assessmentDrawerVisible, setAssessmentDrawerVisible] = useState(false)
-  const [assessmentLoading, setAssessmentLoading] = useState(false)
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const wsRefsRef = useRef(new Map())
@@ -142,14 +137,22 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         setMessages([
           {
             role: 'assistant',
-            content: '你好！我是 VeriSure 智能合规验证助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
+            content: '你好！我是 CertiProof 智能合规验证助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
           },
         ])
         return
       }
       
       try {
-        const response = await api.get('/chat/history', { params: { project_id: projectId } })
+        const threadResponse = await api.get('/chat/threads', { params: { project_id: projectId } })
+        const availableThreads = threadResponse.data.threads || []
+        setThreads(availableThreads)
+        const savedThreadId = Number(window.localStorage.getItem(`certiproof:thread:${projectId}`))
+        const activeThreadId = availableThreads.some((thread) => thread.id === savedThreadId) ? savedThreadId : null
+        setCurrentThreadId(activeThreadId)
+        const response = await api.get('/chat/history', {
+          params: { project_id: projectId, thread_id: activeThreadId || undefined },
+        })
         const history = response.data
         
         let nextMessages
@@ -167,7 +170,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
           nextMessages = [
             {
               role: 'assistant',
-              content: '你好！我是 VeriSure 智能合规验证助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
+              content: '你好！我是 CertiProof 智能合规验证助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
             },
           ]
         }
@@ -201,7 +204,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         setMessages([
           {
             role: 'assistant',
-            content: '你好！我是 VeriSure 智能合规验证助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
+            content: '你好！我是 CertiProof 智能合规验证助手。我可以帮你扫描端口、检测SSL、发现漏洞、管理项目等。直接告诉我你想做什么。',
           },
         ])
       }
@@ -945,7 +948,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
   const handleClearHistory = async () => {
     try {
       if (projectId) {
-        await api.post(`/chat/clear/${projectId}`)
+        await api.post(`/chat/clear/${projectId}`, null, { params: { thread_id: currentThreadId || undefined } })
       } else {
         await api.post('/chat/clear')
       }
@@ -996,70 +999,12 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     }
   }
 
-  const fetchAssessment = async () => {
-    if (!projectId) return null
-    try {
-      const response = await api.get(`/assessments/projects/${projectId}`)
-      if (response.data && response.data.length > 0) {
-        const latestAssessment = response.data[0]
-        const phasesResponse = await api.get(`/assessments/${latestAssessment.id}/phases`)
-        return { assessment: latestAssessment, phases: phasesResponse.data }
-      }
-      return null
-    } catch (error) {
-      console.error('Failed to fetch assessment:', error)
-      return null
-    }
-  }
-
-  const handleAssessmentAction = async () => {
+  const handleAssessmentAction = () => {
     if (!projectId) {
       message.warning('请先选择项目')
       return
     }
-    
-    setAssessmentLoading(true)
-    try {
-      const result = await fetchAssessment()
-      
-      if (result) {
-        setAssessment(result.assessment)
-        setAssessmentPhases(result.phases)
-        setAssessmentDrawerVisible(true)
-      } else {
-        const projectRes = await api.get(`/projects/${projectId}`)
-        const project = projectRes.data
-        const complianceLevel = project.compliance_level
-        const targetLevel = complianceLevel === '二级' ? 2 : 3
-        
-        const templatesRes = await api.get('/assessments/templates')
-        const templates = templatesRes.data
-        const template = templates.find(t => t.compliance_level === targetLevel)
-        
-        if (!template) {
-          message.error('未找到匹配的测评模板')
-          return
-        }
-        
-        const createRes = await api.post(`/assessments/projects/${projectId}`, {
-          template_id: template.id,
-          name: `${projectName || project.name} - 等保${complianceLevel}测评`,
-        })
-        
-        const newAssessment = createRes.data
-        const phasesRes = await api.get(`/assessments/${newAssessment.id}/phases`)
-        
-        setAssessment(newAssessment)
-        setAssessmentPhases(phasesRes.data)
-        setAssessmentDrawerVisible(true)
-        message.success('测评流程已创建')
-      }
-    } catch (error) {
-      console.error('Assessment action failed:', error)
-      message.error('操作失败，请重试')
-    } finally {
-      setAssessmentLoading(false)
-    }
+    window.dispatchEvent(new CustomEvent('certiproof:open-assessment', { detail: { projectId } }))
   }
 
   const handleShowHelp = () => {
@@ -1176,7 +1121,6 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
 
   const handleCreateArchive = async () => {
     try {
-      // 1. 创建归档（立即返回）
       const response = await api.post('/chat/archives', {
         title: null,
         project_id: projectId,
@@ -1184,17 +1128,9 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
       })
       const archiveId = response.data.archive_id
       
-      // 2. 显示"正在生成摘要..."
       message.loading({ content: '正在生成归档摘要...', key: 'archive', duration: 0 })
-      
-      // 3. 清空当前对话
-      setMessages([{
-        role: 'assistant',
-        content: '对话已归档，正在生成摘要...',
-      }])
-      
-      // 4. 轮询直到摘要生成完成
-      const maxAttempts = 15  // 最多等待 30 秒
+      setMessages([])
+      const maxAttempts = 30
       let attempts = 0
       const params = projectId ? { project_id: projectId } : {}
       
@@ -1202,17 +1138,17 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         attempts++
         try {
           const archiveRes = await api.get(`/chat/archives/${archiveId}`, { params })
-          if (archiveRes.data.summary) {
+          if (archiveRes.data.status === 'completed') {
             clearInterval(pollInterval)
             message.success({ content: '归档完成', key: 'archive' })
-            setMessages([{
-              role: 'assistant',
-              content: `对话已归档完成！\n\n**摘要**: ${archiveRes.data.summary}`,
-            }])
+            await loadArchives()
+          } else if (archiveRes.data.status === 'failed') {
+            clearInterval(pollInterval)
+            message.error({ content: archiveRes.data.error_message || '归档摘要失败，可在归档列表重试', key: 'archive' })
             await loadArchives()
           } else if (attempts >= maxAttempts) {
             clearInterval(pollInterval)
-            message.warning({ content: '摘要生成超时，归档已保存', key: 'archive' })
+            message.info({ content: '归档仍在后台处理，可在归档列表查看进度', key: 'archive' })
             await loadArchives()
           }
         } catch (e) {
@@ -1238,7 +1174,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
   const handleDeleteArchive = async (archiveId) => {
     try {
       const params = projectId ? { project_id: projectId } : {}
-      await api.delete(`/chat/archives/${archiveId}`, { params })
+      await api.delete(`/chat/archives/${archiveId}`, { params: { ...params, permanent: true } })
       message.success('归档已删除')
       await loadArchives()
     } catch (error) {
@@ -1246,43 +1182,34 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     }
   }
 
+  const handleViewArchive = async (archiveId) => {
+    try {
+      const params = projectId ? { project_id: projectId } : {}
+      const response = await api.get(`/chat/archives/${archiveId}`, { params })
+      setArchiveDetail(response.data)
+    } catch (error) {
+      message.error('加载归档原文失败')
+    }
+  }
+
+  const handleRetryArchive = async (archiveId) => {
+    try {
+      const params = projectId ? { project_id: projectId } : {}
+      await api.post(`/chat/archives/${archiveId}/retry`, null, { params })
+      message.success('归档摘要已重新加入队列')
+      await loadArchives()
+    } catch (error) {
+      message.error(error.response?.data?.detail || '归档重试失败')
+    }
+  }
+
   const handleContinueFromArchive = async (archive) => {
     try {
-      // 创建新线程，标题包含归档信息
-      const threadTitle = `接续: ${archive.title}`
-      const response = await api.post('/chat/threads', { 
-        title: threadTitle, 
-        parent_thread_id: currentThreadId,
-        project_id: projectId,
-      })
+      const params = projectId ? { project_id: projectId } : {}
+      const response = await api.post(`/chat/archives/${archive.id}/continue`, null, { params })
       setCurrentThreadId(response.data.thread_id)
-      
-      // 构建接续消息
-      let continueMsg = `📋 已接续归档「${archive.title}」\n\n`
-      continueMsg += `**工作状态**: ${archive.summary}\n\n`
-      
-      if (archive.completed_tasks && archive.completed_tasks.length > 0) {
-        continueMsg += `**已完成**:\n`
-        archive.completed_tasks.forEach(t => {
-          continueMsg += `- ${t.task}: ${t.result}\n`
-        })
-        continueMsg += '\n'
-      }
-      
-      if (archive.current_task) {
-        continueMsg += `**进行中**: ${archive.current_task.task} - ${archive.current_task.progress}\n\n`
-      }
-      
-      if (archive.interrupt_point) {
-        continueMsg += `**中断点**: ${archive.interrupt_point}\n\n`
-      }
-      
-      continueMsg += '告诉我"继续"即可接续之前的工作。'
-      
-      setMessages([{
-        role: 'assistant',
-        content: continueMsg,
-      }])
+      window.localStorage.setItem(`certiproof:thread:${projectId}`, String(response.data.thread_id))
+      setMessages([])
       
       setShowArchivePanel(false)
       await loadThreads()
@@ -1302,6 +1229,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         project_id: projectId,
       })
       setCurrentThreadId(response.data.thread_id)
+      window.localStorage.setItem(`certiproof:thread:${projectId}`, String(response.data.thread_id))
       message.success('新线程已创建')
       // 清空当前对话
       setMessages([{
@@ -1329,6 +1257,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
       const params = projectId ? { project_id: projectId } : {}
       const response = await api.post(`/chat/threads/${threadId}/continue`, null, { params })
       setCurrentThreadId(threadId)
+      window.localStorage.setItem(`certiproof:thread:${projectId}`, String(threadId))
       
       // 加载线程的对话历史
       const conversationHistory = response.data.conversation_history || []
@@ -1362,6 +1291,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
       await api.delete(`/chat/threads/${threadId}`, { params })
       if (currentThreadId === threadId) {
         setCurrentThreadId(null)
+        window.localStorage.removeItem(`certiproof:thread:${projectId}`)
       }
       message.success('线程已删除')
       await loadThreads()
@@ -1425,7 +1355,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
               <div key={archive.id} className="archive-item">
                 <div className="archive-info">
                   <div className="archive-title">{archive.title}</div>
-                  <div className="archive-summary">{archive.summary}</div>
+                  <div className="archive-summary">{archive.summary || (archive.status === 'failed' ? archive.error_message : '正在生成摘要...')}</div>
                   
                   {/* 结构化交接信息 */}
                   {archive.completed_tasks && archive.completed_tasks.length > 0 && (
@@ -1463,30 +1393,41 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
                   
                   <div className="archive-meta">
                     <Tag>{archive.message_count} 条消息</Tag>
+                    <Tag color={archive.status === 'completed' ? 'green' : archive.status === 'failed' ? 'red' : 'processing'}>{archive.status === 'completed' ? '摘要完成' : archive.status === 'failed' ? '摘要失败' : '后台处理中'}</Tag>
                     <span className="archive-date">{new Date(archive.archived_at).toLocaleString()}</span>
                   </div>
                 </div>
                 <div className="archive-actions">
+                  <Button size="small" onClick={() => handleViewArchive(archive.id)}>查看原文</Button>
                   <Button
                     type="primary"
                     size="small"
                     icon={<SwapOutlined />}
+                    disabled={archive.status !== 'completed'}
                     onClick={() => handleContinueFromArchive(archive)}
                   >
                     接续
                   </Button>
-                  <Button
-                    type="text"
-                    danger
-                    size="small"
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDeleteArchive(archive.id)}
-                  />
+                  {archive.status === 'failed' && !archive.legacy_summary_only ? <Button size="small" onClick={() => handleRetryArchive(archive.id)}>重试</Button> : null}
+                  <Popconfirm title="永久删除归档？" description="归档摘要和原始对话将不可恢复。" onConfirm={() => handleDeleteArchive(archive.id)} okText="永久删除" cancelText="取消" okButtonProps={{ danger: true }}>
+                    <Button type="text" danger size="small" icon={<DeleteOutlined />} />
+                  </Popconfirm>
                 </div>
               </div>
             ))}
           </div>
         )}
+      </Modal>
+
+      <Modal title={archiveDetail?.title || '归档原文'} open={Boolean(archiveDetail)} onCancel={() => setArchiveDetail(null)} footer={null} width={760}>
+        {archiveDetail ? <div className="archive-transcript">
+          <div className="archive-summary">{archiveDetail.summary || archiveDetail.error_message || '暂无可用摘要'}</div>
+          {(archiveDetail.messages || []).map((item) => <div key={item.id} className={`archive-transcript-item ${item.role}`}>
+            <strong>{item.role === 'user' ? '用户' : '助手'}</strong>
+            <span>{item.content}</span>
+          </div>)}
+          {!archiveDetail.messages?.length ? <Empty description={archiveDetail.legacy_summary_only ? '旧版归档未保留原始对话' : '暂无原始对话'} /> : null}
+        </div> : null}
       </Modal>
 
       {/* Thread Panel Modal */}
@@ -1758,106 +1699,6 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
           ))}
         </div>
       </Modal>
-
-      {/* Assessment Progress Drawer */}
-      <Drawer
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <RocketOutlined style={{ color: '#f59e0b' }} />
-            <span>等保测评进度</span>
-          </div>
-        }
-        placement="right"
-        width={480}
-        open={assessmentDrawerVisible}
-        onClose={() => setAssessmentDrawerVisible(false)}
-        className="assessment-drawer"
-      >
-        {assessment && (
-          <div className="assessment-drawer-content">
-            <div className="assessment-drawer-header">
-              <div className="assessment-drawer-title">{assessment.name}</div>
-              <Tag color={
-                assessment.status === 'completed' ? '#10b981' :
-                assessment.status === 'in_progress' ? '#6366f1' :
-                assessment.status === 'paused' ? '#f59e0b' : '#64748b'
-              }>
-                {assessment.status === 'not_started' ? '未开始' :
-                 assessment.status === 'in_progress' ? '进行中' :
-                 assessment.status === 'paused' ? '已暂停' :
-                 assessment.status === 'completed' ? '已完成' : '失败'}
-              </Tag>
-            </div>
-            
-            <div className="assessment-drawer-progress">
-              <Progress
-                type="circle"
-                percent={Math.round(assessment.progress || 0)}
-                size={100}
-                strokeColor={{ '0%': '#D4AF37', '100%': '#C5A55A' }}
-              />
-              <div className="assessment-drawer-stats">
-                <div className="stat-item">
-                  <span className="stat-value">{assessment.completed_phases || 0}</span>
-                  <span className="stat-label">/ {assessment.total_phases} 阶段</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="assessment-drawer-phases">
-              {assessmentPhases.map((phase, index) => (
-                <div key={phase.id} className={`assessment-phase-item ${phase.status}`}>
-                  <div className="phase-indicator">
-                    {phase.status === 'completed' ? (
-                      <CheckCircleFilled style={{ color: '#10b981' }} />
-                    ) : phase.status === 'active' ? (
-                      <div className="phase-active-dot" />
-                    ) : (
-                      <div className="phase-pending-dot" />
-                    )}
-                    {index < assessmentPhases.length - 1 && (
-                      <div className={`phase-connector-line ${phase.status === 'completed' ? 'completed' : ''}`} />
-                    )}
-                  </div>
-                  <div className="phase-info">
-                    <div className="phase-name">{phase.name}</div>
-                    <div className="phase-meta">
-                      {phase.status === 'completed' && <Tag color="#10b981">完成</Tag>}
-                      {phase.status === 'active' && <Tag color="#6366f1">{Math.round(phase.progress || 0)}%</Tag>}
-                      {phase.status === 'pending' && <Tag>待开始</Tag>}
-                      {phase.status === 'skipped' && <Tag>已跳过</Tag>}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {assessment.status === 'not_started' && (
-              <Button
-                type="primary"
-                icon={<PlayCircleOutlined />}
-                block
-                style={{ marginTop: 16, background: 'linear-gradient(135deg, #D4AF37, #C5A55A)', border: 'none' }}
-                onClick={async () => {
-                  try {
-                    await api.post(`/assessments/${assessment.id}/start`)
-                    const result = await fetchAssessment()
-                    if (result) {
-                      setAssessment(result.assessment)
-                      setAssessmentPhases(result.phases)
-                    }
-                    message.success('测评已开始')
-                  } catch (error) {
-                    message.error('启动失败')
-                  }
-                }}
-              >
-                开始测评
-              </Button>
-            )}
-          </div>
-        )}
-      </Drawer>
 
       {/* SSH 凭证输入 Modal（单目标场景保留） */}
       <Modal

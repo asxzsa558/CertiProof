@@ -38,8 +38,17 @@ from app.services.document_pipeline import (
     normalize_analysis_mode,
 )
 from app.services.file_storage import file_storage
+from app.services.upload_validation import read_limited_upload
 
 router = APIRouter(prefix="/assessments", tags=["Assessments"])
+
+
+async def _read_document_upload(file: UploadFile, max_bytes: int) -> bytes:
+    try:
+        return await read_limited_upload(file, max_bytes, SUPPORTED_SUFFIXES)
+    except ValueError as exc:
+        detail = str(exc)
+        raise HTTPException(status_code=413 if "超过" in detail else 400, detail=detail) from exc
 
 
 async def require_project_permission(db: AsyncSession, project_id: int, user: User, permission: str):
@@ -623,9 +632,8 @@ async def start_task(
 ):
     """开始任务并自动执行（如果是可自动执行的任务）"""
     from app.services.task_executor import get_task_executor
-    from app.models.asset import Asset
-    from sqlalchemy import select
-    import asyncio
+    from app.services.asset_scope import list_scannable_assets
+    from app.services.assessment_task_queue import queue_assessment_task
     
     await require_task_permission(db, task_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
@@ -642,7 +650,6 @@ async def start_task(
                 detail="渗透测试任务已废弃，请使用文档审查模式上传渗透测试报告"
             )
         
-        task = await engine.start_task(task_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
@@ -652,163 +659,21 @@ async def start_task(
     
     # 检查任务是否可以自动执行
     executor = get_task_executor(db)
+    assets = []
     if executor.is_automated_task(task.task_type):
-        # 获取项目的所有资产作为目标
-        result = await db.execute(
-            select(Asset).where(Asset.project_id == assessment.project_id)
-        )
-        assets = result.scalars().all()
-        
-        if assets:
-            targets = [asset.value for asset in assets]
-            # 异步执行任务（支持多目标）
-            asyncio.create_task(_execute_task_async_multi(
-                task_id=task_id,
-                task_type=task.task_type,
-                targets=targets,
-                project_id=assessment.project_id,
-                user_id=current_user.id,
-            ))
-        else:
-            # 没有资产，标记为需要手动执行
-            pass
-    
+        assets = await list_scannable_assets(db, assessment.project_id)
+        if not assets:
+            raise HTTPException(status_code=400, detail="当前项目没有启用资产，无法执行技术检测")
+
+    try:
+        task = await engine.start_task(task_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if assets:
+        await queue_assessment_task(task, [asset.id for asset in assets], current_user.id, db)
+        return {"message": "技术检测已加入持久化队列", "task_id": task_id, "status": "queued"}
     return {"message": "Task started", "task_id": task_id, "status": task.status}
-
-
-async def _execute_task_async(
-    task_id: int,
-    task_type: str,
-    target: str,
-    project_id: int,
-    user_id: int,
-):
-    """异步执行任务"""
-    from app.core.database import AsyncSessionLocal
-    from app.services.task_executor import get_task_executor
-    from app.services.flow_engine import get_flow_engine
-
-    async with AsyncSessionLocal() as task_db:
-        engine = get_flow_engine(task_db)
-        try:
-            # 确保任务状态为 in_progress（防止状态机错误）
-            task = await engine.get_task(task_id)
-            if task.status == "todo":
-                await engine.start_task(task_id)
-
-            executor = get_task_executor(task_db)
-            result = await executor.execute_task(
-                task_type=task_type,
-                target=target,
-                project_id=project_id,
-                user_id=user_id,
-            )
-
-            # 更新任务状态
-            if result["status"] in ["completed", "partial"]:
-                await engine.complete_task(task_id, result)
-            elif result["status"] == "failed":
-                task = await engine.get_task(task_id)
-                task.status = "failed"
-                task.result = result
-                await task_db.commit()
-        except Exception as e:
-            logger.error(f"Task {task_id} execution failed: {e}")
-            try:
-                task = await engine.get_task(task_id)
-                task.status = "failed"
-                task.result = {"error": str(e)}
-                await task_db.commit()
-            except Exception as e2:
-                logger.error(f"Failed to update task status: {e2}")
-
-
-async def _execute_task_async_multi(
-    task_id: int,
-    task_type: str,
-    targets: list,
-    project_id: int,
-    user_id: int,
-):
-    """异步执行任务（支持多目标）"""
-    from app.core.database import AsyncSessionLocal
-    from app.services.task_executor import get_task_executor
-    from app.services.flow_engine import get_flow_engine
-    import asyncio
-
-    async with AsyncSessionLocal() as task_db:
-        engine = get_flow_engine(task_db)
-        try:
-            # 确保任务状态为 in_progress
-            task = await engine.get_task(task_id)
-            if task.status == "todo":
-                await engine.start_task(task_id)
-
-            executor = get_task_executor(task_db)
-
-            # 并发执行所有目标
-            tasks_list = []
-            for target in targets:
-                tasks_list.append(
-                    executor.execute_task(
-                        task_type=task_type,
-                        target=target,
-                        project_id=project_id,
-                        user_id=user_id,
-                    )
-                )
-            results = await asyncio.gather(*tasks_list, return_exceptions=True)
-
-            # 汇总结果
-            asset_results = {}
-            all_failed = []
-            all_completed = []
-            all_warnings = []
-
-            for i, result in enumerate(results):
-                target = targets[i]
-                if isinstance(result, Exception):
-                    asset_results[target] = {
-                        "status": "failed",
-                        "error": str(result),
-                    }
-                    all_failed.append({"target": target, "error": str(result)})
-                else:
-                    asset_results[target] = result
-                    if result["status"] == "failed":
-                        all_failed.append({"target": target, **result})
-                    elif result["status"] == "partial":
-                        all_completed.append({"target": target, **result})
-                        all_warnings.append({"target": target, **result})
-                    else:
-                        all_completed.append({"target": target, **result})
-
-            final_result = {
-                "status": "completed" if not all_failed and not all_warnings else ("partial" if all_completed else "failed"),
-                "task_type": task_type,
-                "asset_results": asset_results,
-                "completed": all_completed,
-                "failed": all_failed,
-                "warnings": all_warnings,
-            }
-
-            # 更新任务状态
-            if final_result["status"] in ["completed", "partial"]:
-                await engine.complete_task(task_id, final_result)
-            elif final_result["status"] == "failed":
-                task = await engine.get_task(task_id)
-                task.status = "failed"
-                task.result = final_result
-                await task_db.commit()
-        except Exception as e:
-            logger.error(f"Task {task_id} execution failed: {e}")
-            try:
-                task = await engine.get_task(task_id)
-                task.status = "failed"
-                task.result = {"error": str(e)}
-                await task_db.commit()
-            except Exception as e2:
-                logger.error(f"Failed to update task status: {e2}")
 
 
 @router.post("/tasks/{task_id}/complete")
@@ -858,7 +723,7 @@ async def execute_task(
     # 确定目标列表
     targets = []
     if req.targets:
-        targets = req.targets
+        targets = list(dict.fromkeys(req.targets))
     elif req.target:
         targets = [req.target]
     else:
@@ -866,6 +731,12 @@ async def execute_task(
     
     phase = await engine.get_phase(task.phase_id)
     assessment = await engine.get_assessment(phase.assessment_id)
+    from app.services.asset_scope import require_scannable_target
+    try:
+        for target in targets:
+            await require_scannable_target(db, assessment.project_id, target)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     try:
         if task.status != "todo":
@@ -903,9 +774,13 @@ async def execute_task(
                         params=target_params,
                     )
 
-            tasks_list = []
+            semaphore = asyncio.Semaphore(max(1, min(settings.ASSESSMENT_MAX_CONCURRENT, 10)))
+
             for target in targets:
-                tasks_list.append(execute_target(target))
+                async def limited_execute(value=target):
+                    async with semaphore:
+                        return await execute_target(value)
+                tasks_list.append(limited_execute())
             results = await asyncio.gather(*tasks_list, return_exceptions=True)
             
             # 汇总结果
@@ -1051,11 +926,7 @@ async def upload_task_documents(
         if suffix not in SUPPORTED_SUFFIXES:
             detail = "暂不支持旧版 DOC，请转换为 DOCX 或 PDF" if suffix == ".doc" else f"不支持的文件格式：{suffix or '未知'}"
             raise HTTPException(status_code=415, detail=detail)
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail=f"{file_name} 是空文件")
-        if len(content) > MAX_TASK_UPLOAD_SIZE:
-            raise HTTPException(status_code=413, detail=f"{file_name} 超过 100MB")
+        content = await _read_document_upload(file, MAX_TASK_UPLOAD_SIZE)
 
         file_path, digest, file_size = await file_storage.save_file(assessment.project_id, file_name, content)
         duplicate = (await db.execute(
@@ -1436,11 +1307,7 @@ async def upload_task_document(
         if suffix not in SUPPORTED_SUFFIXES:
             detail = "暂不支持旧版 DOC，请转换为 DOCX 或 PDF" if suffix == ".doc" else f"不支持的文件格式：{suffix or '未知'}"
             raise HTTPException(status_code=415, detail=detail)
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail="文件为空")
-        if len(content) > MAX_TASK_UPLOAD_SIZE:
-            raise HTTPException(status_code=413, detail="文件过大，单个文档最大支持 100MB")
+        content = await _read_document_upload(file, MAX_TASK_UPLOAD_SIZE)
         file_path, digest, file_size = await file_storage.save_file(assessment.project_id, file_name, content)
         duplicate = (await db.execute(
             select(Evidence).where(
@@ -1477,9 +1344,7 @@ async def upload_task_document(
     task_upload_dir.mkdir(parents=True, exist_ok=True)
     file_path = task_upload_dir / unique_name
 
-    content = await file.read()
-    if len(content) > MAX_TASK_UPLOAD_SIZE:
-        raise HTTPException(status_code=413, detail="文件过大，单个文档最大支持 100MB")
+    content = await _read_document_upload(file, MAX_TASK_UPLOAD_SIZE)
     with open(file_path, "wb") as f:
         f.write(content)
 

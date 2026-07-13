@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.core.database import init_db, AsyncSessionLocal
+from app.core.database import AsyncSessionLocal
 from app.core.initialization import initialize_default_models
 from app.api import api_router
 from app.orchestrator import orchestrator
@@ -22,9 +22,6 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     settings.validate_runtime_security()
 
-    # Startup: Initialize database
-    await init_db()
-    
     # Initialize default model configuration
     async with AsyncSessionLocal() as db:
         await initialize_default_models(db)

@@ -10,7 +10,6 @@ from typing import Dict, Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.asset import Asset
 from app.models.finding import Finding, FindingStatus, Judgment, JudgmentEngine, Severity
 from app.models.remediation import RemediationTicket, RemediationStatus
 from app.models.scan_task import ScanTask, ScanTaskStatus, ScanTaskType, TriggeredBy
@@ -230,17 +229,20 @@ class TaskExecutor:
             )
             existing = {finding.description: finding for finding in existing_result.scalars().all()}
             descriptions = {item["description"] for item in current}
-            for description, finding in existing.items():
-                if description not in descriptions:
-                    finding.status = FindingStatus.RESOLVED
-                    finding.resolved_at = datetime.utcnow()
-                    ticket_result = await self.db.execute(
-                        select(RemediationTicket).where(RemediationTicket.finding_id == finding.id)
-                    )
-                    ticket = ticket_result.scalar_one_or_none()
-                    if ticket and ticket.status not in (RemediationStatus.CLOSED, RemediationStatus.SKIPPED):
-                        ticket.status = RemediationStatus.RESOLVED
-                        ticket.resolved_at = ticket.resolved_at or datetime.utcnow()
+            # Never resolve an earlier finding merely because this run was partial or failed.
+            # A missing result is evidence only after the same capability completed cleanly.
+            if result.get("status") == "completed":
+                for description, finding in existing.items():
+                    if description not in descriptions:
+                        finding.status = FindingStatus.RESOLVED
+                        finding.resolved_at = datetime.utcnow()
+                        ticket_result = await self.db.execute(
+                            select(RemediationTicket).where(RemediationTicket.finding_id == finding.id)
+                        )
+                        ticket = ticket_result.scalar_one_or_none()
+                        if ticket and ticket.status not in (RemediationStatus.CLOSED, RemediationStatus.SKIPPED):
+                            ticket.status = RemediationStatus.RESOLVED
+                            ticket.resolved_at = ticket.resolved_at or datetime.utcnow()
             for item in current:
                 if item["description"] in existing:
                     continue
@@ -299,6 +301,9 @@ class TaskExecutor:
                 "message": f"任务类型 {task_type} 为人工任务，无需自动执行",
                 "task_type": task_type,
             }
+
+        from app.services.asset_scope import require_scannable_target
+        asset = await require_scannable_target(self.db, project_id, target)
         
         capabilities = mapping.get("capabilities", [])
         default_params = mapping.get("default_params", {}).copy()
@@ -312,13 +317,9 @@ class TaskExecutor:
         
         logger.info(f"Executing task {task_type} -> {capabilities} for target {target}")
 
-        asset_result = await self.db.execute(
-            select(Asset).where(Asset.project_id == project_id, Asset.value == target)
-        )
-        asset = asset_result.scalar_one_or_none()
         scan_task = ScanTask(
             project_id=project_id,
-            asset_id=asset.id if asset else None,
+            asset_id=asset.id,
             task_type=ScanTaskType.TARGETED,
             status=ScanTaskStatus.RUNNING,
             triggered_by=TriggeredBy.MANUAL,
