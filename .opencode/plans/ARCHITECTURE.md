@@ -176,6 +176,29 @@ flowchart LR
   RESET -.->|"保护，不删除"| STANDARD
 ```
 
+### 2.5 容器部署与可复现构建
+
+- Git 仓库保存完整源码、锁文件、Dockerfile、Compose 编排、迁移和标准库；不依赖本机生成且被忽略的 `frontend/dist`。
+- 前端镜像采用多阶段构建：Node 20 容器执行 `npm ci` 和 Vite 构建，再把静态产物复制到轻量 Python 静态服务镜像。
+- 全新部署先由 `.env.example` 创建根目录 `.env`，并必须替换数据库密码和至少 32 位的 `SECRET_KEY`。
+- `docker compose up -d --build` 是标准启动入口；`migrate` 服务先完成数据库迁移、pgvector/Apache AGE 初始化和标准图谱装载，业务服务再启动。
+- PostgreSQL、Redis、上传材料、OCR 模型和向量模型分别使用持久卷；普通 `down` 不删除数据，只有明确清库时才使用 `down -v`。
+- 模型权重不进入 Git。向量模型和 OCR/视觉模型首次使用时从模型源下载到持久卷，后续启动复用缓存。
+- 可复现构建仍依赖部署环境能够访问 Docker 镜像源、npm/Python 软件源和首次模型下载源；这些外部网络失败必须与源码构建失败区分显示。
+
+```mermaid
+flowchart LR
+  CLONE["Git clone：源码与锁文件"] --> ENV["由 .env.example 创建 .env"]
+  ENV --> BUILD["Docker Compose build"]
+  BUILD --> FEIMG["Node 构建前端 → 静态服务镜像"]
+  BUILD --> APPIMG["后端、Worker 与工具镜像"]
+  APPIMG --> MIGRATE["迁移 + pgvector + AGE + 标准图谱"]
+  MIGRATE --> START["启动 API、Worker、Gateway 与 Tool Server"]
+  START --> LAZY["首次任务按需下载模型到持久卷"]
+  FEIMG --> READY["Web / API 健康检查"]
+  LAZY --> READY
+```
+
 ## 三、信息架构
 
 产品主线按“组织 → 项目 → 资产/文档/检测 → 发现项 → 整改 → 复测 → 报告”组织。
@@ -939,6 +962,7 @@ flowchart LR
 | 文档合规 | 混合解析、混合归类、混合检索、图谱补全、LLM 判证、规则裁决 | 文档、证据、整改、报告 | implemented |
 | 标准库 | 运行时使用正式知识图谱，YAML 仅作初始化、导入导出和备份 | 标准、检索、判证 | implemented |
 | 图谱引擎 | 使用 Apache AGE 属性图并与 PostgreSQL、pgvector 同库部署；不依赖商业版图数据库 | 标准、证据、部署、备份 | implemented |
+| 可复现部署 | Git 保存完整构建输入，前端在 Docker 内构建，Compose 自动迁移，模型按需下载到持久卷 | 构建、部署、升级、运维 | implemented |
 | 数据策略 | 新文档子系统完整替换旧实现，旧数据不迁移，完成后从空数据验收 | 数据、接口、页面、测试 | implemented |
 | 数据规模 | 在线索引只保留当前有效材料，并提供测评、项目、组织三级清理 | 向量、图谱、OCR、存储 | implemented |
 | 流程边界 | Flow Engine 独立拥有五阶段状态机，Orchestrator/AI Engine 只能通过命令调用 | 测评、对话、任务、审计 | implemented |
@@ -947,6 +971,6 @@ flowchart LR
 
 ---
 
-**文档版本**: v3.3
+**文档版本**: v3.4
 **最后更新**: 2026-07-15
 **维护者**: CertiProof Team
