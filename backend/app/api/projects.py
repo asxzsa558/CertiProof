@@ -15,8 +15,8 @@ from app.models.finding import Finding, FindingStatus, Judgment, JudgmentEngine,
 from app.models.remediation import RemediationTicket, RemediationStatus
 from app.models.evidence import Evidence, EvidenceType
 from app.models.questionnaire import QuestionnaireRecord
-from app.models.evidence import Evidence
 from app.models.assessment import Assessment, FlowTemplate, PhaseInstance, TaskInstance, FlowEvent
+from app.models.document_knowledge import DocumentAnalysisRun, DocumentFile
 from app.models.assessment_type import ProjectAssessment
 from app.models.monitoring import ScheduledScan, ScanHistory
 from app.models.change_snapshot import ChangeSnapshot
@@ -29,6 +29,12 @@ from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, P
 from app.services.report_service import generate_html_report, generate_json_report
 from app.services.flow_engine import get_flow_engine
 from app.services.audit import record_audit_event
+from app.services.data_lifecycle import (
+    clear_project_documents,
+    delete_project_records,
+    delete_storage_files,
+    storage_usage,
+)
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
@@ -358,7 +364,59 @@ async def restore_project(
     return project
 
 
-@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.get("/{project_id}/storage")
+async def get_project_storage(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await get_project_for_user(db, project_id, current_user.id, "assessment:read", allow_archived=True)
+    return {"project_id": project.id, **await storage_usage(db, [project.id])}
+
+
+@router.delete("/{project_id}/documents")
+async def clear_project_document_data(
+    project_id: int,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await get_project_for_user(db, project_id, current_user.id, "evidence:manage")
+    if payload.get("confirmation") != project.name:
+        raise HTTPException(status_code=400, detail="请输入完整项目名称以确认清空文档数据")
+    try:
+        cleanup = await clear_project_documents(db, project.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await record_audit_event(
+        db,
+        event_type="project.documents_cleared",
+        resource_type="project_documents",
+        resource_id=project.id,
+        actor_user_id=current_user.id,
+        organization_id=project.organization_id,
+        project_id=project.id,
+        details={key: value for key, value in cleanup.items() if key != "file_paths"},
+    )
+    await db.commit()
+    files = await delete_storage_files(cleanup.pop("file_paths"))
+    if files["failed_file_paths"]:
+        await record_audit_event(
+            db,
+            event_type="project.document_file_cleanup_partial",
+            resource_type="project_documents",
+            resource_id=project.id,
+            actor_user_id=current_user.id,
+            organization_id=project.organization_id,
+            project_id=project.id,
+            outcome="partial",
+            details=files,
+        )
+        await db.commit()
+    return {"status": "cleared", **cleanup, **files}
+
+
+@router.delete("/{project_id}")
 async def delete_project(
     project_id: int,
     db: AsyncSession = Depends(get_db),
@@ -366,82 +424,22 @@ async def delete_project(
 ):
     project = await get_project_for_user(db, project_id, current_user.id, "project:delete")
 
-    await db.execute(delete(RemediationTicket).where(RemediationTicket.project_id == project_id))
-    await db.execute(delete(Evidence).where(Evidence.project_id == project_id))
-    await db.execute(
-        delete(Evidence).where(
-            Evidence.finding_id.in_(
-                select(Finding.id).where(Finding.project_id == project_id)
-            )
-        )
+    try:
+        cleanup = await delete_project_records(db, project)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await record_audit_event(
+        db,
+        event_type="project.deleted",
+        resource_type="project",
+        resource_id=project_id,
+        actor_user_id=current_user.id,
+        organization_id=project.organization_id,
+        details={"released_file_bytes": cleanup["released_file_bytes"]},
     )
-    await db.execute(
-        delete(Evidence).where(
-            Evidence.questionnaire_record_id.in_(
-                select(QuestionnaireRecord.id).where(QuestionnaireRecord.project_id == project_id)
-            )
-        )
-    )
-    await db.execute(delete(QuestionnaireRecord).where(QuestionnaireRecord.project_id == project_id))
-    await db.execute(delete(Finding).where(Finding.project_id == project_id))
-    await db.execute(delete(ProjectAssessment).where(ProjectAssessment.project_id == project_id))
-
-    # 删除测评流程相关记录
-    assessment_ids = await db.execute(
-        select(Assessment.id).where(Assessment.project_id == project_id)
-    )
-    assessment_id_list = [row[0] for row in assessment_ids.all()]
-
-    if assessment_id_list:
-        await db.execute(
-            delete(FlowEvent).where(FlowEvent.assessment_id.in_(assessment_id_list))
-        )
-        phase_ids = await db.execute(
-            select(PhaseInstance.id).where(PhaseInstance.assessment_id.in_(assessment_id_list))
-        )
-        phase_id_list = [row[0] for row in phase_ids.all()]
-        if phase_id_list:
-            await db.execute(
-                delete(TaskInstance).where(TaskInstance.phase_id.in_(phase_id_list))
-            )
-            await db.execute(
-                delete(PhaseInstance).where(PhaseInstance.assessment_id.in_(assessment_id_list))
-            )
-        await db.execute(delete(Assessment).where(Assessment.project_id == project_id))
-
-    # 删除监控相关记录
-    scheduled_scan_ids = await db.execute(
-        select(ScheduledScan.id).where(ScheduledScan.project_id == project_id)
-    )
-    scheduled_scan_id_list = [row[0] for row in scheduled_scan_ids.all()]
-
-    if scheduled_scan_id_list:
-        await db.execute(
-            delete(ScanHistory).where(ScanHistory.scheduled_scan_id.in_(scheduled_scan_id_list))
-        )
-        await db.execute(delete(ScheduledScan).where(ScheduledScan.project_id == project_id))
-
-    await db.execute(delete(ChangeSnapshot).where(ChangeSnapshot.project_id == project_id))
-    await db.execute(delete(ScanTask).where(ScanTask.project_id == project_id))
-    await db.execute(delete(Asset).where(Asset.project_id == project_id))
-
-    await db.execute(delete(ProjectMemory).where(ProjectMemory.project_id == project_id))
-    await db.execute(delete(ActionHistory).where(ActionHistory.project_id == project_id))
-    await db.execute(delete(ResultCache).where(ResultCache.project_id == project_id))
-
-    await db.execute(
-        delete(ConversationHistory).where(ConversationHistory.project_id == project_id)
-    )
-    await db.execute(
-        delete(ConversationArchive).where(ConversationArchive.project_id == project_id)
-    )
-    await db.execute(
-        delete(ConversationThread).where(ConversationThread.project_id == project_id)
-    )
-
-    await db.delete(project)
     await db.commit()
-    return None
+    files = await delete_storage_files(cleanup.pop("file_paths"))
+    return {"status": "deleted", **cleanup, **files}
 
 
 @router.get("/{project_id}/report")

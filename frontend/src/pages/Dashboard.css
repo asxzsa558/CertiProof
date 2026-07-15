@@ -117,19 +117,20 @@
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  min-height: 84px;
-  margin-bottom: 14px;
-  padding: 14px 17px;
+  min-height: 76px;
+  margin-bottom: 12px;
+  padding: 12px 16px;
   border: 1px solid var(--line);
   background: linear-gradient(105deg, rgba(9, 25, 43, 0.96), rgba(5, 13, 26, 0.82));
   box-shadow: inset 0 1px 0 rgba(234, 249, 255, 0.055), 0 20px 58px rgba(0, 0, 0, 0.2);
 }
 
-.org-title-block { position: relative; padding-left: 12px; }
+.org-topbar > :first-child { flex: 1; min-width: 0; }
+.org-title-block { position: relative; min-width: 0; padding-left: 12px; }
 .org-title-block::before { content: ''; position: absolute; top: 3px; bottom: 3px; left: 0; width: 2px; background: var(--cyan); box-shadow: 0 0 11px rgba(83, 222, 241, 0.76); }
 .org-title-block > span { color: #77dce9; font-size: 10px; }
-.org-topbar h1 { margin: 3px 0 0; color: #f5fbff; font-size: 23px; font-weight: 700; line-height: 1.1; }
-.org-topbar p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.org-topbar h1 { margin: 2px 0 0; color: #f5fbff; font-size: 22px; font-weight: 700; line-height: 1.1; overflow-wrap: anywhere; }
+.org-topbar p { margin: 5px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 
 .org-top-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .org-select { min-width: 176px; }
@@ -199,8 +200,15 @@
 .mini-progress { height: 8px; overflow: hidden; background: rgba(22, 39, 56, 0.94); border: 1px solid rgba(115, 175, 198, 0.13); border-radius: 999px; }
 .mini-progress b { display: block; height: 100%; background: linear-gradient(90deg, #32c7e1, #58a6ff); }
 .matrix-progress-cell em { color: #d9f6fa; font-family: var(--font-mono); font-size: 11px; font-style: normal; text-align: right; }
-.risk-count { color: #a7bed0; font-family: var(--font-mono); }
+.matrix-header .numeric,
+.risk-count,
+.matrix-task-count {
+  justify-self: end;
+  text-align: right;
+}
+.risk-count { min-width: 26px; color: #a7bed0; font-family: var(--font-mono); }
 .risk-count.hot { color: #ff9dab; font-weight: 700; }
+.matrix-task-count { color: #deedf7; font-family: var(--font-mono); }
 
 .topology-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 336px; gap: 14px; align-items: start; min-width: 0; }
 .topology-panel { padding: 0; background: #050b15; }
@@ -211,6 +219,10 @@
 .tool-telemetry-panel { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 9px; flex: 1; min-height: 0; }
 .tool-health-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; min-height: 0; align-content: start; }
 .scroll-region { min-height: 0; overflow: auto; padding-right: 3px; scrollbar-width: thin; scrollbar-color: rgba(83, 222, 241, 0.34) rgba(9, 31, 47, 0.34); }
+.scroll-fade {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 18px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 18px), transparent 100%);
+}
 .scroll-region::-webkit-scrollbar { width: 6px; height: 6px; }
 .scroll-region::-webkit-scrollbar-track { background: rgba(9, 31, 47, 0.34); }
 .scroll-region::-webkit-scrollbar-thumb { background: rgba(83, 222, 241, 0.34); border-radius: 999px; }

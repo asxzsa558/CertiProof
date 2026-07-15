@@ -25,9 +25,9 @@
 .projects-topbar { display: flex; align-items: center; gap: 16px; min-height: 72px; padding: 12px 15px; }
 .projects-back { color: #b8e9f2 !important; }
 .projects-brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
-.projects-brand > div { display: grid; gap: 3px; }
-.projects-brand span { color: #f5fbff; font-size: 17px; font-weight: 700; }
-.projects-brand em { color: rgba(167, 198, 216, 0.72); font-size: 11px; font-style: normal; }
+.projects-brand > div { display: grid; gap: 3px; min-width: 0; }
+.projects-brand span { overflow: hidden; color: #f5fbff; font-size: 17px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.projects-brand em { overflow: hidden; color: rgba(167, 198, 216, 0.72); font-size: 11px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-tabs { display: flex; align-self: stretch; align-items: stretch; gap: 4px; }
 .workspace-tabs button { position: relative; min-width: 92px; padding: 0 11px; color: rgba(177, 206, 222, 0.7); border: 0; background: transparent; cursor: pointer; font-size: 12px; }
 .workspace-tabs button:hover,

@@ -520,7 +520,13 @@ function ChatPage() {
           </div>
           {!showManager && (
             <Space size="middle">
-              <SystemConfig value={selectedModel} onChange={setSelectedModel} />
+              <SystemConfig
+                value={selectedModel}
+                onChange={setSelectedModel}
+                projectId={selectedProject?.id}
+                projectName={selectedProject?.name}
+                organizationId={currentOrgId}
+              />
               <Tooltip title="通知">
                 <Button icon={<BellOutlined />} type="text" className="header-icon-btn" />
               </Tooltip>

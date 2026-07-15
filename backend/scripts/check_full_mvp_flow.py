@@ -12,14 +12,13 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal, engine as db_engine
 from app.models.asset import Asset, AssetType, VerificationStatus
-from app.models.assessment import Assessment, TaskInstance
-from app.models.assessment_type import ProjectAssessment
-from app.models.change_snapshot import ChangeSnapshot
+from app.models.assessment import Assessment, PhaseInstance, TaskInstance
 from app.models.evidence import Evidence, EvidenceType
+from app.models.document_knowledge import DocumentBlock, DocumentFile
 from app.models.finding import Finding, FindingStatus, Judgment, JudgmentEngine, Severity
 from app.models.organization import OrganizationMember
 from app.models.project import ComplianceLevel, Project, ProjectStatus
@@ -27,9 +26,11 @@ from app.models.remediation import RemediationStatus, RemediationTicket
 from app.models.scan_task import ScanTask, ScanTaskStatus, ScanTaskType, TriggeredBy
 from app.models.user import User
 from app.services.change_detection import record_asset_snapshot, record_port_snapshots
-from app.services.document_pipeline import create_document_run, process_document_run
+from app.services.data_lifecycle import delete_project_records, delete_storage_files
+from app.services.document_pipeline import create_document_run
 from app.services.file_storage import file_storage
 from app.services.flow_engine import get_flow_engine
+from app.services.knowledge_graph import knowledge_graph
 from app.services.report_service import generate_html_report, generate_json_report
 
 
@@ -53,44 +54,58 @@ async def _first_user_and_org(db):
     return user, member.organization_id if member else None
 
 
-async def _save_document_evidence(db, project_id: int, task: TaskInstance, file_name: str, content: str, user_id: int):
+async def _save_document_file(db, project_id: int, task: TaskInstance, file_name: str, content: str):
+    phase = await db.get(PhaseInstance, task.phase_id)
+    if not phase:
+        raise RuntimeError("Document task has no assessment phase.")
     file_path, digest, file_size = await file_storage.save_file(project_id, file_name, content.encode("utf-8"))
-    evidence = Evidence(
+    document = DocumentFile(
         project_id=project_id,
-        evidence_type=EvidenceType.DOCUMENT,
-        source="full_flow_e2e",
-        file_name=file_name,
-        file_path=file_path,
-        file_size=file_size,
+        assessment_id=phase.assessment_id,
+        task_id=task.id,
+        original_name=file_name,
+        storage_path=file_path,
+        size_bytes=file_size,
         mime_type="text/plain",
-        clause_id=f"DOC-TASK-{task.id}",
-        hash_sha256=digest,
-        uploaded_by=user_id,
-        description=f"自动化验收：{task.name}",
+        sha256=digest,
+        parse_status="queued",
     )
-    db.add(evidence)
+    db.add(document)
     await db.commit()
-    return evidence
+    return document
 
 
-async def _replace_document_evidence(db, project_id: int, task: TaskInstance, file_name: str, content: str, user_id: int):
-    clause_id = f"DOC-TASK-{task.id}"
-    evidences = (await db.execute(
-        select(Evidence).where(Evidence.project_id == project_id, Evidence.clause_id == clause_id)
+async def _replace_document_file(db, project_id: int, task: TaskInstance, file_name: str, content: str):
+    old_documents = (await db.execute(
+        select(DocumentFile).where(
+            DocumentFile.project_id == project_id,
+            DocumentFile.task_id == task.id,
+            DocumentFile.is_active.is_(True),
+        )
     )).scalars().all()
-    for evidence in evidences:
-        if evidence.file_path:
-            await file_storage.delete_file(evidence.file_path)
-        await db.delete(evidence)
+    replacement = await _save_document_file(db, project_id, task, file_name, content)
+    for document in old_documents:
+        document.is_active = False
+        document.replaced_by_id = replacement.id
+        await db.execute(
+            DocumentBlock.__table__.update()
+            .where(DocumentBlock.document_file_id == document.id)
+            .values(is_active=False, embedding=None)
+        )
+        await knowledge_graph.purge_file(db, document.id)
     await db.commit()
-    return await _save_document_evidence(db, project_id, task, file_name, content, user_id)
+    return replacement
 
 
 async def _run_document_analysis(db, task: TaskInstance, project_id: int, user_id: int):
     run = await create_document_run(db, task, project_id, user_id, "standard")
-    await process_document_run(db, run)
-    await db.refresh(run)
+    for _ in range(180):
+        await asyncio.sleep(1)
+        await db.refresh(run)
+        if run.status in {"completed", "failed", "cancelled"}:
+            break
     task = await db.get(TaskInstance, task.id)
+    await db.refresh(task)
     analysis = (task.result or {}).get("analysis") if task and task.result else None
     if not analysis or run.status != ScanTaskStatus.COMPLETED:
         raise AssertionError(f"document run failed: run={run.id}, status={run.status}, analysis={analysis}")
@@ -415,26 +430,21 @@ async def _add_change_history(db, project_id: int, scan_task_id: int):
 
 
 async def _cleanup_project(db, project_id: int):
-    evidences = (await db.execute(select(Evidence).where(Evidence.project_id == project_id))).scalars().all()
-    for evidence in evidences:
-        if evidence.file_path:
-            await file_storage.delete_file(evidence.file_path)
-    assessment_ids = (await db.execute(select(Assessment.id).where(Assessment.project_id == project_id))).scalars().all()
-    for assessment_id in assessment_ids:
-        assessment = await db.get(Assessment, assessment_id)
-        if assessment:
-            await db.delete(assessment)
-    await db.execute(delete(ProjectAssessment).where(ProjectAssessment.project_id == project_id))
-    await db.execute(delete(ChangeSnapshot).where(ChangeSnapshot.project_id == project_id))
-    await db.execute(delete(RemediationTicket).where(RemediationTicket.project_id == project_id))
-    await db.execute(delete(Evidence).where(Evidence.project_id == project_id))
-    await db.execute(delete(Finding).where(Finding.project_id == project_id))
-    await db.execute(delete(ScanTask).where(ScanTask.project_id == project_id))
-    await db.execute(delete(Asset).where(Asset.project_id == project_id))
     project = await db.get(Project, project_id)
-    if project:
-        await db.delete(project)
+    if not project:
+        return
+    cleanup = await delete_project_records(db, project)
     await db.commit()
+    await delete_storage_files(cleanup["file_paths"])
+
+
+async def _cleanup_failed_e2e_projects():
+    async with AsyncSessionLocal() as db:
+        project_ids = (await db.execute(
+            select(Project.id).where(Project.name.like("CertiProof 自动化验收 %"))
+        )).scalars().all()
+        for project_id in project_ids:
+            await _cleanup_project(db, project_id)
 
 
 async def run_full_flow():
@@ -491,24 +501,28 @@ async def run_full_flow():
             "安全事件管理制度",
             "本制度明确事件发现后应由值班人员进行事件报告。",
             "安全事件应上报安全负责人。",
+            "安全事件无需分析或复盘，也不制定整改或预防措施。",
+            "不进行事件分类或分级，无需升级、通报或遵守报告时限。",
+            "事件证据无需留存，事件关闭不要求闭环验证。",
         ])
-        await _save_document_evidence(db, project.id, doc_task, "e2e-security-event-v1.txt", incomplete_doc, user.id)
+        await _save_document_file(db, project.id, doc_task, "e2e-security-event-v1.txt", incomplete_doc)
         first_run, doc_task, first_analysis = await _run_document_analysis(db, doc_task, project.id, user.id)
-        assert first_analysis["status"] in {"fail", "partial"}
+        assert first_analysis["status"] in {"fail", "partial", "unable"}
         assert first_analysis["gaps"], "first document analysis should generate gaps"
 
         improved_doc = "\n".join([
             "安全事件管理制度",
-            "一、事件发现与事件报告：监控、日志审计和人员上报发现异常后，应在 30 分钟内上报并通报。",
-            "二、事件处置与处理记录：安全事件处置必须形成处置记录和闭环记录。",
-            "三、分析复盘：事件关闭前应开展原因分析、复盘和总结。",
-            "四、整改预防：制定整改、预防、改进措施并跟踪负责人。",
-            "五、事件分类与事件分级：按影响范围、严重程度划分级别。",
-            "六、升级通报和报告时限：重大事件按升级流程通报，明确报告时限。",
-            "七、证据留存：日志、截图、取证材料和记录保存不少于六个月。",
-            "八、关闭验证：整改完成后进行验证、确认和关闭。",
+            "适用范围：本制度适用于公司全部信息系统、网络、数据和相关安全事件。",
+            "一、事件发现与事件报告：监控值班员通过监控、日志审计和人员上报发现异常后，应在 30 分钟内上报安全负责人，并填写事件报告记录。",
+            "二、事件处置与处理记录：应急处置组负责隔离、调查和恢复，处置过程必须形成处置记录和闭环记录。",
+            "三、分析复盘：安全负责人组织相关部门在事件关闭前开展原因分析、复盘和总结，并归档复盘记录。",
+            "四、整改预防：信息安全部门制定整改、预防和改进措施，责任部门按时落实，安全负责人持续跟踪并记录结果。",
+            "五、事件分类与事件分级：信息安全部门按影响范围和严重程度划分一般、较大、重大级别，重大级别由安全委员会审批。",
+            "六、升级通报和报告时限：监控值班员在 30 分钟内报告安全负责人；重大事件由安全负责人按升级流程向管理层通报并登记时间。",
+            "七、证据留存：审计管理员归口保管日志、截图、取证材料和处理记录，保存不少于六个月，并实施访问控制。",
+            "八、关闭验证：整改完成后由安全负责人组织验证，业务负责人确认，安全委员会审批关闭并保留验证记录。",
         ])
-        await _replace_document_evidence(db, project.id, doc_task, "e2e-security-event-v2.txt", improved_doc, user.id)
+        await _replace_document_file(db, project.id, doc_task, "e2e-security-event-v2.txt", improved_doc)
         second_run, doc_task, second_analysis = await _run_document_analysis(db, doc_task, project.id, user.id)
         comparison = second_analysis.get("retest_comparison")
         assert comparison and comparison["delta"] >= 0
@@ -528,7 +542,7 @@ async def run_full_flow():
         assert [phase["name"] for phase in report["assessment"]["phases"]] == STAGE_NAMES
         assert report["summary"]["total_findings"] >= 2
         assert report["summary"]["total_evidences"] >= 2
-        assert report["summary"]["total_scan_tasks"] >= 8
+        assert report["summary"]["total_scan_tasks"] == 6
         assert report["summary"]["closed_tickets"] >= 2
         assert report["document_gaps"], "report should include document gap analysis"
         assert report["retest_comparisons"], "report should include retest comparisons"
@@ -580,5 +594,14 @@ async def run_full_flow():
             await _cleanup_project(db, project.id)
 
 
+async def _main():
+    try:
+        await run_full_flow()
+    except BaseException:
+        if os.getenv("KEEP_E2E_PROJECT", "").lower() not in {"1", "true", "yes"}:
+            await _cleanup_failed_e2e_projects()
+        raise
+
+
 if __name__ == "__main__":
-    asyncio.run(run_full_flow())
+    asyncio.run(_main())

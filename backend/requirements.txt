@@ -10,6 +10,7 @@ sqlalchemy
 aiosqlite
 asyncpg
 alembic
+pgvector>=0.4,<1
 
 # Authentication
 python-jose[cryptography]

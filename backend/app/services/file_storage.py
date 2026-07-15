@@ -10,20 +10,22 @@ from pathlib import Path
 from typing import Optional, Tuple
 from datetime import datetime
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
 class FileStorageService:
     """文件存储服务"""
     
-    def __init__(self, base_path: str = "/app/uploads"):
+    def __init__(self, base_path: str | None = None):
         """
         初始化文件存储服务
         
         Args:
             base_path: 文件存储根目录
         """
-        self.base_path = Path(base_path)
+        self.base_path = Path(base_path or settings.UPLOAD_DIR)
         self.base_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"FileStorageService initialized with base_path: {self.base_path}")
     
@@ -35,7 +37,7 @@ class FileStorageService:
         now = datetime.utcnow()
         year = now.strftime("%Y")
         month = now.strftime("%m")
-        timestamp = now.strftime("%Y%m%d_%H%M%S")
+        timestamp = now.strftime("%Y%m%d_%H%M%S_%f")
         
         # 清理文件名，避免路径注入
         safe_name = self._sanitize_filename(file_name)

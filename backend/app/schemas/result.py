@@ -3,7 +3,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from app.models.finding import Severity, Judgment, JudgmentEngine, FindingStatus
 from app.models.evidence import EvidenceType
-from app.models.scan_task import ScanTaskStatus, ScanTaskType
+from app.models.scan_task import ScanTaskStatus, ScanTaskType, TriggeredBy
 
 
 # Finding schemas
@@ -22,7 +22,8 @@ class FindingBase(BaseModel):
 class FindingResponse(FindingBase):
     id: int
     project_id: int
-    scan_task_id: int
+    scan_task_id: Optional[int] = None
+    document_run_id: Optional[int] = None
     evidence_ids: Optional[List[int]] = None
     created_at: datetime
     updated_at: datetime
@@ -34,12 +35,19 @@ class FindingResponse(FindingBase):
 
 class FindingDetail(FindingResponse):
     evidences: List['EvidenceResponse'] = []
+    document_evidences: List[Dict[str, Any]] = []
 
 
 # Evidence schemas
 class EvidenceBase(BaseModel):
     evidence_type: EvidenceType
+    project_id: Optional[int] = None
     source: Optional[str] = None
+    file_name: Optional[str] = None
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    description: Optional[str] = None
+    clause_id: Optional[str] = None
     content: Optional[Dict[str, Any]] = None
     file_path: Optional[str] = None
     raw_output: Optional[str] = None
@@ -48,7 +56,7 @@ class EvidenceBase(BaseModel):
 
 class EvidenceResponse(EvidenceBase):
     id: int
-    finding_id: int
+    finding_id: Optional[int] = None
     created_at: datetime
     
     class Config:
@@ -66,6 +74,9 @@ class ScanTaskResponse(ScanTaskBase):
     id: int
     project_id: int
     asset_id: Optional[int] = None
+    triggered_by: TriggeredBy
+    result_summary: Optional[Dict[str, Any]] = None
+    progress: Optional[Dict[str, Any]] = None
     findings_count: int = 0
     high_severity_count: int = 0
     medium_severity_count: int = 0

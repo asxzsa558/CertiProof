@@ -24,6 +24,8 @@ import {
   ReloadOutlined,
   CheckOutlined,
   CrownOutlined,
+  HddOutlined,
+  WarningOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import { useAuthStore } from '../store/authStore'
@@ -68,6 +70,13 @@ const PERMISSION_LABELS = {
   'tool:diagnose': '工具诊断',
 }
 
+const formatBytes = (value = 0) => {
+  if (!value) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
+  return `${(value / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`
+}
+
 function OrgPanel({ label, value, sub, accentColor }) {
   return (
     <div className="org-panel" style={{ '--accent': accentColor }}>
@@ -93,6 +102,8 @@ export default function OrganizationSettings() {
   const [editForm] = Form.useForm()
   const [addMemberModalOpen, setAddMemberModalOpen] = useState(false)
   const [addMemberForm] = Form.useForm()
+  const [storage, setStorage] = useState(null)
+  const [initializing, setInitializing] = useState(false)
 
   const currentOrgId = useAuthStore((state) => state.currentOrgId)
   const organizations = useAuthStore((state) => state.organizations)
@@ -132,9 +143,19 @@ export default function OrganizationSettings() {
     }
   }
 
+  const loadStorage = async () => {
+    if (!currentOrgId || currentOrg?.role !== 'admin') return
+    try {
+      const res = await api.get(`/organizations/${currentOrgId}/storage`)
+      setStorage(res.data)
+    } catch (err) {
+      setStorage({ error: err.response?.data?.detail || '容量信息加载失败' })
+    }
+  }
+
   useEffect(() => {
-    Promise.all([loadOrg(), loadMembers(), loadRoles()]).finally(() => setLoading(false))
-  }, [currentOrgId])
+    Promise.all([loadOrg(), loadMembers(), loadRoles(), loadStorage()]).finally(() => setLoading(false))
+  }, [currentOrgId, currentOrg?.role])
 
   const handleSave = async () => {
     try {
@@ -185,6 +206,43 @@ export default function OrganizationSettings() {
     } catch (err) {
       message.error(err.response?.data?.detail || '移除失败')
     }
+  }
+
+  const handleInitializeBusinessData = () => {
+    let confirmation = ''
+    Modal.confirm({
+      title: '初始化组织业务数据',
+      icon: <WarningOutlined />,
+      width: 560,
+      content: (
+        <div className="org-init-confirm">
+          <p>该操作会删除组织下全部项目、资产、测评、检测结果、对话、文档、向量和证据图谱。组织成员、角色模板和标准图谱会保留。</p>
+          <span>输入组织名称 <b>{org.name}</b> 确认：</span>
+          <Input onChange={(event) => { confirmation = event.target.value }} />
+        </div>
+      ),
+      okText: '初始化业务数据',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        if (confirmation !== org.name) {
+          message.error('组织名称不匹配')
+          return Promise.reject(new Error('confirmation mismatch'))
+        }
+        setInitializing(true)
+        try {
+          const response = await api.post(`/organizations/${currentOrgId}/initialize`, { confirmation })
+          const failed = response.data?.failed_file_paths?.length || 0
+          message.success(failed ? `业务数据已初始化，${failed} 个物理文件待重试` : '组织业务数据已初始化')
+          await loadStorage()
+        } catch (err) {
+          message.error(err.response?.data?.detail || '组织业务数据初始化失败')
+          return Promise.reject(err)
+        } finally {
+          setInitializing(false)
+        }
+      },
+    })
   }
 
   if (loading || !org) {
@@ -391,6 +449,43 @@ export default function OrganizationSettings() {
           )}
         </div>
       </section>
+
+      {isAdmin && (
+        <section className="org-section org-data-lifecycle">
+          <div className="org-section-header">
+            <span className="org-section-tag">// DATA LIFECYCLE</span>
+            <span className="org-section-title">数据容量与初始化</span>
+            <span className="org-section-meta">{storage?.project_count || 0} PROJECTS</span>
+          </div>
+          {storage?.error ? (
+            <div className="org-storage-error">{storage.error}</div>
+          ) : (
+            <div className="org-storage-grid">
+              <div className="org-storage-total">
+                <HddOutlined />
+                <span>当前逻辑占用</span>
+                <strong>{formatBytes(storage?.total_bytes || 0)}</strong>
+              </div>
+              {Object.entries(storage?.categories || {}).map(([key, item]) => (
+                <div key={key}>
+                  <span>{item.label}</span>
+                  <strong>{formatBytes(item.bytes)}</strong>
+                  <em>{item.transient ? '临时' : item.on_demand ? '按需' : `${item.count || 0} 项`}</em>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="org-danger-row">
+            <div>
+              <strong>初始化组织业务数据</strong>
+              <span>保留组织、成员、权限角色和全局标准图谱，删除全部项目业务数据。</span>
+            </div>
+            <button className="org-danger-btn" onClick={handleInitializeBusinessData} disabled={initializing}>
+              <DeleteOutlined /> {initializing ? '处理中...' : '初始化'}
+            </button>
+          </div>
+        </section>
+      )}
 
       <Modal
         title={

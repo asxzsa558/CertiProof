@@ -3,7 +3,9 @@ version: "3.8"
 services:
   # 数据库
   db:
-    image: postgres:15-alpine
+    build:
+      context: ./docker/postgres
+      dockerfile: Dockerfile
     container_name: certiproof-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-certiproof}
@@ -65,6 +67,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       TASK_EXECUTION_MODE: ${TASK_EXECUTION_MODE:-worker}
       DOCUMENT_ANALYSIS_MODE: ${DOCUMENT_ANALYSIS_MODE:-standard}
+      GRAPH_NAME: ${GRAPH_NAME:-certiproof}
+      GRAPH_REQUIRED: ${GRAPH_REQUIRED:-true}
+      EMBEDDING_SERVER_URL: http://embedding-server:8017
+      DOCUMENT_EMBEDDING_MODEL: ${DOCUMENT_EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      DOCUMENT_EMBEDDING_DIMENSION: ${DOCUMENT_EMBEDDING_DIMENSION:-1024}
     volumes:
       - ./reference:/reference
       - uploads_data:/app/uploads
@@ -75,6 +82,8 @@ services:
         condition: service_healthy
       mcp-gateway:
         condition: service_started
+      embedding-server:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - certiproof-net
@@ -89,9 +98,16 @@ services:
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       APP_ENV: ${APP_ENV:-production}
       DEBUG: ${DEBUG:-false}
+      GRAPH_NAME: ${GRAPH_NAME:-certiproof}
+      GRAPH_REQUIRED: ${GRAPH_REQUIRED:-true}
+      DOCUMENT_EMBEDDING_MODEL: ${DOCUMENT_EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      DOCUMENT_EMBEDDING_DIMENSION: ${DOCUMENT_EMBEDDING_DIMENSION:-1024}
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./reference:/reference
+      - uploads_data:/app/uploads
     restart: "no"
     networks:
       - certiproof-net
@@ -116,6 +132,11 @@ services:
       TASK_LEASE_MINUTES: ${TASK_LEASE_MINUTES:-120}
       MONITORING_WORKER_BATCH_SIZE: ${MONITORING_WORKER_BATCH_SIZE:-5}
       DOCUMENT_ANALYSIS_MODE: ${DOCUMENT_ANALYSIS_MODE:-standard}
+      GRAPH_NAME: ${GRAPH_NAME:-certiproof}
+      GRAPH_REQUIRED: ${GRAPH_REQUIRED:-true}
+      EMBEDDING_SERVER_URL: http://embedding-server:8017
+      DOCUMENT_EMBEDDING_MODEL: ${DOCUMENT_EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      DOCUMENT_EMBEDDING_DIMENSION: ${DOCUMENT_EMBEDDING_DIMENSION:-1024}
     volumes:
       - ./reference:/reference
       - uploads_data:/app/uploads
@@ -126,6 +147,8 @@ services:
         condition: service_healthy
       mcp-gateway:
         condition: service_started
+      embedding-server:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - certiproof-net
@@ -251,11 +274,36 @@ services:
     networks:
       - certiproof-net
 
+  # 本地多语言文本向量服务（ONNX Runtime，无外部授权依赖）
+  embedding-server:
+    build:
+      context: ./mcp-servers/embedding-server
+      dockerfile: Dockerfile
+    container_name: certiproof-embedding-server
+    environment:
+      DOCUMENT_EMBEDDING_MODEL: ${DOCUMENT_EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+      DOCUMENT_EMBEDDING_DIMENSION: ${DOCUMENT_EMBEDDING_DIMENSION:-1024}
+      EMBEDDING_CACHE_DIR: /models
+      EMBEDDING_THREADS: ${EMBEDDING_THREADS:-2}
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+    volumes:
+      - embedding_models:/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8017/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
 volumes:
   postgres_data:
   redis_data:
   uploads_data:
   ocr_models:
+  embedding_models:
 
 networks:
   certiproof-net:

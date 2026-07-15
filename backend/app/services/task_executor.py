@@ -150,6 +150,23 @@ TASK_CAPABILITY_MAP = {
     "interview": None,
 }
 
+CAPABILITY_NAMES = {
+    "scan_ports": "端口扫描",
+    "masscan_scan": "高速端口扫描",
+    "fping_scan": "批量存活检测",
+    "scan_ssl": "SSL/TLS 检测",
+    "scan_vulnerabilities": "漏洞扫描",
+    "baseline_check": "安全基线核查",
+    "scan_weak_passwords": "弱口令检测",
+    "nikto_scan": "Web 漏洞扫描",
+    "sqlmap_scan": "SQL 注入检测",
+    "web_discovery_scan": "Web 目录发现",
+    "ffuf_scan": "Web 模糊测试",
+    "database_security_scan": "数据库安全检测",
+    "network_device_scan": "网络设备检测",
+    "windows_security_scan": "Windows/AD/SMB 检测",
+}
+
 
 class TaskExecutor:
     """流程任务执行器"""
@@ -183,13 +200,6 @@ class TaskExecutor:
     def _risk_items(capability: str, execution: dict, target: str) -> list[dict]:
         data = execution.get("result") or {}
         items = []
-        issue = execution.get("warning") or execution.get("error") or TaskExecutor._tool_issue(capability, data)
-        if issue:
-            items.append({
-                "description": f"{target}: {capability} 检测未完成（不代表通过）：{issue}",
-                "severity": "medium",
-                "remediation": "先恢复目标连通性、凭证或工具运行条件，再重新执行该检测。",
-            })
         if capability == "scan_ports":
             risky = {21, 23, 135, 139, 445, 1433, 1521, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017}
             items.extend(
@@ -250,7 +260,7 @@ class TaskExecutor:
                     project_id=scan_task.project_id,
                     scan_task_id=scan_task.id,
                     clause_id=clause_id,
-                    clause_name="自动化技术检测",
+                    clause_name=CAPABILITY_NAMES.get(capability, capability),
                     severity=severity_map.get(str(item["severity"]).lower(), Severity.MEDIUM),
                     judgment=Judgment.FAIL,
                     judgment_engine=JudgmentEngine.RULE,

@@ -6,15 +6,23 @@ import {
   ScanOutlined, 
   CheckCircleOutlined, 
   CloseCircleOutlined,
-  WarningOutlined,
   ClockCircleOutlined,
   DeleteOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
+import { scanTaskConclusion, scanTaskName, scanTaskSource, scanTaskTarget } from '../components/toolCatalog'
 import './ResultsPage.css'
 
 const { Header, Content } = Layout
 const { Title, Text } = Typography
+const activeStatuses = new Set(['pending', 'running'])
+
+const formatBytes = (bytes) => {
+  if (!bytes) return ''
+  const units = ['B', 'KB', 'MB', 'GB']
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  return `${(bytes / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`
+}
 
 function ResultsPage() {
   const navigate = useNavigate()
@@ -23,6 +31,8 @@ function ResultsPage() {
   const [project, setProject] = useState(null)
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('completed')
+  const [selectedRowKeys, setSelectedRowKeys] = useState([])
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     fetchData()
@@ -60,17 +70,6 @@ function ResultsPage() {
     )
   }
 
-  const getSeverityColor = (severity) => {
-    const colorMap = {
-      critical: '#ff4d4f',
-      high: '#ff7a45',
-      medium: '#ffa940',
-      low: '#ffc53d',
-      info: '#1890ff',
-    }
-    return colorMap[severity] || '#d9d9d9'
-  }
-
   const filteredTasks = statusFilter === 'all' 
     ? scanTasks 
     : scanTasks.filter(t => t.status === statusFilter)
@@ -78,35 +77,53 @@ function ResultsPage() {
   const handleDeleteScan = async (scanTaskId) => {
     try {
       await api.delete(`/results/scans/${scanTaskId}`)
-      message.success('扫描任务已删除')
-      fetchData()
+      message.success('检测记录已删除')
+      setScanTasks((tasks) => tasks.filter((task) => task.id !== scanTaskId))
+      setSelectedRowKeys((keys) => keys.filter((id) => id !== scanTaskId))
     } catch (error) {
       console.error('Failed to delete scan:', error)
       message.error(error.response?.data?.detail || '删除失败')
     }
   }
 
+  const handleBulkDelete = async (deleteAll = false) => {
+    if (!deleteAll && selectedRowKeys.length === 0) return
+    setDeleting(true)
+    try {
+      const { data } = await api.post(`/results/projects/${projectId}/scans/bulk-delete`, {
+        scan_task_ids: deleteAll ? [] : selectedRowKeys,
+        delete_all: deleteAll,
+      })
+      const deletedIds = new Set(data.deleted_ids || [])
+      setScanTasks((tasks) => tasks.filter((task) => !deletedIds.has(task.id)))
+      setSelectedRowKeys((keys) => keys.filter((id) => !deletedIds.has(id)))
+      const released = formatBytes(data.released_file_bytes)
+      message.success(`已删除 ${data.deleted_count} 条检测记录${released ? `，清理附件 ${released}` : ''}`)
+      if (data.skipped_active_count) message.warning(`已保留 ${data.skipped_active_count} 条运行中或等待中的任务`)
+    } catch (error) {
+      console.error('Failed to bulk delete scans:', error)
+      message.error(error.response?.data?.detail || '批量删除失败')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const columns = [
     {
-      title: '扫描任务',
+      title: '检测内容',
       dataIndex: 'id',
       key: 'id',
-      render: (id, record) => {
-        const taskTypeMap = {
-          full: '全量扫描',
-          incremental: '增量扫描',
-          targeted: '定向扫描',
-          scheduled: '定时扫描',
-        }
-        return (
-          <div>
-            <div style={{ fontWeight: 600 }}>#{id} {taskTypeMap[record.task_type] || '扫描'}</div>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {record.findings_count > 0 ? `${record.findings_count} 项发现` : '无发现'}
-            </Text>
-          </div>
-        )
-      },
+      render: (id, record) => <div><div style={{ fontWeight: 600 }}>{scanTaskName(record)}</div><Text type="secondary" style={{ fontSize: 12 }}>记录 #{id}</Text></div>,
+    },
+    {
+      title: '目标资产',
+      key: 'target',
+      render: (_, record) => scanTaskTarget(record),
+    },
+    {
+      title: '执行来源',
+      key: 'source',
+      render: (_, record) => <Tag>{scanTaskSource(record)}</Tag>,
     },
     {
       title: '状态',
@@ -115,51 +132,12 @@ function ResultsPage() {
       render: (status) => getStatusTag(status),
     },
     {
-      title: '风险发现',
-      key: 'findings',
+      title: '检测结论',
+      key: 'conclusion',
       render: (_, record) => {
-        if (record.findings_count === 0) {
-          return <Text type="secondary">-</Text>
-        }
-        return (
-          <Space>
-            {record.high_severity_count > 0 && (
-              <Tag color="error" icon={<WarningOutlined />}>
-                {record.high_severity_count} 高危
-              </Tag>
-            )}
-            {record.medium_severity_count > 0 && (
-              <Tag color="warning">
-                {record.medium_severity_count} 中危
-              </Tag>
-            )}
-            {record.low_severity_count > 0 && (
-              <Tag color="default">
-                {record.low_severity_count} 低危
-              </Tag>
-            )}
-          </Space>
-        )
-      },
-    },
-    {
-      title: '合规分数',
-      key: 'score',
-      render: (_, record) => {
-        if (record.status !== 'completed') return '-'
-        const score = project?.compliance_score
-        if (score === null || score === undefined) return '-'
-        return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Progress 
-              type="circle" 
-              percent={score} 
-              size={40}
-              strokeColor={score >= 90 ? '#52c41a' : score >= 75 ? '#1890ff' : score >= 60 ? '#faad14' : '#ff4d4f'}
-              format={() => score}
-            />
-          </div>
-        )
+        const conclusion = scanTaskConclusion(record)
+        const colors = { failed: 'error', warning: 'warning', risk: 'error', clean: 'success', running: 'processing' }
+        return <Tag color={colors[conclusion.key]}>{conclusion.label}</Tag>
       },
     },
     {
@@ -181,7 +159,7 @@ function ResultsPage() {
           </Button>
           <Popconfirm
             title="确认删除"
-            description="删除后无法恢复，确定要删除这个扫描任务吗？"
+            description="将同时删除关联发现、证据和整改记录，且无法恢复。"
             onConfirm={() => handleDeleteScan(record.id)}
             okText="确定"
             cancelText="取消"
@@ -213,16 +191,14 @@ function ResultsPage() {
           <Button
             type="text"
             icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/')}
+            onClick={() => navigate(`/projects/${projectId}`)}
             className="back-btn"
           />
-          <div>
-            <Title level={3} style={{ margin: 0, color: '#fff' }}>
-              {project?.name || '项目'} - 扫描结果
+          <div className="results-title-block">
+            <Title level={3} className="results-page-title">
+              检测执行记录
             </Title>
-            <Text style={{ color: 'rgba(255,255,255,0.6)' }}>
-              等保{project?.compliance_level || '三级'}合规检测
-            </Text>
+            <span className="results-title-context">{project?.name || '当前项目'}</span>
           </div>
         </div>
         <div className="header-right">
@@ -246,7 +222,7 @@ function ResultsPage() {
         {scanTasks.length > 0 && (
           <div className="results-summary">
             <Card size="small" className="summary-card">
-              <div className="summary-label">总扫描数</div>
+              <div className="summary-label">执行记录</div>
               <div className="summary-value">{scanTasks.length}</div>
             </Card>
             <Card size="small" className="summary-card">
@@ -263,9 +239,9 @@ function ResultsPage() {
         )}
         
         <Card
-          title="扫描任务列表"
+          title="检测执行记录"
           extra={
-            <Space>
+            <Space wrap className="results-toolbar">
               <Select
                 value={statusFilter}
                 onChange={setStatusFilter}
@@ -277,20 +253,44 @@ function ResultsPage() {
                   { value: 'failed', label: '失败' },
                 ]}
               />
+              <Popconfirm
+                title={`删除选中的 ${selectedRowKeys.length} 条记录？`}
+                description="关联的检测结果、问题、证据和整改记录也会永久删除。"
+                onConfirm={() => handleBulkDelete(false)}
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+              >
+                <Button danger icon={<DeleteOutlined />} disabled={!selectedRowKeys.length} loading={deleting}>
+                  删除选中{selectedRowKeys.length ? ` (${selectedRowKeys.length})` : ''}
+                </Button>
+              </Popconfirm>
+              <Popconfirm
+                title="清空全部历史检测记录？"
+                description="已完成、失败和已取消的记录及其关联数据将永久删除；运行中的任务会保留。"
+                onConfirm={() => handleBulkDelete(true)}
+                okText="清空"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+              >
+                <Button danger disabled={!scanTasks.some((task) => !activeStatuses.has(task.status))} loading={deleting}>
+                  清空历史
+                </Button>
+              </Popconfirm>
               <Button 
                 type="primary" 
                 icon={<ScanOutlined />}
-                onClick={() => navigate('/')}
+                onClick={() => navigate(`/projects/${projectId}`)}
               >
-                新建扫描
+                执行检测
               </Button>
             </Space>
           }
         >
           {filteredTasks.length === 0 ? (
-            <Empty description={statusFilter === 'completed' ? '暂无已完成的扫描任务' : '暂无扫描任务'}>
-              <Button type="primary" onClick={() => navigate('/')}>
-                去扫描
+            <Empty description={statusFilter === 'completed' ? '暂无已完成的检测记录' : '暂无检测记录'}>
+              <Button type="primary" onClick={() => navigate(`/projects/${projectId}`)}>
+                执行检测
               </Button>
             </Empty>
           ) : (
@@ -298,6 +298,12 @@ function ResultsPage() {
               columns={columns}
               dataSource={filteredTasks}
               rowKey="id"
+              scroll={{ x: 980 }}
+              rowSelection={{
+                selectedRowKeys,
+                onChange: setSelectedRowKeys,
+                getCheckboxProps: (record) => ({ disabled: activeStatuses.has(record.status) }),
+              }}
               pagination={{
                 showSizeChanger: true,
                 showQuickJumper: true,

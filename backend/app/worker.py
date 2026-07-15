@@ -26,6 +26,10 @@ async def run_worker() -> None:
     settings.validate_runtime_security()
     async with AsyncSessionLocal() as db:
         await initialize_default_models(db)
+        from app.services.document_pipeline import recover_incomplete_document_runs
+        recovered_documents = await recover_incomplete_document_runs(db)
+        if recovered_documents:
+            logger.info("Recovered %d interrupted document analysis run(s)", recovered_documents)
 
     logger.info("Task worker started; polling every %s seconds", settings.TASK_WORKER_POLL_SECONDS)
     while True:

@@ -14,17 +14,18 @@
   line-height: normal !important;
 }
 
-.header-left {
+.model-settings-header .header-left {
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
 }
 
-.back-btn {
+.model-settings-header .back-btn {
   color: rgba(255, 255, 255, 0.6) !important;
 }
 
-.back-btn:hover {
+.model-settings-header .back-btn:hover {
   color: #fff !important;
 }
 

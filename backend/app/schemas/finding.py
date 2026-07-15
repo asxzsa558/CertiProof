@@ -16,7 +16,8 @@ class FindingBase(BaseModel):
 
 
 class FindingCreate(FindingBase):
-    scan_task_id: int
+    scan_task_id: Optional[int] = None
+    document_run_id: Optional[int] = None
     evidence_ids: Optional[List[int]] = None
 
 
@@ -29,7 +30,8 @@ class FindingUpdate(BaseModel):
 class FindingResponse(FindingBase):
     id: int
     project_id: int
-    scan_task_id: int
+    scan_task_id: Optional[int] = None
+    document_run_id: Optional[int] = None
     status: FindingStatus
     assigned_to: Optional[int] = None
     evidence_ids: Optional[List[int]] = None

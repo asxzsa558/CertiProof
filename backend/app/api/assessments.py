@@ -4,14 +4,13 @@
 提供流程模板、测评实例、阶段、任务的 CRUD 和操作接口
 """
 
-import os
-import re
-import uuid
 import logging
+import mimetypes
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from typing import Dict, List, Optional
@@ -28,14 +27,20 @@ from app.models.assessment import FlowTemplate, Assessment, PhaseInstance, TaskI
 from app.models.project import Project
 from app.models.finding import Finding, Severity, Judgment, JudgmentEngine, FindingStatus
 from app.models.remediation import RemediationTicket, RemediationStatus
-from app.models.scan_task import ScanTask, ScanTaskType, ScanTaskStatus, TriggeredBy
-from app.models.evidence import Evidence, EvidenceType
+from app.models.document_knowledge import DocumentAnalysisRun, DocumentFile, DocumentRunFile
 from app.services.flow_engine import FlowEngine, get_flow_engine
 from app.services.config_service import get_config_service
 from app.services.document_pipeline import (
+    DocumentExtractionError,
+    ARCHIVE_SUFFIXES,
     SUPPORTED_SUFFIXES,
+    MAX_BATCH_FILES,
+    MAX_BATCH_UNCOMPRESSED,
+    create_document_batch_run,
     create_document_run,
+    expand_document_upload,
     normalize_analysis_mode,
+    safe_document_name,
 )
 from app.services.file_storage import file_storage
 from app.services.upload_validation import read_limited_upload
@@ -43,9 +48,9 @@ from app.services.upload_validation import read_limited_upload
 router = APIRouter(prefix="/assessments", tags=["Assessments"])
 
 
-async def _read_document_upload(file: UploadFile, max_bytes: int) -> bytes:
+async def _read_document_upload(file: UploadFile, max_bytes: int, allowed_suffixes: set[str] | None = None) -> bytes:
     try:
-        return await read_limited_upload(file, max_bytes, SUPPORTED_SUFFIXES)
+        return await read_limited_upload(file, max_bytes, allowed_suffixes or SUPPORTED_SUFFIXES)
     except ValueError as exc:
         detail = str(exc)
         raise HTTPException(status_code=413 if "超过" in detail else 400, detail=detail) from exc
@@ -172,6 +177,27 @@ class ExecuteTaskRequest(BaseModel):
     targets: Optional[List[str]] = None
     params: Optional[dict] = None
     credentials: Optional[Dict[str, dict]] = None
+
+
+class ExecuteGapTechnicalRequest(BaseModel):
+    asset_ids: Optional[List[int]] = None
+    credentials: Optional[Dict[str, dict]] = None
+
+
+BASIC_TECHNICAL_TASK_TYPES = {
+    "high_risk_port_scan",
+    "basic_vulnerability_scan",
+    "basic_baseline_check",
+    "basic_weak_password_scan",
+    "basic_ssl_tls_scan",
+}
+
+
+def _public_task_result(result: dict | None) -> dict | None:
+    if not result or not isinstance(result.get("execution"), dict):
+        return result
+    execution = {key: value for key, value in result["execution"].items() if key != "credential_envelope"}
+    return {**result, "execution": execution}
 
 
 class SkipPhaseRequest(BaseModel):
@@ -559,12 +585,74 @@ async def list_tasks(
             status=t.status,
             assignee_id=t.assignee_id,
             priority=t.priority,
-            result=t.result,
+            result=_public_task_result(t.result),
             started_at=t.started_at.isoformat() if t.started_at else None,
             completed_at=t.completed_at.isoformat() if t.completed_at else None,
         )
         for t in tasks
     ]
+
+
+@router.post("/phases/{phase_id}/technical/execute", status_code=status.HTTP_202_ACCEPTED)
+async def execute_gap_technical_tasks(
+    phase_id: int,
+    req: ExecuteGapTechnicalRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Queue all five basic technical checks for the selected project assets."""
+    from app.services.asset_scope import list_scannable_assets
+    from app.services.assessment_task_queue import queue_assessment_task
+
+    phase, assessment = await require_phase_permission(db, phase_id, current_user, "scan:execute")
+    if phase.phase_id != "gap_analysis":
+        raise HTTPException(status_code=400, detail="自动基础技术检测仅适用于差距分析阶段")
+    assets = await list_scannable_assets(db, assessment.project_id)
+    requested_ids = set(req.asset_ids or [])
+    if requested_ids:
+        assets = [asset for asset in assets if asset.id in requested_ids]
+        if {asset.id for asset in assets} != requested_ids:
+            raise HTTPException(status_code=400, detail="选择的资产包含非当前项目或已停用资产")
+    if not assets:
+        raise HTTPException(status_code=400, detail="当前项目没有可执行检测的启用资产")
+
+    engine = get_flow_engine(db)
+    tasks = [
+        task for task in await engine.get_tasks(phase_id, official_only=True)
+        if task.task_type in BASIC_TECHNICAL_TASK_TYPES
+    ]
+    queued, running = [], []
+    credentials = {
+        asset.value: {
+            key: value for key, value in (req.credentials or {}).get(asset.value, {}).items()
+            if key in {"username", "password", "key_file"} and value
+        }
+        for asset in assets
+    }
+    credentials = {target: value for target, value in credentials.items() if value}
+    for task in tasks:
+        if task.status == "in_progress":
+            running.append(task.id)
+            continue
+        if task.status != "todo":
+            await engine.reset_task(task.id)
+        task = await engine.start_task(task.id)
+        await queue_assessment_task(
+            task,
+            [asset.id for asset in assets],
+            current_user.id,
+            db,
+            credentials if task.task_type == "basic_baseline_check" else None,
+        )
+        queued.append(task.id)
+    return {
+        "status": "queued",
+        "queued_task_ids": queued,
+        "already_running_task_ids": running,
+        "asset_count": len(assets),
+        "credential_asset_count": len(credentials),
+        "message": f"已为 {len(assets)} 个资产提交 {len(queued)} 项基础技术检测",
+    }
 
 
 @router.post("/phases/{phase_id}/tasks", response_model=TaskResponse)
@@ -618,7 +706,7 @@ async def get_task_status(
     return {
         "id": task.id,
         "status": task.status,
-        "result": task.result,
+        "result": _public_task_result(task.result),
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     }
@@ -775,6 +863,7 @@ async def execute_task(
                     )
 
             semaphore = asyncio.Semaphore(max(1, min(settings.ASSESSMENT_MAX_CONCURRENT, 10)))
+            tasks_list = []
 
             for target in targets:
                 async def limited_execute(value=target):
@@ -889,14 +978,140 @@ async def list_events(
 
 # ========== 文档上传与跳过 API ==========
 
-UPLOAD_DIR = Path(settings.UPLOAD_DIR) / "assessments"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
 async def _resolve_document_analysis_mode(db: AsyncSession, mode: str | None) -> str:
     if not mode or mode == "default":
         mode = await get_config_service(db).get("document.analysis_mode", settings.DOCUMENT_ANALYSIS_MODE)
     return normalize_analysis_mode(mode)
+
+
+@router.post("/phases/{phase_id}/documents/batch", status_code=status.HTTP_202_ACCEPTED)
+async def upload_phase_documents(
+    phase_id: int,
+    files: List[UploadFile] = File(...),
+    analysis_mode: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Upload documents or a supported archive, classify them, then run matching checks."""
+    phase, assessment = await require_phase_permission(db, phase_id, current_user, "evidence:manage")
+    if phase.phase_id != "gap_analysis":
+        raise HTTPException(status_code=400, detail="批量文档归类仅适用于差距分析阶段")
+    if not files:
+        raise HTTPException(status_code=400, detail="请至少上传一个文件或压缩包")
+    document_tasks = [
+        task for task in await get_flow_engine(db).get_tasks(phase_id, official_only=True)
+        if task.task_type == "doc_review"
+    ]
+    if not document_tasks:
+        raise HTTPException(status_code=400, detail="当前阶段没有文档检查任务")
+    if any(task.status == "in_progress" for task in document_tasks):
+        raise HTTPException(status_code=409, detail="已有文档正在分析，请等待完成后再批量上传")
+
+    configured_mode = await _resolve_document_analysis_mode(db, analysis_mode)
+    expanded: list[tuple[str, bytes]] = []
+    skipped_files: list[str] = []
+    total_size = 0
+    try:
+        for file in files:
+            file_name = safe_document_name(file.filename or "document")
+            suffix = Path(file_name).suffix.lower()
+            if suffix not in SUPPORTED_SUFFIXES | ARCHIVE_SUFFIXES:
+                skipped_files.append(file_name)
+                continue
+            content = await _read_document_upload(file, MAX_TASK_UPLOAD_SIZE, SUPPORTED_SUFFIXES | ARCHIVE_SUFFIXES)
+            documents, skipped = expand_document_upload(file_name, content)
+            expanded.extend(documents)
+            skipped_files.extend(skipped)
+            total_size += sum(len(item[1]) for item in documents)
+            if len(expanded) > MAX_BATCH_FILES or total_size > MAX_BATCH_UNCOMPRESSED:
+                raise DocumentExtractionError(f"单次最多处理 {MAX_BATCH_FILES} 个文档，解压后总计不超过 300MB。")
+        if not expanded:
+            raise DocumentExtractionError("上传内容中没有可分析的 DOCX、PDF、TXT、MD 或图片文档。")
+    except DocumentExtractionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    document_file_ids: list[int] = []
+    saved_files: list[dict] = []
+    duplicate_files: list[dict] = []
+    for file_name, content in expanded:
+        file_path, digest, file_size = await file_storage.save_file(assessment.project_id, file_name, content)
+        duplicate = (await db.execute(
+            select(DocumentFile).where(
+                DocumentFile.assessment_id == assessment.id,
+                DocumentFile.sha256 == digest,
+                DocumentFile.is_active.is_(True),
+            ).limit(1)
+        )).scalar_one_or_none()
+        if duplicate:
+            await file_storage.delete_file(file_path)
+            document_file_ids.append(duplicate.id)
+            duplicate_files.append({"id": duplicate.id, "file_name": duplicate.original_name})
+            continue
+        document_file = DocumentFile(
+            project_id=assessment.project_id,
+            assessment_id=assessment.id,
+            task_id=None,
+            uploaded_in_run_id=None,
+            original_name=file_name,
+            storage_path=file_path,
+            mime_type=mimetypes.guess_type(file_name)[0] or "application/octet-stream",
+            size_bytes=file_size,
+            sha256=digest,
+            parse_status="queued",
+        )
+        db.add(document_file)
+        await db.flush()
+        document_file_ids.append(document_file.id)
+        saved_files.append({"id": document_file.id, "file_name": file_name})
+    await db.commit()
+    run = await create_document_batch_run(
+        db,
+        phase.id,
+        assessment.project_id,
+        list(dict.fromkeys(document_file_ids)),
+        current_user.id,
+        configured_mode,
+        skipped_files,
+        duplicate_files,
+    )
+    return {
+        "status": "queued",
+        "run_id": run.id,
+        "analysis_mode": configured_mode,
+        "files": saved_files,
+        "duplicates": duplicate_files,
+        "skipped_files": skipped_files,
+    }
+
+
+@router.get("/phases/{phase_id}/documents/batch/latest")
+async def get_latest_phase_document_batch(
+    phase_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    phase, assessment = await require_phase_permission(db, phase_id, current_user, "assessment:read")
+    run = (await db.execute(
+        select(DocumentAnalysisRun)
+        .where(
+            DocumentAnalysisRun.assessment_id == assessment.id,
+            DocumentAnalysisRun.phase_id == phase.id,
+            DocumentAnalysisRun.run_kind == "batch",
+        )
+        .order_by(DocumentAnalysisRun.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if not run:
+        return None
+    return {
+        "id": run.id,
+        "status": run.status,
+        "progress": run.progress,
+        "error": run.error_message,
+        "result": run.result_summary,
+        "created_at": run.created_at,
+        "completed_at": run.completed_at,
+    }
 
 
 @router.post("/tasks/{task_id}/documents", status_code=status.HTTP_202_ACCEPTED)
@@ -919,9 +1134,8 @@ async def upload_task_documents(
     configured_mode = await _resolve_document_analysis_mode(db, analysis_mode)
 
     saved = []
-    clause_id = f"DOC-TASK-{task.id}"
     for file in files:
-        file_name = file.filename or "document"
+        file_name = safe_document_name(file.filename or "document")
         suffix = Path(file_name).suffix.lower()
         if suffix not in SUPPORTED_SUFFIXES:
             detail = "暂不支持旧版 DOC，请转换为 DOCX 或 PDF" if suffix == ".doc" else f"不支持的文件格式：{suffix or '未知'}"
@@ -930,33 +1144,33 @@ async def upload_task_documents(
 
         file_path, digest, file_size = await file_storage.save_file(assessment.project_id, file_name, content)
         duplicate = (await db.execute(
-            select(Evidence).where(
-                Evidence.project_id == assessment.project_id,
-                Evidence.clause_id == clause_id,
-                Evidence.hash_sha256 == digest,
+            select(DocumentFile).where(
+                DocumentFile.assessment_id == assessment.id,
+                DocumentFile.task_id == task.id,
+                DocumentFile.sha256 == digest,
+                DocumentFile.is_active.is_(True),
             )
         )).scalar_one_or_none()
         if duplicate:
             await file_storage.delete_file(file_path)
-            saved.append({"id": duplicate.id, "file_name": duplicate.file_name, "duplicate": True})
+            saved.append({"id": duplicate.id, "file_name": duplicate.original_name, "duplicate": True})
             continue
 
-        evidence = Evidence(
+        document_file = DocumentFile(
             project_id=assessment.project_id,
-            evidence_type=EvidenceType.DOCUMENT,
-            source="document_compliance_upload",
-            file_name=file_name,
-            file_path=file_path,
-            file_size=file_size,
+            assessment_id=assessment.id,
+            task_id=task.id,
+            uploaded_in_run_id=None,
+            original_name=file_name,
+            storage_path=file_path,
             mime_type=file.content_type or "application/octet-stream",
-            clause_id=clause_id,
-            hash_sha256=digest,
-            uploaded_by=current_user.id,
-            description=task.name,
+            size_bytes=file_size,
+            sha256=digest,
+            parse_status="queued",
         )
-        db.add(evidence)
+        db.add(document_file)
         await db.flush()
-        saved.append({"id": evidence.id, "file_name": file_name, "duplicate": False})
+        saved.append({"id": document_file.id, "file_name": file_name, "duplicate": False})
 
     await db.commit()
     run = await create_document_run(db, task, assessment.project_id, current_user.id, configured_mode)
@@ -970,23 +1184,46 @@ async def list_task_documents(
     current_user: User = Depends(get_current_user),
 ):
     task, _, assessment = await require_task_permission(db, task_id, current_user, "assessment:read")
-    evidences = (await db.execute(
-        select(Evidence)
-        .where(Evidence.project_id == assessment.project_id, Evidence.clause_id == f"DOC-TASK-{task.id}")
-        .order_by(Evidence.created_at)
+    documents = (await db.execute(
+        select(DocumentFile)
+        .where(
+            DocumentFile.assessment_id == assessment.id,
+            DocumentFile.task_id == task.id,
+            DocumentFile.is_active.is_(True),
+        )
+        .order_by(DocumentFile.created_at)
     )).scalars().all()
     return [{
-        "id": evidence.id,
-        "file_name": evidence.file_name,
-        "file_size": evidence.file_size,
-        "mime_type": evidence.mime_type,
-        "hash_sha256": evidence.hash_sha256,
-        "created_at": evidence.created_at,
-        "extraction": {
-            key: (evidence.content or {}).get(key)
-            for key in ("analysis_mode", "page_count", "native_blocks", "ocr_blocks", "vision_blocks", "warnings")
-        } if evidence.content else None,
-    } for evidence in evidences]
+        "id": document.id,
+        "file_name": document.original_name,
+        "file_size": document.size_bytes,
+        "mime_type": document.mime_type,
+        "hash_sha256": document.sha256,
+        "parse_status": document.parse_status,
+        "classification": document.classification,
+        "created_at": document.created_at,
+        "extraction": document.extraction_summary,
+    } for document in documents]
+
+
+@router.get("/documents/{document_id}/download")
+async def download_document(
+    document_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document = await db.get(DocumentFile, document_id)
+    if not document or not document.is_active:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    await require_project_permission(db, document.project_id, current_user, "assessment:read")
+    content = await file_storage.read_file(document.storage_path)
+    if content is None:
+        raise HTTPException(status_code=404, detail="原始文档文件已丢失")
+    return Response(
+        content=content,
+        media_type=document.mime_type or "application/octet-stream",
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quote(Path(document.original_name).name)}"},
+    )
 
 
 @router.delete("/tasks/{task_id}/documents/{evidence_id}")
@@ -999,23 +1236,37 @@ async def delete_task_document(
     task, _, assessment = await require_task_permission(db, task_id, current_user, "evidence:manage")
     if task.status == "in_progress":
         raise HTTPException(status_code=409, detail="文档正在分析，请等待完成后再删除")
-    evidence = (await db.execute(
-        select(Evidence).where(
-            Evidence.id == evidence_id,
-            Evidence.project_id == assessment.project_id,
-            Evidence.clause_id == f"DOC-TASK-{task.id}",
+    document = (await db.execute(
+        select(DocumentFile).where(
+            DocumentFile.id == evidence_id,
+            DocumentFile.assessment_id == assessment.id,
+            DocumentFile.task_id == task.id,
+            DocumentFile.is_active.is_(True),
         )
     )).scalar_one_or_none()
-    if not evidence:
+    if not document:
         raise HTTPException(status_code=404, detail="文档不存在")
-    await file_storage.delete_file(evidence.file_path)
-    await db.delete(evidence)
+    active_run = (await db.execute(
+        select(DocumentAnalysisRun.id)
+        .join(DocumentRunFile, DocumentRunFile.analysis_run_id == DocumentAnalysisRun.id)
+        .where(
+            DocumentRunFile.document_file_id == document.id,
+            DocumentAnalysisRun.status.in_(["queued", "running"]),
+        ).limit(1)
+    )).scalar_one_or_none()
+    if active_run:
+        raise HTTPException(status_code=409, detail="文档仍在分析中，请等待任务结束后删除")
+    await file_storage.delete_file(document.storage_path)
+    from app.services.knowledge_graph import knowledge_graph
+    await knowledge_graph.purge_file(db, document.id)
+    await db.delete(document)
     await db.commit()
 
     remaining = (await db.execute(
-        select(Evidence.id).where(
-            Evidence.project_id == assessment.project_id,
-            Evidence.clause_id == f"DOC-TASK-{task.id}",
+        select(DocumentFile.id).where(
+            DocumentFile.assessment_id == assessment.id,
+            DocumentFile.task_id == task.id,
+            DocumentFile.is_active.is_(True),
         )
     )).scalars().all()
     if remaining:
@@ -1024,16 +1275,6 @@ async def delete_task_document(
         run = await create_document_run(db, task, assessment.project_id, current_user.id, configured_mode)
         return {"status": "queued", "run_id": run.id, "analysis_mode": configured_mode}
 
-    finding_ids = (await db.execute(
-        select(Finding.id).where(
-            Finding.project_id == assessment.project_id,
-            Finding.clause_id.like(f"DOC-TASK-{task.id}-%"),
-        )
-    )).scalars().all()
-    if finding_ids:
-        await db.execute(delete(RemediationTicket).where(RemediationTicket.finding_id.in_(finding_ids)))
-        await db.execute(delete(Finding).where(Finding.id.in_(finding_ids)))
-    await db.commit()
     await get_flow_engine(db).reset_task(task.id)
     return {"status": "empty"}
 
@@ -1047,9 +1288,10 @@ async def reanalyze_task_documents(
 ):
     task, _, assessment = await require_task_permission(db, task_id, current_user, "evidence:manage")
     has_files = (await db.execute(
-        select(Evidence.id).where(
-            Evidence.project_id == assessment.project_id,
-            Evidence.clause_id == f"DOC-TASK-{task.id}",
+        select(DocumentFile.id).where(
+            DocumentFile.assessment_id == assessment.id,
+            DocumentFile.task_id == task.id,
+            DocumentFile.is_active.is_(True),
         ).limit(1)
     )).scalar_one_or_none()
     if not has_files:
@@ -1065,8 +1307,8 @@ async def get_document_run(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    run = await db.get(ScanTask, run_id)
-    if not run or (run.parameters or {}).get("source") != "document_control_analysis":
+    run = await db.get(DocumentAnalysisRun, run_id)
+    if not run:
         raise HTTPException(status_code=404, detail="文档分析任务不存在")
     await require_project_permission(db, run.project_id, current_user, "assessment:read")
     return {
@@ -1080,51 +1322,6 @@ async def get_document_run(
     }
 
 
-def _extract_text_from_file(file_path: Path) -> str:
-    """从文件中提取文本内容（支持 txt、md、pdf、docx）"""
-    suffix = file_path.suffix.lower()
-
-    if suffix in (".txt", ".md", ".csv", ".log"):
-        try:
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                return f.read()
-        except Exception:
-            return ""
-
-    if suffix == ".pdf":
-        try:
-            import pypdf
-            reader = pypdf.PdfReader(str(file_path))
-            text = ""
-            for page in reader.pages:
-                text += page.extract_text() or ""
-            return text
-        except ImportError:
-            try:
-                from PyPDF2 import PdfReader
-                reader = PdfReader(str(file_path))
-                text = ""
-                for page in reader.pages:
-                    text += page.extract_text() or ""
-                return text
-            except ImportError:
-                return ""
-        except Exception:
-            return ""
-
-    if suffix == ".docx":
-        try:
-            import docx
-            doc = docx.Document(str(file_path))
-            return "\n".join(p.text for p in doc.paragraphs)
-        except ImportError:
-            return ""
-        except Exception:
-            return ""
-
-    return ""
-
-
 async def _sync_document_gap_findings(
     db: AsyncSession,
     project_id: int,
@@ -1135,59 +1332,60 @@ async def _sync_document_gap_findings(
     if (
         not analysis
         or analysis.get("type") != "document_control_analysis"
-        or analysis.get("status") == "unable"
     ):
         return {"created_or_updated": 0, "scan_task_id": None}
 
-    scan_task = await db.get(ScanTask, analysis.get("run_id")) if analysis.get("run_id") else None
-    if not scan_task:
-        scan_task = ScanTask(
-            project_id=project_id,
-            task_type=ScanTaskType.TARGETED,
-            status=ScanTaskStatus.COMPLETED,
-            triggered_by=TriggeredBy.MANUAL,
-            parameters={
-                "source": "document_control_analysis",
-                "task_id": task.id,
-                "document_name": analysis.get("document_name"),
-                "file_name": analysis.get("file_name"),
-            },
-            orchestrator_task_id=f"doc-control-{task.id}-{uuid.uuid4().hex[:8]}",
-            result_summary=analysis,
-            completed_at=datetime.utcnow(),
-        )
-        db.add(scan_task)
-        await db.flush()
+    from app.models.document_knowledge import DocumentAnalysisRun
+
+    document_run = await db.get(DocumentAnalysisRun, analysis.get("run_id")) if analysis.get("run_id") else None
+    if not document_run:
+        raise ValueError("文档差距结果缺少有效的分析运行记录")
+    if analysis.get("status") == "unable":
+        return {
+            "created_or_updated": 0,
+            "fixed": 0,
+            "document_run_id": document_run.id,
+            "skipped": True,
+            "reason": "分析结果为无法判断，未变更问题和整改状态",
+        }
 
     failed_clause_ids = set()
+    passed_clause_ids = set()
     changed = 0
     for control in analysis.get("controls", []):
         for point in control.get("points", []):
+            clause_id = f"DOC-TASK-{task.id}-{control.get('id')}-{point.get('id')}"
+            if point.get("status") == "pass":
+                passed_clause_ids.add(clause_id)
+                continue
             if point.get("status") not in {"fail", "partial"}:
                 continue
 
-            clause_id = f"DOC-TASK-{task.id}-{control.get('id')}-{point.get('id')}"
             failed_clause_ids.add(clause_id)
             result = await db.execute(
                 select(Finding).where(Finding.project_id == project_id, Finding.clause_id == clause_id)
             )
             finding = result.scalar_one_or_none()
             is_partial = point.get("status") == "partial"
+            reason = point.get("llm_reason") or point.get("missing_judgement") or point.get("text") or "证据不足"
             description = (
                 f"{analysis.get('document_name') or task.name}："
-                f"{'证据不完整，' if is_partial else ''}{point.get('missing_judgement')}"
+                f"{'证据不完整，' if is_partial else ''}{reason}"
             )
             suggestion = point.get("remediation") or f"补充“{point.get('text')}”相关制度描述，并在文档中保留可审计证据。"
             evidence_ids = sorted({
-                item.get("evidence_id") for item in point.get("evidence", []) if item.get("evidence_id")
+                item.get("block_id") for item in point.get("evidence", []) if item.get("block_id")
             })
 
             if finding:
-                finding.scan_task_id = scan_task.id
+                finding.scan_task_id = None
+                finding.document_run_id = document_run.id
                 finding.description = description
                 finding.remediation_suggestion = suggestion
                 finding.confidence = analysis.get("confidence")
                 finding.judgment = Judgment.PARTIAL if is_partial else Judgment.FAIL
+                finding.judgment_engine = JudgmentEngine.HYBRID if analysis.get("evidence_engine") == "hybrid" else JudgmentEngine.RULE
+                finding.severity = Severity(point.get("severity", "medium"))
                 finding.evidence_ids = evidence_ids
                 if finding.status == FindingStatus.RESOLVED:
                     finding.status = FindingStatus.OPEN
@@ -1195,12 +1393,13 @@ async def _sync_document_gap_findings(
             else:
                 finding = Finding(
                     project_id=project_id,
-                    scan_task_id=scan_task.id,
+                    scan_task_id=None,
+                    document_run_id=document_run.id,
                     clause_id=clause_id,
                     clause_name=control.get("title") or analysis.get("document_name"),
-                    severity=Severity.MEDIUM,
+                    severity=Severity(point.get("severity", "medium")),
                     judgment=Judgment.PARTIAL if is_partial else Judgment.FAIL,
-                    judgment_engine=JudgmentEngine.RULE,
+                    judgment_engine=JudgmentEngine.HYBRID if analysis.get("evidence_engine") == "hybrid" else JudgmentEngine.RULE,
                     confidence=analysis.get("confidence"),
                     description=description,
                     remediation_suggestion=suggestion,
@@ -1248,7 +1447,7 @@ async def _sync_document_gap_findings(
         )
     )
     for finding in existing_result.scalars().all():
-        if finding.clause_id in failed_clause_ids:
+        if finding.clause_id not in passed_clause_ids:
             continue
         if finding.status != FindingStatus.RESOLVED:
             finding.status = FindingStatus.RESOLVED
@@ -1264,125 +1463,15 @@ async def _sync_document_gap_findings(
             ticket.resolution_notes = ticket.resolution_notes or "文档复测未再发现该缺失项。"
         fixed += 1
 
-    scan_task.findings_count = len(failed_clause_ids)
-    scan_task.medium_severity_count = len(failed_clause_ids)
+    summary = dict(document_run.result_summary or {})
+    summary["findings_count"] = len(failed_clause_ids)
+    document_run.result_summary = summary
     await db.commit()
     return {
         "created_or_updated": changed,
         "fixed": fixed,
-        "scan_task_id": scan_task.id,
+        "document_run_id": document_run.id,
     }
-
-
-@router.post("/tasks/{task_id}/upload")
-async def upload_task_document(
-    task_id: int,
-    file: UploadFile = File(...),
-    analysis_mode: str | None = Form(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    上传任务文档（如定级报告）
-
-    - 定级报告任务会严格验证文档中的定级信息与项目等级是否一致
-    - 不一致时任务标记为 failed
-    - 一致时任务标记为 completed
-    """
-    await require_task_permission(db, task_id, current_user, "evidence:manage")
-    engine = get_flow_engine(db)
-    task = await engine.get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    if task.status == "in_progress":
-        raise HTTPException(status_code=409, detail="文档正在分析，请等待完成后再上传")
-
-    if task.task_type == "doc_review" and "文档检查：" in task.name:
-        phase = await engine.get_phase(task.phase_id)
-        assessment = await engine.get_assessment(phase.assessment_id) if phase else None
-        if not assessment:
-            raise HTTPException(status_code=404, detail="测评不存在")
-        file_name = file.filename or "document"
-        suffix = Path(file_name).suffix.lower()
-        if suffix not in SUPPORTED_SUFFIXES:
-            detail = "暂不支持旧版 DOC，请转换为 DOCX 或 PDF" if suffix == ".doc" else f"不支持的文件格式：{suffix or '未知'}"
-            raise HTTPException(status_code=415, detail=detail)
-        content = await _read_document_upload(file, MAX_TASK_UPLOAD_SIZE)
-        file_path, digest, file_size = await file_storage.save_file(assessment.project_id, file_name, content)
-        duplicate = (await db.execute(
-            select(Evidence).where(
-                Evidence.project_id == assessment.project_id,
-                Evidence.clause_id == f"DOC-TASK-{task.id}",
-                Evidence.hash_sha256 == digest,
-            )
-        )).scalar_one_or_none()
-        if duplicate:
-            await file_storage.delete_file(file_path)
-        else:
-            db.add(Evidence(
-                project_id=assessment.project_id,
-                evidence_type=EvidenceType.DOCUMENT,
-                source="document_compliance_upload",
-                file_name=file_name,
-                file_path=file_path,
-                file_size=file_size,
-                mime_type=file.content_type or "application/octet-stream",
-                clause_id=f"DOC-TASK-{task.id}",
-                hash_sha256=digest,
-                uploaded_by=current_user.id,
-                description=task.name,
-            ))
-        await db.commit()
-        configured_mode = await _resolve_document_analysis_mode(db, analysis_mode)
-        run = await create_document_run(db, task, assessment.project_id, current_user.id, configured_mode)
-        return {"status": "queued", "task_id": task.id, "run_id": run.id, "analysis_mode": configured_mode, "message": "文档已上传，正在后台分析"}
-
-    # 保存文件
-    file_ext = Path(file.filename).suffix if file.filename else ""
-    unique_name = f"{uuid.uuid4().hex}{file_ext}"
-    task_upload_dir = UPLOAD_DIR / str(task.phase_id)
-    task_upload_dir.mkdir(parents=True, exist_ok=True)
-    file_path = task_upload_dir / unique_name
-
-    content = await _read_document_upload(file, MAX_TASK_UPLOAD_SIZE)
-    with open(file_path, "wb") as f:
-        f.write(content)
-
-    # 获取任务所在阶段和测评信息
-    phase = await engine.get_phase(task.phase_id)
-    if not phase:
-        raise HTTPException(status_code=404, detail="阶段不存在")
-
-    assessment = await engine.get_assessment(phase.assessment_id)
-    if not assessment:
-        raise HTTPException(status_code=404, detail="测评不存在")
-
-    # 提取文档文本内容
-    document_content = _extract_text_from_file(file_path)
-
-    # 验证定级信息（如果是定级任务）
-    validation_result = None
-    if task.task_type == "doc_review" and "定级" in task.name:
-        validation_result = await engine.validate_classification_document(
-            project_id=assessment.project_id,
-            document_content=document_content,
-        )
-
-    analysis_result = None
-
-    # 上传文档并完成任务
-    result = await engine.upload_task_document(
-        task_id=task_id,
-        file_path=str(file_path),
-        file_name=file.filename or unique_name,
-        file_size=len(content),
-        mime_type=file.content_type or "application/octet-stream",
-        project_id=assessment.project_id,
-        validation_result=validation_result,
-        analysis_result=analysis_result,
-    )
-
-    return result
 
 
 class SkipTaskRequest(BaseModel):

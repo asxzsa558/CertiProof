@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Avatar, Button, Checkbox, Dropdown, Form, Input, Modal, Select, Tag, message } from 'antd'
+import { Avatar, Button, Checkbox, Dropdown, Form, Input, Modal, Select, Tag, Tooltip, message } from 'antd'
 import {
   AlertOutlined,
   ApiOutlined,
@@ -243,12 +243,6 @@ function Dashboard() {
   const summary = dashboard.summary || emptyDashboard().summary
   const topology = dashboard.exposure_topology || emptyDashboard().exposure_topology
   const selectedTool = dashboard.tool_health[selectedToolIndex] || dashboard.tool_health[0]
-  const primaryProject = dashboard.project_matrix.find((project) => project.progress < 100) || dashboard.project_matrix[0]
-  const navigationPath = (item) => {
-    if (item.key === 'assessment') return primaryProject ? `/projects/${primaryProject.project_id}` : '/projects'
-    if (item.key === 'results') return primaryProject ? `/projects/${primaryProject.project_id}/results` : '/projects'
-    return item.path
-  }
   const riskFilters = [
     { key: 'all', label: '全部', count: dashboard.risk_queue.length },
     { key: 'open', label: '待确认', count: dashboard.risk_queue.filter((risk) => risk.status === 'open').length },
@@ -289,7 +283,7 @@ function Dashboard() {
                 <button
                   key={item.key}
                   className={item.key === 'overview' ? 'active' : ''}
-                  onClick={() => navigate(navigationPath(item))}
+                  onClick={() => navigate(item.path)}
                 >
                   {item.icon}
                   <span>{item.label}</span>
@@ -320,7 +314,9 @@ function Dashboard() {
             <Button className="org-refresh" type="text" icon={<ReloadOutlined spin={loading} />} onClick={() => fetchDashboard()}>
               刷新
             </Button>
-            <Button type="text" icon={<BellOutlined />} />
+            <Tooltip title="通知">
+              <Button type="text" icon={<BellOutlined />} aria-label="通知" />
+            </Tooltip>
             <Dropdown menu={userMenu} placement="bottomRight">
               <Avatar className="org-avatar" icon={<UserOutlined />} />
             </Dropdown>
@@ -350,8 +346,8 @@ function Dashboard() {
                 <span>项目与等级</span>
                 <span>当前阶段</span>
                 <span>测评进度</span>
-                <span>风险</span>
-                <span>任务完成</span>
+                <span className="numeric">风险</span>
+                <span className="numeric">任务完成</span>
                 <span>负责人</span>
                 <span>项目操作</span>
               </div>
@@ -367,7 +363,7 @@ function Dashboard() {
                     <em>{project.progress}%</em>
                   </div>
                   <span className={project.risk_count ? 'risk-count hot' : 'risk-count'}>{project.risk_count}</span>
-                  <span>{project.task_done || 0}/{project.task_total || 0}</span>
+                  <span className="matrix-task-count">{project.task_done || 0}/{project.task_total || 0}</span>
                   <span>{project.owner}</span>
                   <Button size="small" type="text" onClick={() => navigate(`/projects/${project.project_id}`)}>{project.next_action}</Button>
                 </div>
@@ -385,7 +381,7 @@ function Dashboard() {
             <div className="ops-column">
             <Panel className="ops-tools-panel" title="工具遥测" meta={selectedTool ? `${dashboard.tool_health.length} 个工具` : '暂无数据'}>
               <div className="tool-telemetry-panel">
-                <div className="tool-health-grid scroll-region">
+                <div className="tool-health-grid scroll-region scroll-fade">
                 {dashboard.tool_health.map((tool) => (
                   <button
                     type="button"
@@ -471,7 +467,7 @@ function Dashboard() {
                 </button>
               ))}
             </div>
-            <div className="risk-table scroll-region">
+            <div className="risk-table scroll-region scroll-fade">
               {filteredRisks.length ? filteredRisks.map((risk, index) => (
                 <div key={risk.finding_id || `${risk.control}-${index}`} className="risk-row">
                   <strong>{risk.asset}</strong>

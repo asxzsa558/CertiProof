@@ -38,6 +38,8 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 PADDLE_DEVICE = os.getenv("PADDLE_DEVICE", "cpu")
 _document_pipeline_error = None
 _rapidocr_error = None
+_document_pipeline_verified = False
+_rapidocr_verified = False
 PADDLE_TIMEOUT = int(os.getenv("PADDLE_TIMEOUT", "180"))
 DOCUMENT_OCR_ENGINE = os.getenv("DOCUMENT_OCR_ENGINE", "auto")
 
@@ -278,6 +280,7 @@ def _collect_document_blocks(value: Any, blocks: List[Dict[str, Any]]) -> None:
             "bbox": value.get("bbox") or value.get("coordinate") or value.get("box"),
             "confidence": value.get("score") or value.get("confidence") or 0.8,
             "table": value.get("table") or value.get("cells"),
+            "source": "vision",
         })
     for child in value.values():
         if isinstance(child, (dict, list)):
@@ -397,6 +400,7 @@ def _parse_with_rapidocr(image_path: str) -> List[Dict[str, Any]]:
 
 async def document_page_parse(params: Dict[str, Any]) -> Dict[str, Any]:
     global _document_pipeline_error, _rapidocr_error
+    global _document_pipeline_verified, _rapidocr_verified
     image_base64 = params.get("image_base64")
     if not image_base64:
         raise ValueError("Missing required parameter: image_base64")
@@ -407,10 +411,35 @@ async def document_page_parse(params: Dict[str, Any]) -> Dict[str, Any]:
     with tempfile.NamedTemporaryFile(suffix=suffix) as temp:
         temp.write(image_bytes)
         temp.flush()
-        blocks: List[Dict[str, Any]] = []
-        used_engine = None
+        rapid_blocks: List[Dict[str, Any]] = []
+        vision_blocks: List[Dict[str, Any]] = []
+        used_engines: List[str] = []
         errors: List[str] = []
-        if DOCUMENT_OCR_ENGINE in {"auto", "vision"}:
+        cross_validate = bool(params.get("cross_validate")) or params.get("analysis_mode") == "deep"
+        prefer_vision = bool(params.get("prefer_vision"))
+        vision_attempted = False
+
+        if DOCUMENT_OCR_ENGINE in {"auto", "ocr"}:
+            try:
+                rapid_blocks = await asyncio.to_thread(_parse_with_rapidocr, temp.name)
+                _rapidocr_error = None
+                _rapidocr_verified = True
+                if rapid_blocks:
+                    used_engines.append("RapidOCR-ONNXRuntime")
+            except Exception as exc:
+                _rapidocr_error = str(exc)
+                errors.append(f"RapidOCR：{exc}")
+
+        rapid_confidence = (
+            sum(float(block.get("confidence") or 0) for block in rapid_blocks) / len(rapid_blocks)
+            if rapid_blocks else 0
+        )
+        needs_vision = DOCUMENT_OCR_ENGINE == "vision" or (
+            DOCUMENT_OCR_ENGINE == "auto"
+            and (cross_validate or prefer_vision or not rapid_blocks or rapid_confidence < 0.72)
+        )
+        if needs_vision:
+            vision_attempted = True
             try:
                 output = await asyncio.to_thread(
                     _parse_with_paddle_vl,
@@ -418,27 +447,27 @@ async def document_page_parse(params: Dict[str, Any]) -> Dict[str, Any]:
                     bool(params.get("use_chart_recognition", True)),
                 )
                 _document_pipeline_error = None
-                used_engine = "PaddleOCR-VL-1.6"
+                _document_pipeline_verified = True
                 for payload in output:
-                    _collect_document_blocks(payload, blocks)
-                    if not blocks:
+                    before = len(vision_blocks)
+                    _collect_document_blocks(payload, vision_blocks)
+                    if len(vision_blocks) == before:
                         markdown = payload.get("markdown") if isinstance(payload, dict) else None
                         text = markdown.get("text") if isinstance(markdown, dict) else None
                         if text:
-                            blocks.append({"type": "text", "text": text, "confidence": 0.75, "source": "vision"})
+                            vision_blocks.append({
+                                "type": "text",
+                                "text": text,
+                                "confidence": 0.75,
+                                "source": "vision",
+                            })
+                if vision_blocks:
+                    used_engines.insert(0, "PaddleOCR-VL-1.6")
             except Exception as exc:
                 _document_pipeline_error = str(exc)
                 errors.append(f"PaddleOCR-VL-1.6：{exc}")
 
-        if not blocks and DOCUMENT_OCR_ENGINE in {"auto", "ocr"}:
-            try:
-                blocks = await asyncio.to_thread(_parse_with_rapidocr, temp.name)
-                _rapidocr_error = None
-                used_engine = "RapidOCR-ONNXRuntime"
-            except Exception as exc:
-                _rapidocr_error = str(exc)
-                errors.append(f"RapidOCR：{exc}")
-
+        blocks = [*vision_blocks, *rapid_blocks]
         if not blocks:
             return {
                 "tool": "document_page_parse",
@@ -447,9 +476,12 @@ async def document_page_parse(params: Dict[str, Any]) -> Dict[str, Any]:
                 "error": "；".join(errors) or "未提取到可分析的图像文字。",
                 "data": {
                     "blocks": [],
-                    "model": used_engine or DOCUMENT_OCR_ENGINE,
+                    "model": DOCUMENT_OCR_ENGINE,
+                    "models": used_engines,
                     "device": PADDLE_DEVICE,
                     "fallback": DOCUMENT_OCR_ENGINE == "auto",
+                    "cross_validated": False,
+                    "warnings": errors,
                 },
                 "metadata": {"duration_ms": int((time.time() - started) * 1000)},
             }
@@ -460,9 +492,12 @@ async def document_page_parse(params: Dict[str, Any]) -> Dict[str, Any]:
         "status": "success",
         "data": {
             "blocks": blocks,
-            "model": used_engine,
+            "model": "+".join(used_engines),
+            "models": used_engines,
             "device": PADDLE_DEVICE,
-            "fallback": used_engine == "RapidOCR-ONNXRuntime",
+            "fallback": DOCUMENT_OCR_ENGINE == "auto" and bool(rapid_blocks) and not vision_blocks and vision_attempted,
+            "cross_validated": bool(rapid_blocks and vision_blocks),
+            "warnings": errors,
         },
         "metadata": {"duration_ms": int((time.time() - started) * 1000)},
     }
@@ -482,13 +517,30 @@ async def root():
 async def health():
     """Health check"""
     api_configured = bool(OPENAI_API_KEY)
-    local_status = "failed" if (_document_pipeline_error and _rapidocr_error) else "unverified"
+    if DOCUMENT_OCR_ENGINE == "ocr":
+        local_status = "ready" if _rapidocr_verified else ("failed" if _rapidocr_error else "lazy")
+    elif DOCUMENT_OCR_ENGINE == "vision":
+        local_status = "ready" if _document_pipeline_verified else ("failed" if _document_pipeline_error else "lazy")
+    elif _document_pipeline_error and _rapidocr_error:
+        local_status = "failed"
+    elif _rapidocr_verified and _document_pipeline_verified:
+        local_status = "ready"
+    elif _rapidocr_verified and _document_pipeline_error:
+        local_status = "fallback"
+    elif _document_pipeline_verified and _rapidocr_error:
+        local_status = "vision_only"
+    elif _rapidocr_verified:
+        local_status = "ready_lightweight"
+    elif _document_pipeline_verified:
+        local_status = "ready_vision"
+    else:
+        local_status = "lazy"
     return {
-        "status": "degraded" if local_status in {"failed", "unverified"} and not api_configured else "healthy",
+        "status": "degraded" if local_status in {"failed", "fallback", "vision_only"} and not api_configured else "healthy",
         "tools": ["ocr_analyze", "screenshot_analyze", "document_page_parse"],
         "openai_api_configured": api_configured,
         "document_model": DOCUMENT_OCR_ENGINE,
-        "document_model_loaded": False,
+        "document_model_loaded": _rapidocr_verified or _document_pipeline_verified,
         "document_model_error": _document_pipeline_error,
         "document_ocr_fallback_error": _rapidocr_error,
         "document_model_status": local_status,

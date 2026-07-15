@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Avatar, Button, Dropdown, Modal, Select, Tag, message } from 'antd'
+import { Avatar, Button, Dropdown, Modal, Select, Tag, Tooltip, message } from 'antd'
 import {
   ArrowLeftOutlined,
   BarChartOutlined,
@@ -195,11 +195,12 @@ function ReportsPage() {
             <span>{loading ? '同步中' : `${reports.length} 个项目`}</span>
           </div>
 
-          <div className="report-list scroll-region">
+          <div className="report-list scroll-region scroll-fade">
             {reports.length ? reports.map((report) => (
               <article className={`report-item ${report.reportState.tone}`} key={report.project_id}>
                 <div className="report-item-head">
-                  <div><span className="report-id">P-{String(report.project_id).padStart(3, '0')}</span><h3>{report.name}</h3></div>
+                  <span className="report-id">P-{String(report.project_id).padStart(3, '0')}</span>
+                  <h3>{report.name}</h3>
                   <Tag color={report.level === '三级' ? 'red' : 'blue'}>{report.level || '未定级'}</Tag>
                 </div>
                 <div className="report-item-state"><span className={`report-state-dot ${report.reportState.tone}`} /><div><strong>{report.reportState.label}</strong><p>{report.reportState.detail}</p></div></div>
@@ -214,13 +215,15 @@ function ReportsPage() {
                   >
                     预览
                   </Button>
-                  <Button
-                    size="small"
-                    icon={<DownloadOutlined />}
-                    loading={downloadingId === report.project_id}
-                    onClick={() => handleDownloadReport(report.project_id)}
-                    aria-label="下载 HTML 报告"
-                  />
+                  <Tooltip title="下载 HTML 报告">
+                    <Button
+                      size="small"
+                      icon={<DownloadOutlined />}
+                      loading={downloadingId === report.project_id}
+                      onClick={() => handleDownloadReport(report.project_id)}
+                      aria-label="下载 HTML 报告"
+                    />
+                  </Tooltip>
                 </div>
               </article>
             )) : (

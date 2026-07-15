@@ -430,6 +430,7 @@ function ModelSettings() {
               <Select.Option value="chat">对话</Select.Option>
               <Select.Option value="vision">视觉</Select.Option>
               <Select.Option value="code">代码</Select.Option>
+              <Select.Option value="embedding">文本向量</Select.Option>
             </Select>
           </Form.Item>
           <Form.Item name="max_tokens" label="最大 Tokens">

@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import {
   Drawer, Tabs, Select, Button, Tooltip, Space, Tag, Input, Switch,
-  Slider, Form, Divider, message, Spin
+  Slider, Form, Divider, message, Spin, Modal
 } from 'antd'
 import {
   SettingOutlined, RobotOutlined, ThunderboltOutlined,
   FileProtectOutlined, ExperimentOutlined, SaveOutlined,
-  ReloadOutlined, BulbOutlined, GlobalOutlined, FileTextOutlined
+  ReloadOutlined, BulbOutlined, GlobalOutlined, FileTextOutlined,
+  DatabaseOutlined, DeleteOutlined, HddOutlined, WarningOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
@@ -15,7 +16,14 @@ import './SystemConfig.css'
 const { Option } = Select
 const { TabPane } = Tabs
 
-function SystemConfig({ trigger, value, onChange }) {
+const formatBytes = (value = 0) => {
+  if (!value) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
+  return `${(value / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`
+}
+
+function SystemConfig({ trigger, value, onChange, projectId, projectName, organizationId }) {
   const [open, setOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('ai')
   const [loading, setLoading] = useState(false)
@@ -29,6 +37,9 @@ function SystemConfig({ trigger, value, onChange }) {
   const [configs, setConfigs] = useState({})
   const [meta, setMeta] = useState({})
   const [pendingChanges, setPendingChanges] = useState({})
+  const [documentHealth, setDocumentHealth] = useState(null)
+  const [storage, setStorage] = useState(null)
+  const [clearingDocuments, setClearingDocuments] = useState(false)
 
   const navigate = useNavigate()
 
@@ -56,6 +67,27 @@ function SystemConfig({ trigger, value, onChange }) {
       setConfigs(configRes.data)
       setMeta(metaRes.data)
       setPendingChanges({})
+      try {
+        const diagnosticsRes = await api.get('/diagnostics/operations', {
+          params: organizationId ? { organization_id: organizationId } : undefined,
+        })
+        setDocumentHealth({
+          graph: diagnosticsRes.data.knowledge_graph,
+          retrieval: diagnosticsRes.data.document_retrieval,
+        })
+      } catch (diagnosticError) {
+        setDocumentHealth({ error: diagnosticError.response?.data?.detail || diagnosticError.message })
+      }
+      if (projectId) {
+        try {
+          const storageRes = await api.get(`/projects/${projectId}/storage`)
+          setStorage(storageRes.data)
+        } catch (storageError) {
+          setStorage({ error: storageError.response?.data?.detail || storageError.message })
+        }
+      } else {
+        setStorage(null)
+      }
     } catch (error) {
       console.error('Failed to load config:', error)
       message.error('加载配置失败')
@@ -103,6 +135,46 @@ function SystemConfig({ trigger, value, onChange }) {
       if (key in category) return category[key]
     }
     return meta[key]?.value
+  }
+
+  const handleClearProjectDocuments = () => {
+    let confirmation = ''
+    Modal.confirm({
+      title: '清空当前项目文档数据',
+      icon: <WarningOutlined />,
+      content: (
+        <div className="document-clear-confirm">
+          <p>将删除原文、内容块、向量、证据图谱、文档 Finding 和整改项；资产、技术检测和标准图谱不受影响。</p>
+          <span>输入项目名称 <b>{projectName}</b> 确认：</span>
+          <Input onChange={(event) => { confirmation = event.target.value }} />
+        </div>
+      ),
+      okText: '清空文档数据',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        if (confirmation !== projectName) {
+          message.error('项目名称不匹配')
+          return Promise.reject(new Error('confirmation mismatch'))
+        }
+        setClearingDocuments(true)
+        try {
+          const response = await api.delete(`/projects/${projectId}/documents`, {
+            data: { confirmation },
+          })
+          const failed = response.data?.failed_file_paths?.length || 0
+          message.success(failed ? `业务数据已清空，${failed} 个物理文件待重试` : '项目文档数据已完整清空')
+          const storageRes = await api.get(`/projects/${projectId}/storage`)
+          setStorage(storageRes.data)
+          window.dispatchEvent(new CustomEvent('certiproof:document-data-cleared', { detail: { projectId } }))
+        } catch (error) {
+          message.error(error.response?.data?.detail || '文档数据清理失败')
+          return Promise.reject(error)
+        } finally {
+          setClearingDocuments(false)
+        }
+      },
+    })
   }
 
   // Section 标题组件 - 图标徽章 + 标题 + 副标题
@@ -241,6 +313,7 @@ function SystemConfig({ trigger, value, onChange }) {
             </Form.Item>
           </Form>
         </div>
+
       </div>
     )
   }
@@ -302,6 +375,7 @@ function SystemConfig({ trigger, value, onChange }) {
             </Form.Item>
           </Form>
         </div>
+
       </div>
     )
   }
@@ -331,6 +405,70 @@ function SystemConfig({ trigger, value, onChange }) {
               </Select>
             </Form.Item>
           </Form>
+        </div>
+        <div className="config-section">
+          <SectionTitle
+            icon={<DatabaseOutlined />}
+            title="文档知识底座"
+            subtitle="运行时检查标准图谱和语义检索是否可用"
+          />
+          <div className="document-health-grid">
+            <div>
+              <span>标准图谱</span>
+              <Tag color={documentHealth?.graph?.available ? 'success' : 'error'}>
+                {documentHealth?.graph?.available ? 'Apache AGE 正常' : '不可用'}
+              </Tag>
+              <small>
+                {documentHealth?.graph?.available
+                  ? `${documentHealth.graph.standard_nodes || 0} 节点 · ${documentHealth.graph.standard_edges || 0} 关系 · ${documentHealth.graph.standard_version || '未标记版本'}`
+                  : documentHealth?.graph?.reason || documentHealth?.error || '等待诊断'}
+              </small>
+            </div>
+            <div>
+              <span>语义检索</span>
+              <Tag color={documentHealth?.retrieval?.embedding_configured ? 'success' : 'warning'}>
+                {documentHealth?.retrieval?.embedding_configured ? '向量模型已配置' : '向量模型未配置'}
+              </Tag>
+              <small>
+                {documentHealth?.retrieval?.embedding_configured
+                  ? `${documentHealth.retrieval.models.join('、')} · ${documentHealth.retrieval.embedding_dimension} 维`
+                  : documentHealth?.retrieval?.message || documentHealth?.error || '等待诊断'}
+              </small>
+            </div>
+          </div>
+        </div>
+        <div className="config-section">
+          <SectionTitle
+            icon={<HddOutlined />}
+            title="项目文档容量"
+            subtitle="逻辑占用不含 PostgreSQL 共享索引页"
+          />
+          {storage?.error ? (
+            <div className="document-storage-error">{storage.error}</div>
+          ) : (
+            <div className="document-storage-list">
+              {Object.entries(storage?.categories || {}).map(([key, item]) => (
+                <div key={key}>
+                  <span>{item.label}</span>
+                  <strong>{formatBytes(item.bytes)}</strong>
+                  <em>{item.transient ? '随请求释放' : item.on_demand ? '按需生成' : `${item.count || 0} 项`}</em>
+                </div>
+              ))}
+              <div className="document-storage-total">
+                <span>当前逻辑占用</span>
+                <strong>{formatBytes(storage?.total_bytes || 0)}</strong>
+              </div>
+            </div>
+          )}
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            onClick={handleClearProjectDocuments}
+            loading={clearingDocuments}
+            disabled={!projectId || !projectName}
+          >
+            清空当前项目文档数据
+          </Button>
         </div>
       </div>
     )

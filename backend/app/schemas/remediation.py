@@ -61,6 +61,7 @@ class RemediationTicketListResponse(BaseModel):
     judgment: Optional[str] = None
     confidence: Optional[float] = None
     scan_task_id: Optional[int] = None
+    document_run_id: Optional[int] = None
     assigned_to: Optional[int] = None
     skip_reason: Optional[str] = None
     resolution_notes: Optional[str] = None

@@ -9,7 +9,7 @@ from alembic.config import Config
 from sqlalchemy import text
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal, engine, init_db
+from app.core.database import AsyncSessionLocal, engine, init_db, seed_runtime_data
 
 
 async def _has_alembic_version() -> bool:
@@ -27,11 +27,18 @@ def _alembic_config() -> Config:
 
 async def main() -> bool:
     settings.validate_runtime_security()
-    await init_db()
+    has_alembic_version = await _has_alembic_version()
+    if not has_alembic_version:
+        await init_db()
+    await engine.dispose()
+    return has_alembic_version
+
+
+async def reconcile_after_upgrade() -> None:
+    await seed_runtime_data()
     async with AsyncSessionLocal() as db:
         from app.services.flow_engine import get_flow_engine
         await get_flow_engine(db).reconcile_all_assessment_progress()
-    return await _has_alembic_version()
 
 
 if __name__ == "__main__":
@@ -48,3 +55,4 @@ if __name__ == "__main__":
         if not has_alembic_version:
             command.stamp(config, "003")
         command.upgrade(config, "head")
+        asyncio.run(reconcile_after_upgrade())

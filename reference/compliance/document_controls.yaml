@@ -3,6 +3,12 @@ basis:
   - "GB/T 22239-2019"
   - "GB/T 28448-2019"
 description: "CertiProof 等保自查文档标准库。结论来自结构化必检项和规则评分；LLM 只作为证据判读辅助，不直接给最终合规结论。"
+requirement_defaults:
+  required_evidence: ["可定位的正式制度条款", "明确的责任主体、流程或执行要求"]
+  completeness: "证据应同时回答适用对象、责任主体和执行要求；只有口号、标题或关键词不算完整。"
+  negative_conditions: ["正文明确表示不执行该要求", "仅有草案、待定或无责任主体的描述", "证据与其他有效条款相互矛盾"]
+  severity: "medium"
+  remediation_template: "补充并正式发布“{requirement}”相关条款，明确责任主体、执行流程和可审计记录。"
 
 documents:
   security_management_policy:

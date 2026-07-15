@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { Fragment, useState, useEffect, useRef, useCallback } from 'react'
 import { Progress, Tag, Tooltip, Drawer, Button, Steps, Empty, Spin, Modal, Upload, Input, message, Form, Radio, Checkbox, Alert } from 'antd'
 import {
   CheckCircleFilled,
@@ -12,6 +12,7 @@ import {
   BugOutlined,
   TeamOutlined,
   FileTextOutlined,
+  FolderOpenOutlined,
   RadarChartOutlined,
   SettingOutlined,
   ThunderboltOutlined,
@@ -97,7 +98,58 @@ const EXECUTABLE_TASK_TYPES = [
   'ssh_baseline_assessment',
 ]
 
-const SSH_CREDENTIAL_TASK_TYPES = ['config_check', 'basic_baseline_check', 'ssh_baseline_assessment']
+const GAP_TECH_BATCH_TYPE = 'gap_technical_batch'
+const SSH_CREDENTIAL_TASK_TYPES = ['config_check', 'basic_baseline_check', 'ssh_baseline_assessment', GAP_TECH_BATCH_TYPE]
+const BASIC_TECHNICAL_TASK_TYPES = new Set([
+  'high_risk_port_scan',
+  'basic_vulnerability_scan',
+  'basic_baseline_check',
+  'basic_weak_password_scan',
+  'basic_ssl_tls_scan',
+])
+
+const DOCUMENT_PIPELINE_STAGES = [
+  ['native_extraction', '内容提取'],
+  ['fusion', '视觉补充与融合'],
+  ['retrieval', '标准检索'],
+  ['judging', '模型判证'],
+  ['generating_results', '规则汇总'],
+  ['completed', '生成结果'],
+]
+
+const BATCH_DOCUMENT_STAGES = [
+  ['native_extraction', '内容提取'],
+  ['classification', '混合归类'],
+  ['analyzing', '子项排队'],
+  ['completed', '提交分析'],
+]
+
+function DocumentPipelineProgress({ progress = {}, batch = false }) {
+  const stages = batch ? BATCH_DOCUMENT_STAGES : DOCUMENT_PIPELINE_STAGES
+  const currentStage = progress.stage || stages[0][0]
+  const currentIndex = Math.max(0, stages.findIndex(([key]) => key === currentStage))
+  const completed = currentStage === 'completed'
+  const failed = currentStage === 'failed'
+
+  return (
+    <div className="document-pipeline-progress">
+      <div className="document-pipeline-stages">
+        {stages.map(([key, label], index) => (
+          <span
+            key={key}
+            className={completed || index < currentIndex ? 'done' : index === currentIndex ? (failed ? 'failed' : 'active') : ''}
+          >
+            <i />{label}
+          </span>
+        ))}
+      </div>
+      <div className="document-pipeline-message">
+        <span>{progress.message || '等待文档分析'}</span>
+        <em>{progress.percent || 0}%</em>
+      </div>
+    </div>
+  )
+}
 
 const PHASE_ICONS = {
   1: <SafetyCertificateOutlined />,
@@ -155,6 +207,9 @@ function AssessmentProgress({ projectId, projectName }) {
   const [uploadAnalysisMode, setUploadAnalysisMode] = useState('default')
   const [uploading, setUploading] = useState(false)
   const [projectLevel, setProjectLevel] = useState(null)
+  const [batchUploadMode, setBatchUploadMode] = useState(false)
+  const [batchDocumentRun, setBatchDocumentRun] = useState(null)
+  const batchPollingRef = useRef(null)
 
   // 跳过任务弹窗
   const [skipModalVisible, setSkipModalVisible] = useState(false)
@@ -187,6 +242,9 @@ function AssessmentProgress({ projectId, projectName }) {
     return () => {
       if (pollingRef.current) {
         clearInterval(pollingRef.current)
+      }
+      if (batchPollingRef.current) {
+        clearInterval(batchPollingRef.current)
       }
     }
   }, [projectId])
@@ -396,14 +454,56 @@ function AssessmentProgress({ projectId, projectName }) {
     }
   }
 
+  const startBatchPolling = (runId, phaseId, notify = false) => {
+    if (!runId || !phaseId) return
+    if (batchPollingRef.current) clearInterval(batchPollingRef.current)
+    const poll = async () => {
+      try {
+        const response = await api.get(`/assessments/document-runs/${runId}`)
+        const run = response.data
+        setBatchDocumentRun(run)
+        if (['completed', 'failed', 'cancelled'].includes(run.status)) {
+          clearInterval(batchPollingRef.current)
+          batchPollingRef.current = null
+          const tasksResponse = await api.get(`/assessments/phases/${phaseId}/tasks`)
+          setTasks(tasksResponse.data)
+          fetchAssessment({ silent: true })
+          if (tasksResponse.data.some(task => task.status === 'in_progress')) startPolling(phaseId)
+          if (notify) {
+            if (run.status === 'completed') {
+              const count = run.result?.classified?.length || 0
+              const unresolved = run.result?.unclassified?.length || 0
+              message.success(`已归类 ${count} 个文档${unresolved ? `，${unresolved} 个需调整文件名或内容` : ''}`)
+            } else {
+              message.error(run.error || '批量文档归类失败')
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Batch document polling failed:', error)
+      }
+    }
+    poll()
+    batchPollingRef.current = setInterval(poll, 2000)
+  }
+
   const handlePhaseClick = async (phase) => {
     setSelectedPhase(phase)
     setDrawerVisible(true)
     setTasksLoading(true)
     
     try {
-      const response = await api.get(`/assessments/phases/${phase.id}/tasks`)
+      const [response, latestBatchResponse] = await Promise.all([
+        api.get(`/assessments/phases/${phase.id}/tasks`),
+        phase.phase_id === 'gap_analysis'
+          ? api.get(`/assessments/phases/${phase.id}/documents/batch/latest`)
+          : Promise.resolve({ data: null }),
+      ])
       setTasks(response.data)
+      setBatchDocumentRun(latestBatchResponse.data)
+      if (latestBatchResponse.data && ['queued', 'pending', 'running'].includes(latestBatchResponse.data.status)) {
+        startBatchPolling(latestBatchResponse.data.id, phase.id)
+      }
       
       // 如果有进行中的任务，启动轮询
       const hasInProgress = response.data.some(t => t.status === 'in_progress')
@@ -456,6 +556,20 @@ function AssessmentProgress({ projectId, projectName }) {
     return () => window.removeEventListener('certiproof:open-assessment', openAssessment)
   }, [projectId])
 
+  useEffect(() => {
+    const refreshAfterDocumentClear = async (event) => {
+      if (event.detail?.projectId !== projectId) return
+      await fetchAssessment({ silent: true })
+      if (selectedPhase?.id) {
+        const response = await api.get(`/assessments/phases/${selectedPhase.id}/tasks`)
+        setTasks(response.data)
+        setBatchDocumentRun(null)
+      }
+    }
+    window.addEventListener('certiproof:document-data-cleared', refreshAfterDocumentClear)
+    return () => window.removeEventListener('certiproof:document-data-cleared', refreshAfterDocumentClear)
+  }, [projectId, selectedPhase?.id])
+
   const handleStartAssessment = async () => {
     if (!assessment) return
     
@@ -494,6 +608,21 @@ function AssessmentProgress({ projectId, projectName }) {
     }
   }
 
+  const loadProjectAssets = async (selectAll = false) => {
+    setAssetsLoading(true)
+    try {
+      const response = await api.get(`/projects/${projectId}/assets/`)
+      const assets = response.data || []
+      setProjectAssets(assets)
+      if (selectAll) setSelectedAssets(assets.map(asset => asset.id))
+    } catch (error) {
+      console.error('Failed to fetch assets:', error)
+      setProjectAssets([])
+    } finally {
+      setAssetsLoading(false)
+    }
+  }
+
   // 打开任务执行参数弹窗
   const handleOpenExecute = async (task) => {
     setExecuteTask(task)
@@ -504,17 +633,18 @@ function AssessmentProgress({ projectId, projectName }) {
     setUnifiedCredential(true)
     setAssetCredentials({})
     
-    // 获取项目资产
-    setAssetsLoading(true)
-    try {
-      const response = await api.get(`/projects/${projectId}/assets/`)
-      setProjectAssets(response.data || [])
-    } catch (error) {
-      console.error('Failed to fetch assets:', error)
-      setProjectAssets([])
-    } finally {
-      setAssetsLoading(false)
-    }
+    await loadProjectAssets()
+  }
+
+  const handleOpenTechnicalBatch = async () => {
+    setExecuteTask({ task_type: GAP_TECH_BATCH_TYPE, name: '自动基础技术检测' })
+    setExecuteMode('all')
+    setExecuteParams({ target: '', username: 'root', password: '', key_file: '' })
+    setSelectedAssets([])
+    setUnifiedCredential(true)
+    setAssetCredentials({})
+    setExecuteModalVisible(true)
+    await loadProjectAssets(true)
   }
 
   // 提交任务执行
@@ -570,11 +700,17 @@ function AssessmentProgress({ projectId, projectName }) {
       if (Object.keys(credentials).length > 0) {
         payload.credentials = credentials
       }
-      const executeResponse = await api.post(`/assessments/tasks/${executeTask.id}/execute`, payload)
+      const isGapBatch = executeTask.task_type === GAP_TECH_BATCH_TYPE
+      const executeResponse = isGapBatch
+        ? await api.post(`/assessments/phases/${selectedPhase.id}/technical/execute`, {
+            asset_ids: selectedAssets,
+            ...(Object.keys(credentials).length > 0 ? { credentials } : {}),
+          })
+        : await api.post(`/assessments/tasks/${executeTask.id}/execute`, payload)
       if (executeResponse.data?.status === 'partial') {
         message.warning(executeResponse.data.message || '任务部分完成，存在无法检测项')
       } else {
-        message.success(executeResponse.data?.message || '任务执行完成')
+        message.success(executeResponse.data?.message || (isGapBatch ? '基础技术检测已提交' : '任务执行完成'))
       }
       setExecuteModalVisible(false)
       
@@ -626,6 +762,7 @@ function AssessmentProgress({ projectId, projectName }) {
   }
 
   const handleOpenUpload = async (task) => {
+    setBatchUploadMode(false)
     setUploadTask(task)
     setUploadFiles([])
     setTaskDocuments([])
@@ -645,32 +782,48 @@ function AssessmentProgress({ projectId, projectName }) {
     }
   }
 
+  const handleOpenBatchUpload = () => {
+    setBatchUploadMode(true)
+    setUploadTask(null)
+    setUploadFiles([])
+    setTaskDocuments([])
+    setProjectLevel(null)
+    setUploadAnalysisMode('default')
+    setUploadModalVisible(true)
+  }
+
   const handleSubmitUpload = async () => {
     if (uploadFiles.length === 0) {
       message.warning('请先选择文件')
       return
     }
-    if (!uploadTask) return
+    if (!batchUploadMode && !uploadTask) return
 
     setUploading(true)
     try {
       const formData = new FormData()
-      uploadFiles.forEach(file => formData.append('files', file))
+      uploadFiles.forEach(file => formData.append('files', file, file.webkitRelativePath || file.name))
       formData.append('analysis_mode', uploadAnalysisMode)
 
       const response = await api.post(
-        `/assessments/tasks/${uploadTask.id}/documents`,
+        batchUploadMode
+          ? `/assessments/phases/${selectedPhase.id}/documents/batch`
+          : `/assessments/tasks/${uploadTask.id}/documents`,
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } }
       )
 
-      message.success(`已上传 ${uploadFiles.length} 个文件，正在后台分析`)
+      message.success(batchUploadMode ? '文档集已上传，正在自动归类' : `已上传 ${uploadFiles.length} 个文件，正在后台分析`)
+      if (batchUploadMode) {
+        setBatchDocumentRun({ id: response.data.run_id, status: 'pending', progress: { percent: 0, message: '等待批量文档归类' } })
+        startBatchPolling(response.data.run_id, selectedPhase.id, true)
+      }
       const tasksResponse = await api.get(`/assessments/phases/${selectedPhase.id}/tasks`)
       setTasks(tasksResponse.data)
       fetchAssessment()
       setUploadModalVisible(false)
       setUploadFiles([])
-      startPolling(selectedPhase.id)
+      if (!batchUploadMode) startPolling(selectedPhase.id)
     } catch (error) {
       console.error('Upload failed:', error)
       const errMsg = error.response?.data?.detail || error.message || '上传失败'
@@ -880,9 +1033,10 @@ function AssessmentProgress({ projectId, projectName }) {
   }
 
   const handleOpenEvidence = async (item) => {
-    if (!item.evidence_id) return
+    const documentId = item.document_file_id || item.evidence_id
+    if (!documentId) return
     try {
-      const response = await api.get(`/evidences/${item.evidence_id}/download`, { responseType: 'blob' })
+      const response = await api.get(`/assessments/documents/${documentId}/download`, { responseType: 'blob' })
       const url = window.URL.createObjectURL(response.data)
       window.open(`${url}${item.page ? `#page=${item.page}` : ''}`, '_blank', 'noopener,noreferrer')
       window.setTimeout(() => window.URL.revokeObjectURL(url), 60000)
@@ -905,6 +1059,12 @@ function AssessmentProgress({ projectId, projectName }) {
     const gaps = analysis.gaps || []
     const comparison = analysis.retest_comparison
     const controls = analysis.controls || []
+    const retrieval = analysis.retrieval || {}
+    const engineLabel = analysis.evidence_engine === 'hybrid'
+      ? 'LLM 判证 + 规则汇总'
+      : analysis.evidence_engine === 'rule'
+        ? '规则汇总'
+        : '判证不可用'
 
     return (
       <div className="document-analysis">
@@ -912,24 +1072,52 @@ function AssessmentProgress({ projectId, projectName }) {
           <Tag color={status.color}>{status.text}</Tag>
           <strong>{analysis.document_name || '文档检查'}</strong>
           <span>覆盖率 {Math.round((analysis.coverage || 0) * 100)}%</span>
-          <span>置信度 {Math.round((analysis.confidence || 0) * 100)}%</span>
+          <span>置信度 {analysis.status === 'unable' ? '不可用' : `${Math.round((analysis.confidence || 0) * 100)}%`}</span>
           <span>{analysis.analysis_mode === 'deep' ? '深度模式' : '标准模式'}</span>
         </div>
+        <div className="document-engine-summary">
+          <Tag color={retrieval.semantic_available ? 'cyan' : 'warning'}>
+            {retrieval.engine || '精确检索 + 标准图谱'}
+          </Tag>
+          <Tag color={analysis.evidence_engine === 'unavailable' ? 'error' : 'geekblue'}>{engineLabel}</Tag>
+          {retrieval.embedding_model && <span>向量模型：{retrieval.embedding_model}</span>}
+        </div>
+        {(analysis.message || retrieval.semantic_error) && (
+          <Alert
+            type={analysis.status === 'unable' ? 'error' : 'warning'}
+            showIcon
+            message={analysis.message || '语义检索不可用，已降级为精确检索和图谱扩展'}
+            description={retrieval.semantic_error || undefined}
+          />
+        )}
         {(analysis.files || []).length > 0 && (
           <div className="document-file-summary">
             {analysis.files.map(file => (
-              <div key={file.evidence_id}>
+              <div key={file.document_file_id} className={file.status === 'failed' ? 'failed' : ''}>
                 <FileTextOutlined />
                 <span>{file.file_name}</span>
-                <em>{file.page_count || 0} 页 · 原生 {file.native_blocks || 0} · OCR {file.ocr_blocks || 0} · 视觉 {Math.max((file.vision_blocks || 0) - (file.ocr_blocks || 0), 0)}</em>
+                <em>
+                  {file.status === 'failed'
+                    ? `提取失败：${file.error || '未知错误'}`
+                    : `${file.page_count || 0} 页 · 原生 ${file.native_blocks || 0} · OCR ${file.ocr_blocks || 0} · 视觉 ${Math.max((file.vision_blocks || 0) - (file.ocr_blocks || 0), 0)} · 向量${file.embedding_status === 'ready' ? '就绪' : '不可用'}`}
+                </em>
+                {(file.warnings || []).length > 0 && <small>{file.warnings.join('；')}</small>}
               </div>
             ))}
           </div>
         )}
         {comparison && (
-          <div className="document-analysis-comparison">
-            复测：{comparison.status === 'improved' ? '已改善' : comparison.status === 'regressed' ? '有退化' : '无变化'}
-            {' '}({comparison.delta > 0 ? '+' : ''}{Math.round((comparison.delta || 0) * 100)}%)
+          <div className={`document-analysis-comparison ${comparison.comparison_reliable === false ? 'unreliable' : ''}`}>
+            <strong>
+              复测：{comparison.comparison_reliable === false
+                ? '无法可靠比较'
+                : comparison.status === 'improved' ? '已改善' : comparison.status === 'regressed' ? '有退化' : '无变化'}
+            </strong>
+            <span>{comparison.delta > 0 ? '+' : ''}{Math.round((comparison.delta || 0) * 100)}%</span>
+            {comparison.comparison_reliable !== false && (
+              <em>已修复 {comparison.fixed_gap_ids?.length || 0} · 仍存在 {comparison.remaining_gap_ids?.length || 0} · 新增 {comparison.new_gap_ids?.length || 0}</em>
+            )}
+            {comparison.comparison_reliable === false && <em>初检或本次分析未完成，不自动关闭原问题</em>}
           </div>
         )}
         {gaps.length > 0 && (
@@ -943,7 +1131,7 @@ function AssessmentProgress({ projectId, projectName }) {
         {controls.length > 0 && (
           <details className="document-analysis-details">
             <summary>
-              检查详情：{analysis.passed_points || 0}/{analysis.total_points || 0} 个检查点通过，共 {controls.length} 个检查域
+              检查详情：通过 {analysis.passed_points || 0} · 部分 {analysis.partial_points || 0} · 不通过 {analysis.failed_points || 0} · 无法判断 {analysis.unable_points || 0}
             </summary>
             <div className="document-control-list">
               {controls.map((control) => {
@@ -963,9 +1151,10 @@ function AssessmentProgress({ projectId, projectName }) {
                             <Tag color={pointStatus.color}>{pointStatus.text}</Tag>
                             <span>{point.text}</span>
                           </div>
-                          {point.status === 'fail' && (
+                          {['fail', 'partial'].includes(point.status) && (
                             <div className="document-control-missing">
-                              {point.contradiction ? '发现与检查要求冲突的内容：' : ''}{point.llm_reason || point.missing_judgement}
+                              {point.contradiction ? '发现冲突：' : point.status === 'partial' ? '证据不足：' : '缺失：'}
+                              {point.llm_reason || point.missing_judgement}
                             </div>
                           )}
                           {evidence.slice(0, 2).map((item, index) => (
@@ -982,6 +1171,10 @@ function AssessmentProgress({ projectId, projectName }) {
                                 {item.type ? ` · ${item.type}` : ''}
                               </button>
                               <span>证据：{item.text}</span>
+                              <small>
+                                {item.retrieval_sources?.length ? `${item.retrieval_sources.join(' + ')} · ` : ''}
+                                置信度 {Math.round((item.confidence || 0) * 100)}%
+                              </small>
                             </div>
                           ))}
                           {(point.basis || []).length > 0 && (
@@ -1024,6 +1217,13 @@ function AssessmentProgress({ projectId, projectName }) {
   }
 
   const statusConfig = STATUS_CONFIG[assessment.status] || STATUS_CONFIG.not_started
+  const isGapAnalysis = selectedPhase?.phase_id === 'gap_analysis'
+  const documentTasks = tasks.filter(task => task.task_type === 'doc_review')
+  const technicalTasks = tasks.filter(task => BASIC_TECHNICAL_TASK_TYPES.has(task.task_type))
+  const documentCompleted = documentTasks.filter(task => task.status === 'completed').length
+  const technicalCompleted = technicalTasks.filter(task => task.status === 'completed').length
+  const technicalRunning = technicalTasks.filter(task => task.status === 'in_progress').length
+  const batchDocumentRunning = ['queued', 'pending', 'running'].includes(batchDocumentRun?.status)
 
   return (
     <>
@@ -1383,7 +1583,7 @@ function AssessmentProgress({ projectId, projectName }) {
           </div>
         }
         placement="right"
-        width="min(720px, 94vw)"
+        width={isGapAnalysis ? 'min(920px, 96vw)' : 'min(720px, 94vw)'}
         onClose={() => {
           setDrawerVisible(false)
           stopPolling()
@@ -1416,9 +1616,102 @@ function AssessmentProgress({ projectId, projectName }) {
               </div>
             </div>
 
+            {isGapAnalysis && (
+              <div className="gap-analysis-tracks">
+                <section className="gap-track document-track">
+                  <div className="gap-track-header">
+                    <span className="gap-track-icon"><FileProtectOutlined /></span>
+                    <div>
+                      <strong>文档合规检查</strong>
+                      <p>上传文件、文件夹、ZIP、RAR 或 7z，系统通过文件名、正文标题和内容混合归类并逐项分析。</p>
+                    </div>
+                  </div>
+                  <div className="gap-track-stats">
+                    <span><b>{documentCompleted}</b> / {documentTasks.length} 已完成</span>
+                    <span><b>{documentTasks.filter(task => task.status === 'in_progress').length}</b> 分析中</span>
+                    <span><b>{batchDocumentRun?.result?.unclassified?.length || 0}</b> 未归类</span>
+                  </div>
+                  {batchDocumentRun && (
+                    <div className={`batch-document-status ${batchDocumentRun.status}`}>
+                      {batchDocumentRunning ? (
+                        <>
+                          <DocumentPipelineProgress progress={batchDocumentRun.progress} batch />
+                        </>
+                      ) : batchDocumentRun.status === 'failed' ? (
+                        <span><WarningOutlined /> {batchDocumentRun.error || '批量文档归类失败'}</span>
+                      ) : (
+                        <>
+                          <span>最近归类：{batchDocumentRun.result?.classified?.length || 0} 个已匹配，{batchDocumentRun.result?.missing?.length || 0} 类仍缺材料</span>
+                          {(batchDocumentRun.result?.classified?.length || 0) > 0 && (
+                            <details>
+                              <summary>查看归类结果与文件名提示</summary>
+                              {batchDocumentRun.result.classified.map(item => (
+                                <div key={item.document_file_id} className="classification-result-row">
+                                  <span>{item.file_name} → {item.document_name}</span>
+                                  <Tag color={item.naming_status === 'filename_warning' ? 'warning' : 'success'}>
+                                    {item.naming_status === 'filename_warning' ? '命名不规范' : '名称匹配'}
+                                  </Tag>
+                                  <em>{item.classifier === 'hybrid' ? '规则 + LLM' : item.classifier === 'rule_fallback' ? '规则降级' : '规则确认'} · {Math.round((item.confidence || 0) * 100)}%</em>
+                                </div>
+                              ))}
+                            </details>
+                          )}
+                          {(batchDocumentRun.result?.unclassified?.length || 0) > 0 && (
+                            <details>
+                              <summary>{batchDocumentRun.result.unclassified.length} 个文件未可靠归类</summary>
+                              {batchDocumentRun.result.unclassified.map(item => (
+                                <div key={item.document_file_id}>{item.file_name}：{item.reason}</div>
+                              ))}
+                            </details>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <Button
+                    type="primary"
+                    icon={<InboxOutlined />}
+                    onClick={handleOpenBatchUpload}
+                    disabled={batchDocumentRunning || documentTasks.some(task => task.status === 'in_progress')}
+                  >
+                    批量上传并自动分析
+                  </Button>
+                </section>
+
+                <section className="gap-track technical-track">
+                  <div className="gap-track-header">
+                    <span className="gap-track-icon"><ThunderboltOutlined /></span>
+                    <div>
+                      <strong>基础技术检测</strong>
+                      <p>一次选择资产和 SSH 凭证，并行执行端口、漏洞、基线、弱口令和 SSL/TLS 检测。</p>
+                    </div>
+                  </div>
+                  <div className="gap-track-stats">
+                    <span><b>{technicalCompleted}</b> / {technicalTasks.length} 已完成</span>
+                    <span><b>{technicalRunning}</b> 执行中</span>
+                    <span><b>{technicalTasks.filter(task => task.status === 'failed').length}</b> 失败</span>
+                  </div>
+                  {technicalRunning > 0 && (
+                    <div className="technical-batch-status">
+                      <Spin size="small" />
+                      <span>{technicalRunning} 项检测正在后台执行，可继续进行文档检查</span>
+                    </div>
+                  )}
+                  <Button
+                    type="primary"
+                    icon={<ThunderboltOutlined />}
+                    onClick={handleOpenTechnicalBatch}
+                    disabled={technicalTasks.length === 0 || technicalRunning > 0}
+                  >
+                    自动检测全部资产
+                  </Button>
+                </section>
+              </div>
+            )}
+
             {/* Tasks List */}
             <div className="tasks-section">
-              <h4>任务列表</h4>
+              <h4>{isGapAnalysis ? '单项检查与结果' : '任务列表'}</h4>
               {tasksLoading ? (
                 <div className="tasks-loading">
                   <Spin />
@@ -1427,7 +1720,7 @@ function AssessmentProgress({ projectId, projectName }) {
                 <Empty description="暂无任务" />
               ) : (
                 <div className="tasks-list">
-                  {tasks.map(task => {
+                  {tasks.map((task, taskIndex) => {
                     const taskStatus = TASK_STATUS_CONFIG[task.status] || TASK_STATUS_CONFIG.todo
                     const taskIcon = TASK_TYPE_ICONS[task.task_type] || <FileTextOutlined />
                     const taskIssues = getTaskIssues(task)
@@ -1436,9 +1729,18 @@ function AssessmentProgress({ projectId, projectName }) {
                     const isFailed = task.status === 'failed'
                     const isInProgress = task.status === 'in_progress'
                     const isExpanded = expandedErrors[task.id]
+                    const firstDocumentIndex = tasks.findIndex(item => item.task_type === 'doc_review')
+                    const firstTechnicalIndex = tasks.findIndex(item => BASIC_TECHNICAL_TASK_TYPES.has(item.task_type))
                     
                     return (
-                      <div key={task.id} className={`task-item ${taskStatus.className} ${hasOnlyWarnings ? 'partial' : ''}`}>
+                      <Fragment key={task.id}>
+                      {isGapAnalysis && taskIndex === firstDocumentIndex && (
+                        <div className="task-track-divider"><FileProtectOutlined /> 文档检查子项</div>
+                      )}
+                      {isGapAnalysis && taskIndex === firstTechnicalIndex && (
+                        <div className="task-track-divider technical"><ThunderboltOutlined /> 基础技术子项</div>
+                      )}
+                      <div className={`task-item ${taskStatus.className} ${hasOnlyWarnings ? 'partial' : ''}`}>
                         <div className="task-icon">
                           {isInProgress ? (
                             <Spin size="small" />
@@ -1478,10 +1780,7 @@ function AssessmentProgress({ projectId, projectName }) {
                           )}
                           {(isFailed || hasIssues) && isExpanded && renderFailureDetails(task)}
                           {task.task_type === 'doc_review' && task.status === 'in_progress' && task.result?.progress && (
-                            <div className="document-run-progress">
-                              <Progress percent={task.result.progress.percent || 0} size="small" />
-                              <span>{task.result.progress.message || '正在分析文档'}</span>
-                            </div>
+                            <DocumentPipelineProgress progress={task.result.progress} />
                           )}
                           {task.task_type === 'doc_review' && task.status === 'completed' && renderDocumentAnalysis(task)}
                         </div>
@@ -1617,6 +1916,7 @@ function AssessmentProgress({ projectId, projectName }) {
                           )}
                         </div>
                       </div>
+                      </Fragment>
                     )
                   })}
                 </div>
@@ -1644,7 +1944,7 @@ function AssessmentProgress({ projectId, projectName }) {
         title={
           <span>
             <UploadOutlined style={{ marginRight: 8 }} />
-            上传任务文档 - {uploadTask?.name}
+            {batchUploadMode ? '批量上传文档集' : `上传任务文档 - ${uploadTask?.name || ''}`}
           </span>
         }
         open={uploadModalVisible}
@@ -1656,7 +1956,16 @@ function AssessmentProgress({ projectId, projectName }) {
         width={600}
         destroyOnClose
       >
-        {projectLevel && projectLevel.requires_level_check && (
+        {batchUploadMode && (
+          <Alert
+            type="info"
+            showIcon
+            message="系统会先归类，再执行检查"
+            description="文件名允许包含版本号、日期和修订标记；名称不规范但正文标题明确时会归类并提示。名称与正文都无法确认的文件不会被强行判定。"
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        {!batchUploadMode && projectLevel && projectLevel.requires_level_check && (
           <div
             style={{
               padding: 12,
@@ -1696,6 +2005,25 @@ function AssessmentProgress({ projectId, projectName }) {
           </Form.Item>
         </Form>
 
+        {batchUploadMode && (
+          <Upload
+            directory
+            multiple
+            showUploadList={false}
+            beforeUpload={(file) => {
+              if (file.size > 100 * 1024 * 1024) {
+                message.error('文件过大，单个文档最大支持 100MB')
+                return Upload.LIST_IGNORE
+              }
+              setUploadFiles(current => current.some(item => item.uid === file.uid) ? current : [...current, file])
+              return false
+            }}
+            disabled={uploading}
+          >
+            <Button icon={<FolderOpenOutlined />} disabled={uploading}>选择文件夹</Button>
+          </Upload>
+        )}
+
         <Upload.Dragger
           multiple
           beforeUpload={(file) => {
@@ -1710,15 +2038,15 @@ function AssessmentProgress({ projectId, projectName }) {
           onRemove={(file) => {
             setUploadFiles(current => current.filter(item => item.uid !== file.uid))
           }}
-          accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff"
+          accept={batchUploadMode ? '.zip,.rar,.7z,.pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff' : '.pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff'}
           disabled={uploading}
         >
           <p className="ant-upload-drag-icon">
             <InboxOutlined />
           </p>
-          <p className="ant-upload-text">点击或拖拽一个或多个文件到此区域</p>
+          <p className="ant-upload-text">{batchUploadMode ? '拖拽文档集、ZIP、RAR 或 7z 到此区域' : '点击或拖拽一个或多个文件到此区域'}</p>
           <p className="ant-upload-hint">
-            支持 DOCX、PDF、TXT、MD 和常见图片。单个文件不超过 100MB。
+            支持 DOCX、PDF、TXT、MD 和常见图片。{batchUploadMode ? '压缩包最多 100 个文档、解压后 300MB。' : '单个文件不超过 100MB。'}
           </p>
         </Upload.Dragger>
 
@@ -1728,11 +2056,19 @@ function AssessmentProgress({ projectId, projectName }) {
             {taskDocuments.map(document => (
               <div key={document.id}>
                 <span><FileTextOutlined /> {document.file_name}</span>
-                <em>
-                  {document.extraction
-                    ? `${document.extraction.analysis_mode === 'deep' ? '深度' : '标准'} · ${document.extraction.page_count || 0} 页 · 原生 ${document.extraction.native_blocks || 0} · OCR ${document.extraction.ocr_blocks || 0} · 视觉 ${Math.max((document.extraction.vision_blocks || 0) - (document.extraction.ocr_blocks || 0), 0)}`
-                    : '等待解析'}
-                </em>
+                <div className="existing-document-meta">
+                  <em>
+                    {document.extraction
+                      ? `${document.extraction.analysis_mode === 'deep' ? '深度' : '标准'} · ${document.extraction.page_count || 0} 页 · 原生 ${document.extraction.native_blocks || 0} · OCR ${document.extraction.ocr_blocks || 0} · 视觉 ${Math.max((document.extraction.vision_blocks || 0) - (document.extraction.ocr_blocks || 0), 0)} · 向量${document.extraction.embedding_status === 'ready' ? '就绪' : '不可用'}`
+                      : '等待解析'}
+                  </em>
+                  {document.classification && (
+                    <Tag color={document.classification.naming_status === 'filename_warning' ? 'warning' : 'cyan'}>
+                      {document.classification.document_name || '未归类'}
+                      {document.classification.naming_status === 'filename_warning' ? ' · 命名不规范' : ''}
+                    </Tag>
+                  )}
+                </div>
                 <Button
                   type="text"
                   danger
@@ -1794,17 +2130,19 @@ function AssessmentProgress({ projectId, projectName }) {
         onCancel={() => !executing && setExecuteModalVisible(false)}
         onOk={handleSubmitExecute}
         confirmLoading={executing}
-        okText="开始执行"
+        okText={executeTask?.task_type === GAP_TECH_BATCH_TYPE ? '提交五项检测' : '开始执行'}
         cancelText="取消"
         width={600}
         destroyOnClose
       >
         <div style={{ marginBottom: 16, color: 'rgba(255,255,255,0.7)' }}>
-          选择检查模式，系统将根据任务类型自动调用相应的安全工具。
+          {executeTask?.task_type === GAP_TECH_BATCH_TYPE
+            ? '选择本次测评资产并配置 SSH 凭证。无凭证时端口、漏洞、弱口令和 SSL/TLS 仍会执行，基线检查会明确标记为无法检测。'
+            : '选择检查模式，系统将根据任务类型自动调用相应的安全工具。'}
         </div>
         
         <Form layout="vertical">
-          <Form.Item label="检查模式">
+          {executeTask?.task_type !== GAP_TECH_BATCH_TYPE && <Form.Item label="检查模式">
             <Radio.Group 
               value={executeMode} 
               onChange={(e) => setExecuteMode(e.target.value)}
@@ -1813,7 +2151,7 @@ function AssessmentProgress({ projectId, projectName }) {
               <Radio.Button value="single">单项资产</Radio.Button>
               <Radio.Button value="all">全部资产</Radio.Button>
             </Radio.Group>
-          </Form.Item>
+          </Form.Item>}
 
           {executeMode === 'single' ? (
             <Form.Item label="目标地址" required>

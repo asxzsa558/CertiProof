@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 import importlib.util
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "app" / "services" / "document_control_engine.py"
@@ -12,7 +13,8 @@ DocumentControlEngine = module.DocumentControlEngine
 
 
 def main():
-    engine = DocumentControlEngine()
+    library = yaml.safe_load((ROOT.parent / "reference" / "compliance" / "document_controls.yaml").read_text(encoding="utf-8"))
+    engine = DocumentControlEngine(library)
     docs = engine.documents
     assert len(docs) == 10, f"expected 10 core documents, got {len(docs)}"
 
@@ -64,6 +66,44 @@ def main():
     empty = engine.analyze("", "任意名称.docx", "信息安全管理制度")
     assert empty["status"] == "unable"
     assert "正文" in empty["message"]
+
+    versioned = engine.classify_blocks(
+        "安全事件管理制度V2-2026.docx",
+        [{"type": "heading", "page": 1, "text": "安全事件管理制度"}, {"type": "text", "page": 1, "text": "安全事件报告、处置、复盘和改进"}],
+    )
+    assert versioned["status"] == "classified"
+    assert versioned["document_name"] == "安全事件管理制度"
+    assert versioned["naming_status"] == "matched"
+
+    recovered = engine.classify_blocks(
+        "随便写的文件.docx",
+        [{"type": "heading", "page": 1, "text": "信息安全管理机构设置文件"}, {"type": "text", "page": 1, "text": "安全委员会领导小组负责人及职责分工"}],
+    )
+    assert recovered["status"] == "classified"
+    assert recovered["document_name"] == "信息安全管理机构设置文件"
+    assert recovered["naming_status"] == "filename_warning"
+
+    unrelated = engine.classify_blocks(
+        "普通会议纪要.docx",
+        [{"type": "heading", "page": 1, "text": "周例会记录"}, {"type": "text", "page": 1, "text": "本周完成项目沟通和行政安排"}],
+    )
+    assert unrelated["status"] == "unclassified"
+
+    wrapped = engine._parse_llm_json(
+        '<think>先核对证据完整性</think>\n```json\n{"decisions":[{"control_id":"C1","point_id":"P1","decision":"partial"}]}\n```'
+    )
+    assert wrapped[0]["decision"] == "partial"
+    classified_payload = engine._parse_llm_object(
+        '分析完成：```json\n{"primary_key":"security_management_policy","confidence":0.91,"reason":"标题与正文一致"}\n```'
+    )
+    assert classified_payload["primary_key"] == "security_management_policy"
+
+    merged = engine._merge_candidates(
+        [{"block_id": 1, "text": "审计日志", "retrieval_sources": ["exact"], "matched_keywords": ["审计"]}],
+        [{"block_id": 1, "text": "审计日志", "retrieval_sources": ["vector"]}],
+    )
+    assert merged[0]["retrieval_sources"] == ["exact", "vector"]
+    assert merged[0]["matched_keywords"] == ["审计"]
     print("document control engine check passed")
 
 

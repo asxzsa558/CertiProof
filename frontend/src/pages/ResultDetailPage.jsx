@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Layout, Card, Table, Tag, Space, Button, Typography, Spin, Empty, Descriptions, Collapse, List } from 'antd'
+import { Layout, Card, Table, Tag, Space, Button, Typography, Spin, Empty, Descriptions, Collapse, List, Modal, message } from 'antd'
 import { 
   ArrowLeftOutlined, 
   CheckCircleOutlined, 
@@ -9,6 +9,7 @@ import {
   FileTextOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
+import { scanTaskConclusion, scanTaskName, scanTaskSource, scanTaskTarget } from '../components/toolCatalog'
 import './ResultDetailPage.css'
 
 const { Header, Content } = Layout
@@ -20,6 +21,9 @@ function ResultDetailPage() {
   const { projectId, scanTaskId } = useParams()
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [findingDetail, setFindingDetail] = useState(null)
+  const [evidenceOpen, setEvidenceOpen] = useState(false)
+  const [evidenceLoading, setEvidenceLoading] = useState(false)
 
   useEffect(() => {
     fetchSummary()
@@ -61,6 +65,20 @@ function ResultDetailPage() {
         {config.text}
       </Tag>
     )
+  }
+
+  const showFindingEvidence = async (finding) => {
+    setFindingDetail(finding)
+    setEvidenceOpen(true)
+    setEvidenceLoading(true)
+    try {
+      const response = await api.get(`/results/findings/${finding.id}`)
+      setFindingDetail(response.data)
+    } catch (error) {
+      message.error(error.response?.data?.detail || '加载问题证据失败')
+    } finally {
+      setEvidenceLoading(false)
+    }
   }
 
   const findingColumns = [
@@ -106,9 +124,9 @@ function ResultDetailPage() {
         <Button 
           type="link" 
           icon={<FileTextOutlined />}
-          onClick={() => navigate(`/projects/${projectId}/findings/${record.id}`)}
+          onClick={() => showFindingEvidence(record)}
         >
-          查看证据
+          问题与证据
         </Button>
       ),
     },
@@ -134,6 +152,12 @@ function ResultDetailPage() {
     )
   }
 
+  const conclusion = scanTaskConclusion(summary.scan_task)
+  const executionIssues = [
+    ...(summary.scan_task.result_summary?.warnings || []),
+    ...(summary.scan_task.result_summary?.failed || []),
+  ]
+
   return (
     <Layout className="result-detail-page">
       <Header className="result-detail-header">
@@ -144,35 +168,32 @@ function ResultDetailPage() {
             onClick={() => navigate(`/projects/${projectId}/results`)}
             className="back-btn"
           />
-          <div>
-            <Title level={3} style={{ margin: 0, color: '#fff' }}>
-              扫描任务 #{summary.scan_task.id}
-            </Title>
-            <Text style={{ color: 'rgba(255,255,255,0.6)' }}>
-              {summary.scan_task.parameters?.target || '未知目标'}
-            </Text>
+          <div className="result-detail-title-block">
+            <Title level={3} className="result-detail-title">检测结果详情</Title>
+            <span className="result-detail-context">
+              {scanTaskName(summary.scan_task)} · 记录 #{summary.scan_task.id}
+            </span>
           </div>
         </div>
       </Header>
 
       <Content className="result-detail-content">
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
-          {/* 扫描任务信息 */}
-          <Card title="扫描任务信息">
-            <Descriptions column={2}>
-              <Descriptions.Item label="任务类型">
-                {summary.scan_task.task_type === 'full' ? '全量扫描' : '定向扫描'}
+          <Card title="检测执行信息">
+            <Descriptions column={{ xs: 1, md: 2 }}>
+              <Descriptions.Item label="检测内容">
+                {scanTaskName(summary.scan_task)}
               </Descriptions.Item>
               <Descriptions.Item label="状态">
                 <Tag color={summary.scan_task.status === 'completed' ? 'success' : 'processing'}>
                   {summary.scan_task.status === 'completed' ? '已完成' : '运行中'}
                 </Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="扫描目标">
-                {summary.scan_task.parameters?.target || '-'}
+              <Descriptions.Item label="目标资产">
+                {scanTaskTarget(summary.scan_task)}
               </Descriptions.Item>
-              <Descriptions.Item label="扫描类型">
-                {summary.scan_task.parameters?.scan_type || '-'}
+              <Descriptions.Item label="执行来源">
+                {scanTaskSource(summary.scan_task)}
               </Descriptions.Item>
               <Descriptions.Item label="创建时间">
                 {new Date(summary.scan_task.created_at).toLocaleString('zh-CN')}
@@ -204,28 +225,81 @@ function ResultDetailPage() {
                 <div className="stat-value">{summary.partial}</div>
                 <div className="stat-label">部分通过</div>
               </div>
-              <div className="stat-item score">
-                <div className="stat-value">{summary.compliance_score || 0}</div>
-                <div className="stat-label">合规分数</div>
+              <div className={`stat-item ${conclusion.key}`}>
+                <div className="stat-value">{executionIssues.length}</div>
+                <div className="stat-label">未完成项</div>
               </div>
             </div>
           </Card>
 
+          {executionIssues.length ? (
+            <Card title="未完成检测说明">
+              <List
+                dataSource={executionIssues}
+                renderItem={(item) => <List.Item><strong>{item.capability || '检测工具'}</strong><span>{item.error || item.message || '未返回具体原因'}</span></List.Item>}
+              />
+            </Card>
+          ) : null}
+
           {/* 发现列表 */}
           <Card title="发现详情">
             {summary.findings.length === 0 ? (
-              <Empty description="未发现任何问题" />
+              <Empty description={conclusion.key === 'warning' ? '本次未形成风险发现，但存在未完成检测，请查看上方说明' : '本次未发现安全问题'} />
             ) : (
               <Table
                 columns={findingColumns}
                 dataSource={summary.findings}
                 rowKey="id"
                 pagination={false}
+                scroll={{ x: 860 }}
               />
             )}
           </Card>
         </Space>
       </Content>
+      <Modal
+        title={findingDetail?.clause_name || '问题与证据'}
+        open={evidenceOpen}
+        onCancel={() => setEvidenceOpen(false)}
+        footer={<Button onClick={() => setEvidenceOpen(false)}>关闭</Button>}
+        width={760}
+      >
+        <Spin spinning={evidenceLoading}>
+          {findingDetail ? (
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <Descriptions column={1} size="small" bordered>
+                <Descriptions.Item label="问题描述">{findingDetail.description || '-'}</Descriptions.Item>
+                <Descriptions.Item label="整改建议">{findingDetail.remediation_suggestion || '暂无整改建议'}</Descriptions.Item>
+              </Descriptions>
+              {(findingDetail.evidences?.length || findingDetail.document_evidences?.length) ? (
+                <Collapse>
+                  {findingDetail.evidences.map((evidence) => (
+                    <Panel header={evidence.file_name || evidence.source || `证据 #${evidence.id}`} key={evidence.id}>
+                      <Paragraph className="evidence-meta">来源：{evidence.source || '-'} · 类型：{evidence.evidence_type} · SHA-256：{evidence.hash_sha256 || '-'}</Paragraph>
+                      <pre className="evidence-content">{evidence.raw_output || (evidence.content ? JSON.stringify(evidence.content, null, 2) : evidence.description || '该证据没有可预览的文本内容')}</pre>
+                    </Panel>
+                  ))}
+                  {(findingDetail.document_evidences || []).map((evidence) => (
+                    <Panel
+                      header={`${evidence.file_name || '文档证据'}${evidence.page ? ` · 第 ${evidence.page} 页` : ''}`}
+                      key={`block-${evidence.block_id}`}
+                    >
+                      <Paragraph className="evidence-meta">
+                        来源：{evidence.source || '-'} · 类型：{evidence.type || '-'}
+                        {evidence.section?.length ? ` · 章节：${evidence.section.join(' / ')}` : ''}
+                        {' '}· 置信度：{Math.round((evidence.confidence || 0) * 100)}%
+                      </Paragraph>
+                      <pre className="evidence-content">{evidence.text || '该内容块没有可预览文本'}</pre>
+                    </Panel>
+                  ))}
+                </Collapse>
+              ) : (
+                <Empty description="暂无独立证据文件；该问题依据本次工具输出生成" />
+              )}
+            </Space>
+          ) : null}
+        </Spin>
+      </Modal>
     </Layout>
   )
 }

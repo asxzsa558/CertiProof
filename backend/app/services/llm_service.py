@@ -5,7 +5,7 @@ Unified LLM interface with multi-provider support and fallback strategy.
 
 import asyncio
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 from datetime import datetime
 from abc import ABC, abstractmethod
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +35,9 @@ class BaseProvider(ABC):
     async def test_connection(self, model_name: str = None) -> bool:
         """Test if the provider connection works"""
         pass
+
+    async def embed(self, inputs: List[str], model_name: str, dimensions: int) -> List[List[float]]:
+        raise ValueError("This provider does not support embeddings")
 
 
 class OpenAIProvider(BaseProvider):
@@ -66,6 +69,7 @@ class OpenAIProvider(BaseProvider):
 
             return {
                 "content": response.choices[0].message.content,
+                "finish_reason": response.choices[0].finish_reason,
                 "usage": {
                     "prompt_tokens": usage.prompt_tokens,
                     "completion_tokens": usage.completion_tokens,
@@ -111,6 +115,18 @@ class OpenAIProvider(BaseProvider):
             logger.error(f"OpenAI connection test failed: {e}")
             return False
 
+    async def embed(self, inputs: List[str], model_name: str, dimensions: int) -> List[List[float]]:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(
+            api_key=self.api_key or "local",
+            base_url=self.api_base or "https://api.openai.com/v1",
+            timeout=120.0,
+            max_retries=2,
+        )
+        response = await client.embeddings.create(model=model_name, input=inputs, dimensions=dimensions)
+        return [list(item.embedding) for item in sorted(response.data, key=lambda item: item.index)]
+
 
 class AnthropicProvider(BaseProvider):
     """Anthropic Claude API adapter - 支持 prompt cache"""
@@ -153,6 +169,7 @@ class AnthropicProvider(BaseProvider):
 
             return {
                 "content": response.content[0].text,
+                "finish_reason": getattr(response, "stop_reason", None),
                 "usage": {
                     "prompt_tokens": usage.input_tokens,
                     "completion_tokens": usage.output_tokens,
@@ -241,6 +258,7 @@ class OllamaProvider(BaseProvider):
 
                 return {
                     "content": data["message"]["content"],
+                    "finish_reason": data.get("done_reason"),
                     "usage": {
                         "prompt_tokens": data.get("prompt_eval_count", 0),
                         "completion_tokens": data.get("eval_count", 0),
@@ -279,6 +297,18 @@ class OllamaProvider(BaseProvider):
         except Exception as e:
             logger.error(f"Ollama connection test failed: {e}")
             return False
+
+    async def embed(self, inputs: List[str], model_name: str, dimensions: int) -> List[List[float]]:
+        import httpx
+
+        api_base = (self.api_base or "http://localhost:11434").rstrip("/")
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            response = await client.post(
+                f"{api_base}/api/embed",
+                json={"model": model_name, "input": inputs, "dimensions": dimensions, "truncate": True},
+            )
+            response.raise_for_status()
+            return response.json().get("embeddings") or []
 
 
 # --- LLM Service ---
@@ -408,6 +438,7 @@ class LLMService:
         messages: List[Dict],
         task_type: str = "chat",
         timeout: float = 60.0,
+        response_validator: Optional[Callable[[Dict[str, Any]], None]] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -418,12 +449,86 @@ class LLMService:
         """
         try:
             return await asyncio.wait_for(
-                self._chat_with_fallback_impl(db, user_id, messages, task_type, **kwargs),
+                self._chat_with_fallback_impl(
+                    db,
+                    user_id,
+                    messages,
+                    task_type,
+                    response_validator=response_validator,
+                    **kwargs,
+                ),
                 timeout=timeout
             )
         except asyncio.TimeoutError:
             logger.error(f"LLM call timed out after {timeout}s")
             raise ValueError(f"LLM call timed out after {timeout}s")
+
+    async def embed_with_fallback(
+        self,
+        db: AsyncSession,
+        inputs: List[str],
+        dimensions: int,
+        timeout: float = 180.0,
+        input_type: str = "passage",
+    ) -> Dict[str, Any]:
+        if not inputs:
+            return {"embeddings": [], "model": None}
+
+        async def execute():
+            models = await self.get_available_models(db, "embedding")
+            errors = []
+            for model_config in models:
+                provider = (await db.execute(
+                    select(ModelProvider).where(
+                        ModelProvider.id == model_config.provider_id,
+                        ModelProvider.is_active.is_(True),
+                    )
+                )).scalar_one_or_none()
+                if not provider:
+                    continue
+                try:
+                    vectors = await self._get_provider(provider).embed(inputs, model_config.model_name, dimensions)
+                    if len(vectors) != len(inputs) or any(len(vector) != dimensions for vector in vectors):
+                        raise ValueError(f"向量维度必须为 {dimensions}，模型返回结果不匹配")
+                    return {
+                        "embeddings": vectors,
+                        "model": model_config.model_name,
+                        "model_config_id": model_config.id,
+                        "provider": provider.name,
+                    }
+                except Exception as exc:
+                    errors.append(f"{model_config.display_name}: {exc}")
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.post(
+                        f"{settings.EMBEDDING_SERVER_URL}/embed",
+                        json={
+                            "inputs": inputs,
+                            "input_type": input_type,
+                            "dimensions": dimensions,
+                        },
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                vectors = payload.get("embeddings") or []
+                if len(vectors) != len(inputs) or any(len(vector) != dimensions for vector in vectors):
+                    raise ValueError(f"本地向量服务返回结果不是 {dimensions} 维")
+                return {
+                    "embeddings": vectors,
+                    "model": payload.get("model") or settings.DOCUMENT_EMBEDDING_MODEL,
+                    "model_config_id": None,
+                    "provider": payload.get("runtime") or "local",
+                }
+            except Exception as exc:
+                errors.append(f"本地向量服务: {exc}")
+            raise ValueError("全部向量模型不可用：" + "；".join(errors))
+
+        try:
+            return await asyncio.wait_for(execute(), timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            raise ValueError(f"向量模型调用超过 {timeout:.0f} 秒") from exc
     
     async def _chat_with_fallback_impl(
         self,
@@ -431,10 +536,15 @@ class LLMService:
         user_id: int,
         messages: List[Dict],
         task_type: str = "chat",
+        response_validator: Optional[Callable[[Dict[str, Any]], None]] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """Internal implementation of chat_with_fallback"""
         models = await self.get_available_models(db, task_type)
+        if not models and task_type != "chat":
+            models = await self.get_available_models(db, "chat")
+        if not models:
+            models = await self.get_available_models(db)
         
         if not models:
             raise ValueError("No available models for this task type")
@@ -462,6 +572,8 @@ class LLMService:
                     completion_tokens=response["usage"]["completion_tokens"],
                     task_type=task_type,
                 )
+                if response_validator:
+                    response_validator(response)
                 
                 response["model_config_id"] = model_config.id
                 response["model_name"] = model_config.model_name
@@ -513,6 +625,23 @@ class LLMService:
         
         adapter = self._get_provider(provider)
         try:
+            if "embedding" in (model_config.capabilities or []):
+                vectors = await adapter.embed(
+                    ["CertiProof 文档语义检索连通性测试"],
+                    model_config.model_name,
+                    settings.DOCUMENT_EMBEDDING_DIMENSION,
+                )
+                if len(vectors) != 1 or len(vectors[0]) != settings.DOCUMENT_EMBEDDING_DIMENSION:
+                    raise ValueError(
+                        f"向量模型必须返回 {settings.DOCUMENT_EMBEDDING_DIMENSION} 维向量"
+                    )
+                return {
+                    "success": True,
+                    "model_name": model_config.model_name,
+                    "provider": provider.name,
+                    "capability": "embedding",
+                    "dimensions": len(vectors[0]),
+                }
             success = await adapter.test_connection(model_name=model_config.model_name)
             if not success:
                 return {

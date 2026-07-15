@@ -503,7 +503,7 @@ export default function ExposureTopology({ topology }) {
               <i />
               <div>
                 <header><b>{EVENT_SEVERITY_LABELS[item.severity] || '信息'}</b><time>{eventTime(item.observed_at)}</time><strong>{item.asset}</strong></header>
-                <p>{item.title}</p>
+                <p><b>{item.title}</b>{item.description && item.description !== item.title ? ` · ${item.description}` : ''}</p>
               </div>
             </button>) : <em>暂无有资产归属的待处理风险</em>}
           </div>

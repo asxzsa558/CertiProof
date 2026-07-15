@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
+import re
 
 
 class Settings(BaseSettings):
@@ -12,6 +13,8 @@ class Settings(BaseSettings):
     
     # Database - Using SQLite for development
     DATABASE_URL: str = "sqlite+aiosqlite:///./certiproof.db"
+    GRAPH_NAME: str = "certiproof"
+    GRAPH_REQUIRED: bool = False
     
     # JWT
     SECRET_KEY: str = ""
@@ -48,11 +51,14 @@ class Settings(BaseSettings):
     MONITORING_WORKER_BATCH_SIZE: int = 5
 
     # 文件上传
-    UPLOAD_DIR: str = "/app/uploads"  # 文件上传目录
+    UPLOAD_DIR: str = "./uploads"  # 容器内解析为 /app/uploads，本机也可直接运行
     OCR_SERVER_URL: str = "http://ocr-server:8005"
+    EMBEDDING_SERVER_URL: str = "http://embedding-server:8017"
     DOCUMENT_MAX_TOTAL_PAGES: int = 200
     DOCUMENT_WORKER_BATCH_SIZE: int = 2
     DOCUMENT_ANALYSIS_MODE: str = "standard"  # standard/deep
+    DOCUMENT_EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large"
+    DOCUMENT_EMBEDDING_DIMENSION: int = 1024
 
     # 报告配置
     REPORT_DEFAULT_FORMAT: str = "html"  # 默认报告格式
@@ -63,6 +69,10 @@ class Settings(BaseSettings):
         """Fail fast on unsafe production settings."""
         if self.TASK_EXECUTION_MODE not in {"inline", "worker"}:
             raise RuntimeError("Invalid configuration: TASK_EXECUTION_MODE must be 'inline' or 'worker'")
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", self.GRAPH_NAME):
+            raise RuntimeError("Invalid configuration: GRAPH_NAME must be a safe PostgreSQL identifier")
+        if self.DOCUMENT_EMBEDDING_DIMENSION != 1024:
+            raise RuntimeError("Invalid configuration: DOCUMENT_EMBEDDING_DIMENSION must match the 1024-dimensional vector schema")
 
         if self.APP_ENV.lower() not in {"prod", "production"}:
             return

@@ -436,6 +436,10 @@ async def get_organization_command_dashboard(
     projects = projects_result.scalars().all()
     project_ids = [p.id for p in projects]
     current_risk_statuses = [FindingStatus.OPEN, FindingStatus.IN_PROGRESS]
+    incomplete_technical_finding = and_(
+        Finding.clause_name == "自动化技术检测",
+        Finding.description.like("%检测未完成（不代表通过）%"),
+    )
 
     if not project_ids:
         return {
@@ -520,6 +524,10 @@ async def get_organization_command_dashboard(
             finding for finding in project_findings
             if _enum_value(finding.severity) in ("critical", "high", "medium")
             and finding.status in current_risk_statuses
+            and not (
+                finding.clause_name == "自动化技术检测"
+                and "检测未完成（不代表通过）" in (finding.description or "")
+            )
         ])
 
         evidence_result = await db.execute(select(func.count(Evidence.id)).where(Evidence.project_id == project.id))
@@ -566,6 +574,7 @@ async def get_organization_command_dashboard(
             func.coalesce(func.sum(case((and_(
                 Finding.status.in_(current_risk_statuses),
                 Finding.severity.in_(["critical", "high", "medium"]),
+                ~incomplete_technical_finding,
             ), 1), else_=0)), 0).label("risk_count"),
             func.coalesce(func.sum(case((and_(
                 Finding.status.in_(current_risk_statuses),
@@ -673,6 +682,7 @@ async def get_organization_command_dashboard(
         .where(
             Finding.project_id.in_(project_ids),
             Finding.status.in_(current_risk_statuses),
+            ~incomplete_technical_finding,
         )
         .order_by(Finding.updated_at.desc())
         .limit(24)
@@ -686,6 +696,7 @@ async def get_organization_command_dashboard(
             "severity": _enum_value(finding.severity),
             "status": _enum_value(finding.status),
             "title": finding.clause_name or finding.description or finding.clause_id,
+            "description": finding.description,
             "observed_at": finding.updated_at.isoformat() if finding.updated_at else None,
         }
         for finding, _, asset in intelligence_result.all()
@@ -704,7 +715,7 @@ async def get_organization_command_dashboard(
         select(Finding, Project, RemediationTicket)
         .join(Project, Project.id == Finding.project_id)
         .outerjoin(RemediationTicket, RemediationTicket.finding_id == Finding.id)
-        .where(Finding.project_id.in_(project_ids))
+        .where(Finding.project_id.in_(project_ids), ~incomplete_technical_finding)
         .order_by(Finding.updated_at.desc())
         .limit(80)
     )

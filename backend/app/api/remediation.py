@@ -1,4 +1,5 @@
 import re
+import mimetypes
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +13,7 @@ from app.models.user import User
 from app.models.finding import Finding, FindingStatus
 from app.models.remediation import RemediationTicket, RemediationStatus
 from app.models.scan_task import ScanTask
-from app.models.evidence import Evidence, EvidenceType
+from app.models.document_knowledge import DocumentBlock, DocumentFile
 from app.schemas.remediation import (
     RemediationTicketCreate,
     RemediationTicketUpdate,
@@ -24,6 +25,7 @@ from app.services.document_pipeline import (
     SUPPORTED_SUFFIXES,
     create_document_run,
     normalize_analysis_mode,
+    safe_document_name,
 )
 from app.services.file_storage import file_storage
 from app.services.upload_validation import read_limited_upload
@@ -41,7 +43,7 @@ def _finding_source(finding: Finding | None) -> tuple[str, str]:
         return "manual", "人工问题"
 
     clause_id = finding.clause_id or ""
-    if clause_id.startswith("DOC-TASK-"):
+    if finding.document_run_id or clause_id.startswith("DOC-TASK-"):
         return "document", "文档差距"
 
     scan_task = finding.__dict__.get("scan_task")
@@ -76,6 +78,7 @@ def _ticket_payload(ticket: RemediationTicket, finding: Finding | None = None) -
         "judgment": _enum_value(finding.judgment) if finding else None,
         "confidence": finding.confidence if finding else None,
         "scan_task_id": finding.scan_task_id if finding else None,
+        "document_run_id": finding.document_run_id if finding else None,
         "assigned_to": ticket.assigned_to,
         "skip_reason": ticket.skip_reason,
         "resolution_notes": ticket.resolution_notes,
@@ -91,14 +94,21 @@ def _apply_finding_status(ticket: RemediationTicket, finding: Finding | None):
     if not finding:
         return
 
-    if ticket.status == RemediationStatus.IN_PROGRESS:
+    if ticket.status == RemediationStatus.OPEN:
+        finding.status = FindingStatus.OPEN
+        finding.resolved_at = None
+    elif ticket.status == RemediationStatus.IN_PROGRESS:
         finding.status = FindingStatus.IN_PROGRESS
+        finding.resolved_at = None
     elif ticket.status in (
         RemediationStatus.RESOLVED,
         RemediationStatus.VERIFIED,
         RemediationStatus.CLOSED,
     ):
         finding.status = FindingStatus.RESOLVED
+        finding.resolved_at = finding.resolved_at or datetime.utcnow()
+    elif ticket.status == RemediationStatus.SKIPPED:
+        finding.status = FindingStatus.FALSE_POSITIVE
         finding.resolved_at = finding.resolved_at or datetime.utcnow()
 
 
@@ -334,12 +344,17 @@ async def update_remediation_ticket(
         ):
             raise HTTPException(status_code=400, detail="提交整改前必须填写整改说明")
         ticket.status = ticket_data.status
-        if ticket_data.status == RemediationStatus.RESOLVED:
+        if ticket_data.status in (RemediationStatus.OPEN, RemediationStatus.IN_PROGRESS):
+            ticket.resolved_at = None
+            ticket.verified_at = None
+        elif ticket_data.status == RemediationStatus.RESOLVED:
             ticket.resolved_at = datetime.utcnow()
+            ticket.verified_at = None
         elif ticket_data.status == RemediationStatus.VERIFIED:
             ticket.verified_at = datetime.utcnow()
         elif ticket_data.status == RemediationStatus.SKIPPED:
             ticket.resolved_at = datetime.utcnow()
+            ticket.verified_at = None
     
     if ticket_data.assigned_to is not None:
         ticket.assigned_to = ticket_data.assigned_to
@@ -392,7 +407,7 @@ async def document_retest(
     if not assessment or assessment.project_id != project_id:
         raise HTTPException(status_code=400, detail="文档任务不属于当前项目")
 
-    file_name = file.filename or "retest-document"
+    file_name = safe_document_name(file.filename or "retest-document")
     suffix = Path(file_name).suffix.lower()
     if suffix not in SUPPORTED_SUFFIXES:
         detail = "暂不支持旧版 DOC，请转换为 DOCX 或 PDF" if suffix == ".doc" else f"不支持的文件格式：{suffix or '未知'}"
@@ -404,30 +419,46 @@ async def document_retest(
         detail = str(exc)
         raise HTTPException(status_code=413 if "超过" in detail else 400, detail=detail) from exc
 
-    clause_id = f"DOC-TASK-{task.id}"
-    old_evidences = (await db.execute(
-        select(Evidence).where(Evidence.project_id == project_id, Evidence.clause_id == clause_id)
+    old_documents = (await db.execute(
+        select(DocumentFile).where(
+            DocumentFile.assessment_id == assessment.id,
+            DocumentFile.task_id == task.id,
+            DocumentFile.is_active.is_(True),
+        )
     )).scalars().all()
-    for evidence in old_evidences:
-        if evidence.file_path:
-            await file_storage.delete_file(evidence.file_path)
-        await db.delete(evidence)
 
     file_path, digest, file_size = await file_storage.save_file(project_id, file_name, content)
-    evidence = Evidence(
-        project_id=project_id,
-        evidence_type=EvidenceType.DOCUMENT,
-        source="document_compliance_retest",
-        file_name=file_name,
-        file_path=file_path,
-        file_size=file_size,
-        mime_type=file.content_type or "application/octet-stream",
-        clause_id=clause_id,
-        hash_sha256=digest,
-        uploaded_by=current_user.id,
-        description=f"复测：{task.name}",
-    )
-    db.add(evidence)
+    duplicate = next((document for document in old_documents if document.sha256 == digest), None)
+    if duplicate:
+        await file_storage.delete_file(file_path)
+        replacement = duplicate
+    else:
+        replacement = DocumentFile(
+            project_id=project_id,
+            assessment_id=assessment.id,
+            task_id=task.id,
+            original_name=file_name,
+            storage_path=file_path,
+            size_bytes=file_size,
+            mime_type=file.content_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream",
+            sha256=digest,
+            parse_status="queued",
+        )
+        db.add(replacement)
+        await db.flush()
+        for document in old_documents:
+            document.is_active = False
+            document.replaced_by_id = replacement.id
+            await db.execute(
+                DocumentBlock.__table__.update()
+                .where(DocumentBlock.document_file_id == document.id)
+                .values(is_active=False, embedding=None)
+            )
+            from app.services.knowledge_graph import knowledge_graph
+            await knowledge_graph.purge_file(db, document.id)
+
+    ticket.status = RemediationStatus.IN_PROGRESS
+    finding.status = FindingStatus.IN_PROGRESS
     await db.commit()
 
     configured_mode = await _resolve_document_analysis_mode(db, analysis_mode)
@@ -435,10 +466,11 @@ async def document_retest(
     refreshed_ticket = await db.get(RemediationTicket, ticket.id)
     return {
         "status": "queued",
-        "message": "新版文档已提交复测，后台分析完成后会自动更新关联整改项",
+        "message": "新版文档已提交复测，后台分析完成后会自动更新同类文档的全部整改项",
         "run_id": run.id,
         "analysis_mode": configured_mode,
-        "replaced_documents": len(old_evidences),
+        "document_file_id": replacement.id,
+        "replaced_documents": 0 if duplicate else len(old_documents),
         "ticket": _ticket_payload(refreshed_ticket, finding) if refreshed_ticket else None,
     }
 

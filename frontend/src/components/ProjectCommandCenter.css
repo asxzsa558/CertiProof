@@ -60,7 +60,8 @@ body.command-center-active::before {
 }
 
 .project-identity {
-  min-width: 260px;
+  flex: 1 1 260px;
+  min-width: 0;
 }
 
 .identity-kicker {
@@ -83,11 +84,13 @@ body.command-center-active::before {
 .project-identity h1 {
   font-size: 20px;
   font-weight: 720;
+  overflow-wrap: anywhere;
 }
 
 .identity-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 6px;
   color: rgba(203, 213, 225, 0.74);

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
@@ -9,6 +9,14 @@ from app.core.rbac import PERMISSION_GROUPS, require_org_permission
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.organization import Organization, OrganizationMember, OrganizationRole, OrganizationRoleAudit, OrgRole
+from app.models.project import Project
+from app.services.audit import record_audit_event
+from app.services.data_lifecycle import (
+    delete_organization_records,
+    delete_project_records,
+    delete_storage_files,
+    storage_usage,
+)
 from app.schemas.organization import (
     OrganizationCreate,
     OrganizationUpdate,
@@ -100,6 +108,82 @@ async def seed_default_roles(db: AsyncSession, org_id: int, actor_user_id: int |
             # ponytail: concurrent role-list calls can race on first org load; the
             # unique key is the lock, and the winner's row is good enough.
             await db.rollback()
+
+
+@router.get("/{org_id}/storage")
+async def get_organization_storage(
+    org_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await ensure_org_admin(db, org_id, current_user.id)
+    project_ids = list((await db.execute(select(Project.id).where(
+        Project.organization_id == org_id
+    ))).scalars().all())
+    return {"organization_id": org_id, "project_count": len(project_ids), **await storage_usage(db, project_ids)}
+
+
+@router.post("/{org_id}/initialize")
+async def initialize_organization_business_data(
+    org_id: int,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await ensure_org_admin(db, org_id, current_user.id)
+    organization = await db.get(Organization, org_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="组织不存在")
+    if payload.get("confirmation") != organization.name:
+        raise HTTPException(status_code=400, detail="请输入完整组织名称以确认初始化")
+
+    projects = list((await db.execute(select(Project).where(
+        Project.organization_id == org_id
+    ))).scalars().all())
+    cleanups = []
+    try:
+        for project in projects:
+            cleanups.append(await delete_project_records(db, project))
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    await record_audit_event(
+        db,
+        event_type="organization.business_data_initialized",
+        resource_type="organization",
+        resource_id=org_id,
+        actor_user_id=current_user.id,
+        organization_id=org_id,
+        details={
+            "deleted_projects": len(cleanups),
+            "released_file_bytes": sum(item["released_file_bytes"] for item in cleanups),
+            "standard_graph_preserved": True,
+            "roles_preserved": True,
+        },
+    )
+    await db.commit()
+    files = await delete_storage_files(path for item in cleanups for path in item["file_paths"])
+    if files["failed_file_paths"]:
+        await record_audit_event(
+            db,
+            event_type="organization.file_cleanup_partial",
+            resource_type="organization",
+            resource_id=org_id,
+            actor_user_id=current_user.id,
+            organization_id=org_id,
+            outcome="partial",
+            details=files,
+        )
+        await db.commit()
+    return {
+        "status": "initialized",
+        "deleted_projects": len(cleanups),
+        "released_file_bytes": sum(item["released_file_bytes"] for item in cleanups),
+        "standard_graph_preserved": True,
+        "roles_preserved": True,
+        **files,
+    }
 
 
 def serialize_role(role: OrganizationRole, member_count: int = 0) -> OrganizationRoleResponse:
@@ -214,7 +298,7 @@ async def update_organization(
     return org
 
 
-@router.delete("/{org_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{org_id}")
 async def delete_organization(
     org_id: int,
     db: AsyncSession = Depends(get_db),
@@ -230,9 +314,42 @@ async def delete_organization(
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    await db.delete(org)
+    try:
+        cleanup = await delete_organization_records(db, org)
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await record_audit_event(
+        db,
+        event_type="organization.deleted",
+        resource_type="organization",
+        resource_id=org_id,
+        actor_user_id=current_user.id,
+        details={
+            "organization_name": org.name,
+            "deleted_projects": cleanup["deleted_projects"],
+            "released_file_bytes": cleanup["released_file_bytes"],
+        },
+    )
     await db.commit()
-    return None
+    files = await delete_storage_files(cleanup["file_paths"])
+    if files["failed_file_paths"]:
+        await record_audit_event(
+            db,
+            event_type="organization.file_cleanup_partial",
+            resource_type="organization",
+            resource_id=org_id,
+            actor_user_id=current_user.id,
+            outcome="partial",
+            details=files,
+        )
+        await db.commit()
+    return {
+        "status": "deleted",
+        "deleted_projects": cleanup["deleted_projects"],
+        "released_file_bytes": cleanup["released_file_bytes"],
+        **files,
+    }
 
 
 @router.get("/{org_id}/members", response_model=List[OrganizationMemberResponse])

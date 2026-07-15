@@ -1,15 +1,22 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import and_, delete, or_, select
 from typing import List
 
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.project import Project
-from app.models.scan_task import ScanTask
+from app.models.scan_task import ScanTask, ScanTaskStatus
 from app.models.finding import Finding
 from app.models.evidence import Evidence
+from app.models.remediation import RemediationTicket
+from app.models.document_knowledge import DocumentBlock, DocumentFile
+from app.models.monitoring import ScanHistory
+from app.models.change_snapshot import ChangeSnapshot
+from app.services.audit import record_audit_event
+from app.services.file_storage import file_storage
 from app.schemas.result import (
     ScanTaskResponse,
     ScanTaskDetail,
@@ -20,6 +27,46 @@ from app.schemas.result import (
 )
 
 router = APIRouter(prefix="/results", tags=["Results"])
+
+
+class BulkDeleteScansRequest(BaseModel):
+    scan_task_ids: List[int] = Field(default_factory=list, max_length=1000)
+    delete_all: bool = False
+
+
+def _visible_findings(scan_task_id: int):
+    return select(Finding).where(
+        Finding.scan_task_id == scan_task_id,
+        ~and_(
+            Finding.clause_name == "自动化技术检测",
+            Finding.description.like("%检测未完成（不代表通过）%"),
+        ),
+    )
+
+
+async def _delete_scan_records(db: AsyncSession, scan_task_ids: list[int]) -> tuple[list[str], int]:
+    findings = (await db.execute(select(Finding).where(Finding.scan_task_id.in_(scan_task_ids)))).scalars().all()
+    finding_ids = [finding.id for finding in findings]
+    file_paths = []
+    file_bytes = 0
+    if finding_ids:
+        evidences = (await db.execute(select(Evidence).where(Evidence.finding_id.in_(finding_ids)))).scalars().all()
+        file_paths = [evidence.file_path for evidence in evidences if evidence.file_path]
+        file_bytes = sum(evidence.file_size or 0 for evidence in evidences if evidence.file_path)
+        await db.execute(delete(RemediationTicket).where(RemediationTicket.finding_id.in_(finding_ids)))
+        await db.execute(delete(Evidence).where(Evidence.finding_id.in_(finding_ids)))
+        await db.execute(delete(Finding).where(Finding.id.in_(finding_ids)))
+    await db.execute(delete(ScanHistory).where(ScanHistory.scan_task_id.in_(scan_task_ids)))
+    await db.execute(delete(ChangeSnapshot).where(ChangeSnapshot.scan_task_id.in_(scan_task_ids)))
+    await db.execute(delete(ScanTask).where(ScanTask.id.in_(scan_task_ids)))
+    return file_paths, file_bytes
+
+
+async def _finish_file_cleanup(file_paths: list[str]) -> int:
+    deleted = 0
+    for file_path in file_paths:
+        deleted += bool(await file_storage.delete_file(file_path))
+    return deleted
 
 
 @router.get("/projects/{project_id}/scans", response_model=List[ScanTaskResponse])
@@ -64,16 +111,15 @@ async def get_scan_task(
     await get_project_for_user(db, scan_task.project_id, current_user.id, "scan:read")
     
     # 获取 findings
-    result = await db.execute(
-        select(Finding).where(Finding.scan_task_id == scan_task_id)
-    )
+    result = await db.execute(_visible_findings(scan_task_id))
     findings = result.scalars().all()
     
     # 构建响应
-    response = ScanTaskDetail.model_validate(scan_task)
-    response.findings = [FindingResponse.model_validate(f) for f in findings]
-    
-    return response
+    response = ScanTaskResponse.model_validate(scan_task)
+    return ScanTaskDetail(
+        **response.model_dump(),
+        findings=[FindingResponse.model_validate(f) for f in findings],
+    )
 
 
 @router.get("/scans/{scan_task_id}/summary", response_model=ResultSummary)
@@ -96,9 +142,7 @@ async def get_scan_summary(
     project = await get_project_for_user(db, scan_task.project_id, current_user.id, "scan:read")
     
     # 获取 findings
-    result = await db.execute(
-        select(Finding).where(Finding.scan_task_id == scan_task_id)
-    )
+    result = await db.execute(_visible_findings(scan_task_id))
     findings = result.scalars().all()
     
     # 统计
@@ -137,16 +181,45 @@ async def get_finding(
     await get_project_for_user(db, finding.project_id, current_user.id, "scan:read")
     
     # 获取 evidences
-    result = await db.execute(
-        select(Evidence).where(Evidence.finding_id == finding_id)
-    )
+    evidence_ids = [value for value in (finding.evidence_ids or []) if isinstance(value, int)]
+    evidence_filter = Evidence.finding_id == finding_id
+    if evidence_ids and not finding.document_run_id:
+        evidence_filter = or_(evidence_filter, Evidence.id.in_(evidence_ids))
+    result = await db.execute(select(Evidence).where(evidence_filter))
     evidences = result.scalars().all()
+
+    document_evidences = []
+    if finding.document_run_id and evidence_ids:
+        rows = (await db.execute(
+            select(DocumentBlock, DocumentFile)
+            .join(DocumentFile, DocumentFile.id == DocumentBlock.document_file_id)
+            .where(
+                DocumentBlock.analysis_run_id == finding.document_run_id,
+                DocumentBlock.id.in_(evidence_ids),
+            )
+            .order_by(DocumentFile.original_name, DocumentBlock.page_number, DocumentBlock.ordinal)
+        )).all()
+        document_evidences = [{
+            "block_id": block.id,
+            "document_file_id": document.id,
+            "file_name": document.original_name,
+            "page": block.page_number,
+            "section": block.section_path,
+            "type": block.block_type,
+            "source": block.source,
+            "confidence": block.source_confidence,
+            "bbox": block.bbox,
+            "text": block.text,
+            "table": block.table_data,
+        } for block, document in rows]
     
     # 构建响应
-    response = FindingDetail.model_validate(finding)
-    response.evidences = [EvidenceResponse.model_validate(e) for e in evidences]
-    
-    return response
+    response = FindingResponse.model_validate(finding)
+    return FindingDetail(
+        **response.model_dump(),
+        evidences=[EvidenceResponse.model_validate(e) for e in evidences],
+        document_evidences=document_evidences,
+    )
 
 
 @router.get("/evidences/{evidence_id}", response_model=EvidenceResponse)
@@ -178,6 +251,62 @@ async def get_evidence(
     return evidence
 
 
+@router.post("/projects/{project_id}/scans/bulk-delete")
+async def bulk_delete_scan_tasks(
+    project_id: int,
+    payload: BulkDeleteScansRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.api.projects import get_project_for_user
+    project = await get_project_for_user(db, project_id, current_user.id, "scan:cancel")
+
+    query = select(ScanTask).where(ScanTask.project_id == project_id)
+    if not payload.delete_all:
+        requested_ids = sorted(set(payload.scan_task_ids))
+        if not requested_ids:
+            raise HTTPException(status_code=400, detail="请选择要删除的检测记录")
+        query = query.where(ScanTask.id.in_(requested_ids))
+    tasks = (await db.execute(query)).scalars().all()
+    if not payload.delete_all and len(tasks) != len(set(payload.scan_task_ids)):
+        raise HTTPException(status_code=404, detail="部分检测记录不存在或不属于当前项目")
+
+    active = [task for task in tasks if task.status in (ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING)]
+    active_ids = {task.id for task in active}
+    if active and not payload.delete_all:
+        raise HTTPException(status_code=409, detail="运行中或等待中的检测不能删除，请先停止任务")
+    task_ids = [task.id for task in tasks if task.id not in active_ids]
+    if not task_ids:
+        return {"deleted_count": 0, "deleted_ids": [], "skipped_active_count": len(active), "deleted_file_count": 0, "released_file_bytes": 0}
+
+    file_paths, file_bytes = await _delete_scan_records(db, task_ids)
+    await record_audit_event(
+        db,
+        event_type="scan_results.bulk_deleted",
+        resource_type="project",
+        resource_id=project_id,
+        actor_user_id=current_user.id,
+        organization_id=project.organization_id,
+        project_id=project_id,
+        details={
+            "deleted_count": len(task_ids),
+            "delete_all": payload.delete_all,
+            "skipped_active_count": len(active),
+            "attachment_file_count": len(file_paths),
+            "attachment_bytes": file_bytes,
+        },
+    )
+    await db.commit()
+    deleted_file_count = await _finish_file_cleanup(file_paths)
+    return {
+        "deleted_count": len(task_ids),
+        "deleted_ids": task_ids,
+        "skipped_active_count": len(active),
+        "deleted_file_count": deleted_file_count,
+        "released_file_bytes": file_bytes,
+    }
+
+
 @router.delete("/scans/{scan_task_id}")
 async def delete_scan_task(
     scan_task_id: int,
@@ -196,29 +325,22 @@ async def delete_scan_task(
     
     # 验证项目属于当前用户
     from app.api.projects import get_project_for_user
-    await get_project_for_user(db, scan_task.project_id, current_user.id, "scan:cancel")
+    project = await get_project_for_user(db, scan_task.project_id, current_user.id, "scan:cancel")
     
-    # 删除关联的 evidences（通过 findings）
-    result = await db.execute(
-        select(Finding).where(Finding.scan_task_id == scan_task_id)
+    if scan_task.status in (ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING):
+        raise HTTPException(status_code=409, detail="运行中或等待中的检测不能删除，请先停止任务")
+    file_paths, file_bytes = await _delete_scan_records(db, [scan_task_id])
+    await record_audit_event(
+        db,
+        event_type="scan_result.deleted",
+        resource_type="scan_task",
+        resource_id=scan_task_id,
+        actor_user_id=current_user.id,
+        organization_id=project.organization_id,
+        project_id=scan_task.project_id,
+        details={"attachment_file_count": len(file_paths), "attachment_bytes": file_bytes},
     )
-    findings = result.scalars().all()
-    
-    for finding in findings:
-        await db.execute(
-            delete(Evidence).where(Evidence.finding_id == finding.id)
-        )
-    
-    # 删除关联的 findings
-    await db.execute(
-        delete(Finding).where(Finding.scan_task_id == scan_task_id)
-    )
-    
-    # 删除扫描任务
-    await db.execute(
-        delete(ScanTask).where(ScanTask.id == scan_task_id)
-    )
-    
     await db.commit()
+    deleted_file_count = await _finish_file_cleanup(file_paths)
     
-    return {"message": "扫描任务已删除"}
+    return {"message": "检测记录已删除", "deleted_file_count": deleted_file_count, "released_file_bytes": file_bytes}

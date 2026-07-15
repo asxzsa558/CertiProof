@@ -39,9 +39,9 @@
 .report-list {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(298px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   align-content: start;
-  gap: 12px;
+  gap: 10px;
   padding: 2px;
   max-height: calc(100vh - 286px);
   overflow: auto;
@@ -49,10 +49,10 @@
 
 .report-item {
   display: grid;
-  grid-template-rows: auto auto auto 1fr auto;
-  gap: 14px;
-  min-height: 280px;
-  padding: 16px;
+  grid-template-rows: auto auto auto auto;
+  gap: 10px;
+  min-height: 210px;
+  padding: 13px;
   color: rgba(226, 232, 240, 0.9);
   background: rgba(4, 14, 28, 0.58);
   border: 1px solid rgba(107, 151, 183, 0.18);
@@ -76,20 +76,20 @@
 }
 
 .report-item-head {
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.report-item-head > div {
-  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
 }
 
 .report-item-head h3 {
-  margin: 3px 0 0;
+  min-width: 0;
+  margin: 0;
   color: #f8fafc;
-  font-size: 16px;
-  line-height: 1.32;
-  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .report-item-head .ant-tag {
@@ -98,8 +98,13 @@
 }
 
 .report-id {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 7px;
   color: rgba(116, 206, 230, 0.82);
+  border: 1px solid rgba(83, 222, 241, 0.18);
+  background: rgba(83, 222, 241, 0.06);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
 }
@@ -107,7 +112,7 @@
 .report-item-state {
   align-items: flex-start;
   gap: 9px;
-  min-height: 38px;
+  min-height: 32px;
 }
 
 .report-state-dot {
@@ -142,7 +147,7 @@
 .report-item-state p {
   margin: 3px 0 0;
   color: rgba(148, 171, 192, 0.84);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.45;
 }
 
@@ -187,7 +192,7 @@
 
 .report-item-metrics > div {
   min-width: 0;
-  padding: 8px 7px;
+  padding: 7px;
   border-left: 1px solid rgba(126, 163, 190, 0.2);
 }
 

@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
+    pip install --no-cache-dir -r requirements.txt
+
+COPY server.py .
+
+EXPOSE 8017
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8017"]

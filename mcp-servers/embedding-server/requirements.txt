@@ -1,0 +1,4 @@
+fastapi
+uvicorn[standard]
+pydantic
+fastembed==0.8.0

@@ -510,6 +510,17 @@ async def _migrate_existing_data(conn):
         pass
 
 
+async def seed_runtime_data() -> None:
+    """Seed mutable runtime data after the versioned schema is current."""
+    async with AsyncSessionLocal() as session:
+        from app.services.flow_engine import get_flow_engine
+        from app.services.knowledge_graph import knowledge_graph
+
+        await get_flow_engine(session).upsert_default_templates()
+        await knowledge_graph.seed_standard_bundle(session)
+        await session.commit()
+
+
 async def init_db():
     """Initialize database tables."""
     # Register every model before metadata is materialized; migration runs without
@@ -518,6 +529,19 @@ async def init_db():
     async with engine.begin() as conn:
         if "postgresql" in settings.DATABASE_URL:
             await conn.execute(text("SELECT pg_advisory_xact_lock(hashtext('certiproof_schema_migration'))"))
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS age"))
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            await conn.execute(text("LOAD 'age'"))
+            await conn.execute(text('SET search_path = public, ag_catalog, "$user"'))
+            graph_exists = (await conn.execute(
+                text("SELECT 1 FROM ag_catalog.ag_graph WHERE name = :name"),
+                {"name": settings.GRAPH_NAME},
+            )).scalar()
+            if not graph_exists:
+                await conn.execute(
+                    text("SELECT ag_catalog.create_graph(:name)"),
+                    {"name": settings.GRAPH_NAME},
+                )
         # 创建新表
         await conn.run_sync(Base.metadata.create_all)
         
@@ -538,7 +562,4 @@ async def init_db():
         # 数据迁移
         await _migrate_existing_data(conn)
 
-    async with AsyncSessionLocal() as session:
-        from app.services.flow_engine import get_flow_engine
-
-        await get_flow_engine(session).upsert_default_templates()
+    await seed_runtime_data()

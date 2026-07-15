@@ -12,6 +12,7 @@ from app.models.evidence import Evidence
 from app.models.assessment import Assessment, PhaseInstance, TaskInstance
 from app.models.remediation import RemediationTicket
 from app.models.change_snapshot import ChangeSnapshot
+from app.models.document_knowledge import DocumentBlock, DocumentFile
 
 
 def _value(value):
@@ -119,6 +120,31 @@ def _evidence_payload(evidence: Evidence) -> dict:
     }
 
 
+def _document_evidence_html(finding: dict) -> str:
+    items = finding.get("document_evidences") or []
+    if not items:
+        return f"<span class=\"muted\">{finding.get('evidence_count', 0)} 条</span>"
+
+    rows = []
+    for item in items[:2]:
+        section = item.get("section") or []
+        if isinstance(section, list):
+            section = " / ".join(str(part) for part in section if part)
+        location = [item.get("file_name") or "未命名文件"]
+        if item.get("page"):
+            location.append(f"第 {item['page']} 页")
+        if section:
+            location.append(str(section))
+        excerpt = str(item.get("text") or "").strip().replace("\n", " ")[:180]
+        rows.append(
+            f"<div class=\"evidence-ref\"><strong>{escape(' · '.join(location))}</strong>"
+            f"<span>{escape(excerpt or '已定位结构化证据')}</span></div>"
+        )
+    remaining = len(items) - len(rows)
+    suffix = f"<span class=\"muted\">另有 {remaining} 条</span>" if remaining > 0 else ""
+    return "".join(rows) + suffix
+
+
 async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
@@ -198,18 +224,44 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
     ticket_by_finding = {ticket.finding_id: ticket for ticket in tickets}
 
     finding_ids = [finding.id for finding in findings]
-    explicit_evidence_ids = sorted({evidence_id for finding in findings for evidence_id in _finding_evidence_ids(finding)})
+    document_block_ids = sorted({
+        evidence_id
+        for finding in findings
+        if finding.document_run_id
+        for evidence_id in _finding_evidence_ids(finding)
+    })
+    technical_evidence_ids = sorted({
+        evidence_id
+        for finding in findings
+        if not finding.document_run_id
+        for evidence_id in _finding_evidence_ids(finding)
+    })
     evidence_by_id = {}
     if finding_ids:
         result = await db.execute(select(Evidence).where(Evidence.finding_id.in_(finding_ids)))
         evidence_by_id.update({evidence.id: evidence for evidence in result.scalars().all()})
-    if explicit_evidence_ids:
-        result = await db.execute(select(Evidence).where(Evidence.id.in_(explicit_evidence_ids)))
+    if technical_evidence_ids:
+        result = await db.execute(select(Evidence).where(Evidence.id.in_(technical_evidence_ids)))
         evidence_by_id.update({evidence.id: evidence for evidence in result.scalars().all()})
     evidences = list(evidence_by_id.values())
+    document_blocks = {}
+    if document_block_ids:
+        rows = (await db.execute(
+            select(DocumentBlock, DocumentFile)
+            .join(DocumentFile, DocumentFile.id == DocumentBlock.document_file_id)
+            .where(DocumentBlock.id.in_(document_block_ids))
+        )).all()
+        document_blocks = {block.id: (block, document) for block, document in rows}
     project_evidence_count = (await db.execute(
         select(func.count()).select_from(Evidence).where(Evidence.project_id == project_id)
-    )).scalar() or len(evidences)
+    )).scalar() or 0
+    project_document_count = (await db.execute(
+        select(func.count()).select_from(DocumentFile).where(
+            DocumentFile.project_id == project_id,
+            DocumentFile.is_active.is_(True),
+        )
+    )).scalar() or 0
+    project_evidence_count += project_document_count
 
     severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     judgment_counts = {"pass": 0, "fail": 0, "partial": 0, "not_tested": 0, "paper_compliant": 0}
@@ -221,7 +273,30 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
         judgment_counts[judgment] = judgment_counts.get(judgment, 0) + 1
         related_ids = set(_finding_evidence_ids(finding))
-        related_evidence = [e for e in evidences if e.finding_id == finding.id or e.id in related_ids]
+        related_evidence = [
+            evidence for evidence in evidences
+            if evidence.finding_id == finding.id or (not finding.document_run_id and evidence.id in related_ids)
+        ]
+        related_document_evidence = []
+        if finding.document_run_id:
+            for block_id in related_ids:
+                item = document_blocks.get(block_id)
+                if not item:
+                    continue
+                block, document = item
+                if block.analysis_run_id != finding.document_run_id:
+                    continue
+                related_document_evidence.append({
+                    "block_id": block.id,
+                    "document_file_id": document.id,
+                    "file_name": document.original_name,
+                    "page": block.page_number,
+                    "section": block.section_path,
+                    "type": block.block_type,
+                    "source": block.source,
+                    "confidence": block.source_confidence,
+                    "text": block.text,
+                })
         ticket = ticket_by_finding.get(finding.id)
         findings_data.append({
             "id": finding.id,
@@ -237,8 +312,12 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
             "ticket_priority": ticket.priority if ticket else None,
             "ticket_title": ticket.title if ticket else None,
             "resolution_days": _duration_days(finding.created_at, ticket.resolved_at if ticket else finding.resolved_at),
-            "evidence_count": len(related_evidence),
+            "source": "document" if finding.document_run_id else "technical",
+            "scan_task_id": finding.scan_task_id,
+            "document_run_id": finding.document_run_id,
+            "evidence_count": len(related_evidence) + len(related_document_evidence),
             "evidences": [_evidence_payload(evidence) for evidence in related_evidence],
+            "document_evidences": related_document_evidence,
             "created_at": _dt(finding.created_at),
         })
 
@@ -514,7 +593,7 @@ async def generate_html_report(db: AsyncSession, project_id: int) -> str:
         for p in assessment["phases"]
     ) or '<tr><td colspan="4">暂无测评阶段</td></tr>'
     priority_rows = "\n".join(
-        f"<article class=\"action-item\"><div>{_badge(f['priority'])}<strong>{escape(str(f.get('ticket_title') or f.get('clause_name') or f['clause_id'] or '待整改事项'))}</strong></div><p>{escape(str(f['description'] or '-'))}</p><footer><span>当前：{_badge(f.get('ticket_status') or f['status'])}</span><span>证据 {f['evidence_count']} 条</span></footer><p class=\"recommendation\">{escape(str(f['remediation_suggestion'] or '请补充整改措施并重新验证。'))}</p></article>"
+        f"<article class=\"action-item\"><div>{_badge(f['priority'])}<strong>{escape(str(f.get('ticket_title') or f.get('clause_name') or f['clause_id'] or '待整改事项'))}</strong></div><p>{escape(str(f['description'] or '-'))}</p>{_document_evidence_html(f)}<footer><span>当前：{_badge(f.get('ticket_status') or f['status'])}</span><span>证据 {f['evidence_count']} 条</span></footer><p class=\"recommendation\">{escape(str(f['remediation_suggestion'] or '请补充整改措施并重新验证。'))}</p></article>"
         for f in open_findings[:12]
     ) or '<p class="empty">当前没有待整改问题。</p>'
     document_retest_rows = "\n".join(
@@ -540,7 +619,7 @@ async def generate_html_report(db: AsyncSession, project_id: int) -> str:
         for scan in report["technical_scans"]
     ) or '<tr><td colspan="7">尚未执行技术检测。</td></tr>'
     finding_rows = "\n".join(
-        f"<tr><td>#{f['id']}</td><td>{escape(str(f['clause_id'] or '-'))}</td><td>{_badge(f['priority'])}</td><td>{_badge(f['lifecycle'])}</td><td>{_badge(f.get('ticket_status') or f['status'])}</td><td>{f['evidence_count']}</td><td>{escape(str(f['description'] or '-'))}</td><td>{escape(str(f['remediation_suggestion'] or '-'))}</td></tr>"
+        f"<tr><td>#{f['id']}</td><td>{escape(str(f['clause_id'] or '-'))}</td><td>{_badge(f['priority'])}</td><td>{_badge(f['lifecycle'])}</td><td>{_badge(f.get('ticket_status') or f['status'])}</td><td>{_document_evidence_html(f)}</td><td>{escape(str(f['description'] or '-'))}</td><td>{escape(str(f['remediation_suggestion'] or '-'))}</td></tr>"
         for f in sorted(report["findings"], key=lambda item: (item["lifecycle"] != "open", priority_order.get(item.get("priority"), 9)))
     ) or '<tr><td colspan="8">未产生问题记录。</td></tr>'
     change_rows = "\n".join(
@@ -563,6 +642,7 @@ async def generate_html_report(db: AsyncSession, project_id: int) -> str:
     .layout {{ display:grid; grid-template-columns:186px minmax(0,1fr); gap:28px; }} .toc {{ align-self:start; position:sticky; top:20px; display:grid; gap:3px; padding-right:16px; border-right:1px solid var(--line); }} .toc span {{ margin-bottom:7px; color:var(--muted); font-size:11px; }} .toc a {{ padding:6px 0; color:#a9c4d7; text-decoration:none; font-size:12px; }} .toc a:hover {{ color:var(--cyan); }} .content {{ min-width:0; }} section {{ padding:0 0 30px; margin:0 0 30px; border-bottom:1px solid var(--line); }} section:last-child {{ border:0; }} .section-head {{ display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:13px; }} h2 {{ font-size:19px; }} .section-head p {{ color:var(--muted); font-size:12px; }}
     .badge {{ display:inline-flex; align-items:center; min-height:22px; padding:2px 8px; color:#bfeefa; border:1px solid #275168; background:#0b2635; border-radius:999px; font-size:11px; white-space:nowrap; }} .badge.good {{ color:#a9f0c8; border-color:#246447; background:#0b2b21; }} .badge.warning {{ color:#ffe099; border-color:#705826; background:#30270e; }} .badge.danger {{ color:#ffb0b8; border-color:#71343f; background:#32151d; }} .badge.info {{ color:#bfeefa; border-color:#275168; background:#0b2635; }} .badge.neutral {{ color:#becbd6; border-color:#3b4c5b; background:#14202c; }}
     .action-list {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }} .action-item {{ min-width:0; padding:15px; border:1px solid #31445a; background:#0a1928; }} .action-item > div {{ display:flex; align-items:center; gap:8px; }} .action-item strong {{ min-width:0; overflow-wrap:anywhere; font-size:14px; }} .action-item p {{ margin-top:10px; color:#c9d8e6; }} .action-item footer {{ display:flex; justify-content:space-between; gap:8px; margin-top:12px; color:var(--muted); font-size:11px; }} .action-item .recommendation {{ padding-top:10px; border-top:1px solid var(--line); color:#9fddeb; }} .empty {{ color:var(--muted); padding:14px 0; }}
+    .evidence-ref {{ display:grid!important; gap:3px!important; margin-top:9px; padding:8px 10px; border-left:2px solid #2e7084; background:#081522; }} .evidence-ref strong {{ color:#9fddeb; font-size:11px; }} .evidence-ref span {{ color:#aebfce; font-size:11px; overflow-wrap:anywhere; }}
     .table-wrap {{ overflow:auto; border:1px solid var(--line); background:#091827; }} table {{ width:100%; min-width:680px; border-collapse:collapse; }} th,td {{ padding:11px 12px; border-bottom:1px solid #183247; text-align:left; vertical-align:top; }} th {{ color:#9ec9df; background:#0c2032; font-size:11px; font-weight:600; }} td {{ color:#d7e5ef; font-size:12px; }} tr:last-child td {{ border-bottom:0; }} td em {{ display:inline-block; margin-left:8px; color:var(--muted); font-size:11px; font-style:normal; }} .progress {{ display:inline-block; width:92px; height:6px; margin-right:6px; overflow:hidden; vertical-align:middle; background:#10283a; }} .progress i {{ display:block; height:100%; background:var(--cyan); }}
     details {{ border:1px solid var(--line); background:#091827; }} summary {{ padding:12px 14px; color:#c8e9f3; cursor:pointer; }} details .table-wrap {{ border-width:1px 0 0; }}
     @media (max-width:900px) {{ .shell {{ padding:20px 14px 44px; }} .metrics,.action-list {{ grid-template-columns:repeat(2,minmax(0,1fr)); }} .layout {{ display:block; }} .toc {{ position:static; grid-template-columns:repeat(2,minmax(0,1fr)); margin-bottom:24px; padding:0 0 12px; border-right:0; border-bottom:1px solid var(--line); }} }} @media (max-width:560px) {{ h1 {{ font-size:26px; }} .hero-line {{ align-items:flex-start; flex-direction:column; }} .metrics,.action-list {{ grid-template-columns:1fr; }} .toc {{ grid-template-columns:1fr; }} }}

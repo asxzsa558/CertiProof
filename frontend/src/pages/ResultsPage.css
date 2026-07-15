@@ -1,5 +1,7 @@
 .results-page {
+  min-width: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   background: var(--bg-primary);
 }
 
@@ -7,29 +9,56 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  height: auto !important;
+  min-height: 64px;
+  line-height: normal !important;
   padding: 16px 24px;
   background: rgba(17, 17, 19, 0.95);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.header-left {
+.results-header .header-left {
   display: flex;
+  flex: 1;
   align-items: center;
   gap: 16px;
+  min-width: 0;
 }
 
-.back-btn {
+.results-header .back-btn {
+  flex: 0 0 auto;
   color: rgba(255, 255, 255, 0.8) !important;
 }
 
-.back-btn:hover {
+.results-header .back-btn:hover {
   color: #fff !important;
 }
 
-.header-right {
+.results-header .header-right {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 16px;
+}
+
+.results-title-block {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.results-page-title.ant-typography {
+  margin: 0;
+  color: #fff;
+  font-size: 22px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.results-title-context {
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 12px;
 }
 
 .compliance-score {
@@ -39,6 +68,7 @@
 }
 
 .results-content {
+  min-width: 0;
   padding: 24px;
 }
 
@@ -75,9 +105,14 @@
 }
 
 .results-content .ant-card {
+  min-width: 0;
   background: rgba(17, 17, 19, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
+}
+
+.results-content .ant-table-wrapper {
+  min-width: 0;
 }
 
 .results-content .ant-card-head {
@@ -105,4 +140,37 @@
 
 .results-content .ant-table-tbody > tr:hover > td {
   background: rgba(255, 255, 255, 0.02);
+}
+
+.results-toolbar {
+  justify-content: flex-end;
+}
+
+@media (max-width: 900px) {
+  .results-header,
+  .results-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .results-header .header-right {
+    justify-content: flex-start;
+  }
+
+  .results-content {
+    padding: 16px;
+  }
+
+  .results-content .ant-card-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .results-content .ant-card-extra {
+    margin: 0 0 12px;
+  }
+
+  .results-toolbar {
+    justify-content: flex-start;
+  }
 }

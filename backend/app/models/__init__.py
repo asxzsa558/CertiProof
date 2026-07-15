@@ -20,6 +20,15 @@ from app.models.assessment import (
 from app.models.config import SystemConfig
 from app.models.questionnaire import QuestionnaireRecord
 from app.models.audit import AuditEvent
+from app.models.document_knowledge import (
+    KnowledgeGraphRevision,
+    DocumentAnalysisRun,
+    DocumentFile,
+    DocumentRunFile,
+    DocumentBlock,
+    DocumentControlResult,
+    DocumentEvidenceLink,
+)
 
 __all__ = [
     "User",
@@ -75,4 +84,11 @@ __all__ = [
     "FlowEvent",
     "QuestionnaireRecord",
     "AuditEvent",
+    "KnowledgeGraphRevision",
+    "DocumentAnalysisRun",
+    "DocumentFile",
+    "DocumentRunFile",
+    "DocumentBlock",
+    "DocumentControlResult",
+    "DocumentEvidenceLink",
 ]

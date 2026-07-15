@@ -8,14 +8,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
+from app.core.config import settings
 from app.core.rbac import require_any_org_permission, require_org_permission
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.project import Project
 from app.models.scan_task import ScanTask, ScanTaskStatus
 from app.models.context import ConversationArchive, ConversationSummary
+from app.models.model_config import ModelConfig
 from app.models.audit import AuditEvent
 from app.mcp.gateway_client import MCPGatewayClient
+from app.services.knowledge_graph import knowledge_graph
 import httpx
 
 router = APIRouter(prefix="/diagnostics", tags=["Diagnostics"])
@@ -86,8 +89,36 @@ async def get_operations_snapshot(
         .order_by(AuditEvent.created_at.desc())
         .limit(40)
     )).scalars().all()
+    embedding_models = (await db.execute(
+        select(ModelConfig).where(ModelConfig.is_active.is_(True))
+    )).scalars().all()
+    embedding_models = [model for model in embedding_models if "embedding" in (model.capabilities or [])]
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            local_embedding = (await client.get(f"{settings.EMBEDDING_SERVER_URL}/health")).json()
+        local_available = local_embedding.get("status") in {"lazy", "ready"}
+    except Exception as exc:
+        local_embedding = {"status": "unavailable", "error": str(exc), "model": settings.DOCUMENT_EMBEDDING_MODEL}
+        local_available = False
+    retrieval_available = bool(embedding_models) or local_available
     return {
         "window_hours": hours,
+        "knowledge_graph": await knowledge_graph.status(db),
+        "document_retrieval": {
+            "embedding_configured": retrieval_available,
+            "embedding_dimension": settings.DOCUMENT_EMBEDDING_DIMENSION,
+            "models": [
+                *[model.display_name for model in embedding_models],
+                *([local_embedding.get("model")] if local_available else []),
+            ],
+            "local_service": local_embedding,
+            "status": "configured" if retrieval_available else "unavailable",
+            "message": (
+                "本地向量模型将在首次文档分析时下载并加载。"
+                if local_embedding.get("status") == "lazy" and not embedding_models
+                else (None if retrieval_available else "文本向量服务不可用；无精确证据的检查项将标记为无法判断。")
+            ),
+        },
         "scan_tasks": {
             "total": len(scans),
             "by_status": status_counts,
@@ -131,6 +162,7 @@ async def test_mcp_health(
         "db_tools": "http://db-tools:8015",
         "ssh_checker": "http://ssh-checker:8016",
         "ocr_server": "http://ocr-server:8005",
+        "embedding_server": settings.EMBEDDING_SERVER_URL,
     }
     
     async with httpx.AsyncClient(timeout=10.0) as client:

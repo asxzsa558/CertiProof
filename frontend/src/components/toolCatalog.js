@@ -43,3 +43,64 @@ export const CAPABILITY_NAMES = TOOL_CATALOG.reduce((acc, tool) => {
   nuclei_scan: '漏洞扫描',
   hydra_bruteforce: '弱口令检测',
 })
+
+const ASSESSMENT_TASK_NAMES = {
+  asset_discovery: '资产发现',
+  high_risk_port_scan: '高危端口扫描',
+  basic_vulnerability_scan: '基础漏洞扫描',
+  basic_baseline_check: '安全基线核查',
+  basic_weak_password_scan: '弱口令检测',
+  basic_ssl_tls_scan: 'SSL/TLS 检测',
+  config_check: '安全基线核查',
+  vuln_scan: '漏洞扫描',
+  web_scan: 'Web 安全检测',
+  ssl_check: 'SSL/TLS 检测',
+  password_scan: '弱口令检测',
+  db_check: '数据库安全检测',
+  network_check: '网络设备检测',
+  windows_check: 'Windows/AD/SMB 检测',
+  full_compliance_scan: '全量合规扫描',
+  full_asset_assessment: '全资产组合扫描',
+}
+
+export function scanTaskCapabilities(task = {}) {
+  const parameters = task.parameters || {}
+  const summary = task.result_summary || {}
+  const values = [parameters.capability, parameters.tool_name, ...(parameters.capabilities || [])]
+  for (const step of parameters.plan || []) values.push(step?.capability)
+  for (const item of [...(summary.results || []), ...(summary.failed || []), ...(summary.warnings || [])]) values.push(item?.capability)
+  return [...new Set(values.filter(Boolean))]
+}
+
+export function scanTaskName(task = {}) {
+  const parameters = task.parameters || {}
+  const capabilities = scanTaskCapabilities(task)
+  return parameters.report_name
+    || ASSESSMENT_TASK_NAMES[parameters.task_type]
+    || capabilities.map((capability) => CAPABILITY_NAMES[capability] || capability).join(' + ')
+    || ({ full: '全量检测', incremental: '增量检测', targeted: '定向检测', scheduled: '定时检测' })[task.task_type]
+    || '安全检测'
+}
+
+export function scanTaskTarget(task = {}) {
+  const parameters = task.parameters || {}
+  const summary = task.result_summary || {}
+  const value = parameters.target || parameters.targets || summary.target
+  return Array.isArray(value) ? value.join(', ') : value || '未记录目标'
+}
+
+export function scanTaskSource(task = {}) {
+  if (task.parameters?.source === 'assessment_task') return '等保测评'
+  if (task.triggered_by === 'scheduled') return '定时任务'
+  if (task.triggered_by === 'event') return '系统触发'
+  return '手动 / AI'
+}
+
+export function scanTaskConclusion(task = {}) {
+  const summary = task.result_summary || {}
+  if (task.status === 'failed' || task.status === 'cancelled' || task.error_message) return { key: 'failed', label: '无法完成' }
+  if (task.status === 'running' || task.status === 'pending') return { key: 'running', label: '执行中' }
+  if ((summary.failed || []).length || (summary.warnings || []).length || summary.status === 'partial') return { key: 'warning', label: '部分未完成' }
+  if (task.findings_count > 0) return { key: 'risk', label: `发现 ${task.findings_count} 项问题` }
+  return { key: 'clean', label: '未发现问题' }
+}

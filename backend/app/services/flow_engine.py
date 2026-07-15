@@ -903,101 +903,6 @@ class FlowEngine:
         logger.info(f"Completed task {task_id}")
         return task
 
-    async def upload_task_document(
-        self,
-        task_id: int,
-        file_path: str,
-        file_name: str,
-        file_size: int,
-        mime_type: str,
-        project_id: int,
-        document_level: str = None,
-        validation_result: dict = None,
-        analysis_result: dict = None,
-    ) -> dict:
-        """
-        上传任务文档（定级报告等）
-
-        Args:
-            task_id: 任务ID
-            file_path: 文件存储路径
-            file_name: 文件名
-            file_size: 文件大小
-            mime_type: MIME类型
-            project_id: 项目ID
-            document_level: 文档中识别的定级
-            validation_result: 定级验证结果
-            analysis_result: 文档标准项检查结果
-
-        Returns:
-            包含验证结果的字典
-        """
-        task = await self.get_task(task_id)
-        if not task:
-            raise ValueError(f"Task {task_id} not found")
-
-        already_completed = task.status == "completed"
-        if task.status not in ("todo", "in_progress", "completed"):
-            raise ValueError(f"Cannot transition from {task.status} to completed")
-
-        # 严格验证：如果是系统定级任务，验证文档等级与项目等级
-        if task.task_type == "doc_review" and "定级" in task.name:
-            if validation_result and not validation_result.get("match", False):
-                # 验证失败，标记任务为失败
-                task.status = "failed"
-                task.completed_at = datetime.utcnow()
-                task.result = {
-                    "type": "doc_review",
-                    "file_name": file_name,
-                    "file_path": file_path,
-                    "validation": validation_result,
-                    "error": validation_result.get("error", "定级验证失败"),
-                }
-                await self.db.commit()
-                await self.emit_event(
-                    task.phase_id and (await self.get_phase(task.phase_id)).assessment_id or 0,
-                    "task_failed",
-                    {"task_id": task_id, "reason": "定级验证失败"},
-                )
-                return {
-                    "status": "failed",
-                    "task_id": task_id,
-                    "message": validation_result.get("error", "定级验证失败"),
-                    "validation": validation_result,
-                }
-
-        # 验证通过或非定级任务，标记为完成
-        task.status = "completed"
-        task.completed_at = task.completed_at if already_completed else datetime.utcnow()
-        task.result = {
-            "type": "doc_review",
-            "file_name": file_name,
-            "file_path": file_path,
-            "file_size": file_size,
-            "mime_type": mime_type,
-            "validation": validation_result,
-            "analysis": analysis_result,
-        }
-
-        phase = await self.get_phase(task.phase_id)
-        all_tasks = await self.get_tasks(phase.id, official_only=True)
-        finished = sum(1 for t in all_tasks if t.status in ["completed", "cancelled"])
-        phase.completed_tasks = finished
-        phase.progress = (finished / phase.total_tasks * 100) if phase.total_tasks > 0 else 0
-
-        await self.db.commit()
-
-        await self.emit_event(phase.assessment_id, "task_completed", {"task_id": task_id})
-
-        logger.info(f"Task {task_id} document uploaded and completed")
-        return {
-            "status": "completed",
-            "task_id": task_id,
-            "message": "文档上传成功，任务已完成",
-            "validation": validation_result,
-            "analysis": analysis_result,
-        }
-
     async def skip_task(self, task_id: int, reason: str = "") -> TaskInstance:
         """
         跳过任务
@@ -1109,21 +1014,39 @@ class FlowEngine:
 
         phase = await self.get_phase(task.phase_id)
         if task.task_type == "doc_review":
-            from app.models.evidence import Evidence
+            from app.models.document_knowledge import DocumentAnalysisRun, DocumentFile, DocumentRunFile
             from app.models.finding import Finding
             from app.models.remediation import RemediationTicket
             from app.services.file_storage import file_storage
             assessment = await self.get_assessment(phase.assessment_id)
-            evidences = (await self.db.execute(
-                select(Evidence).where(
-                    Evidence.project_id == assessment.project_id,
-                    Evidence.clause_id == f"DOC-TASK-{task.id}",
-                )
-            )).scalars().all()
-            for evidence in evidences:
-                if evidence.file_path:
-                    await file_storage.delete_file(evidence.file_path)
-                await self.db.delete(evidence)
+            document_rows = (await self.db.execute(
+                select(DocumentFile.id, DocumentFile.storage_path)
+                .where(DocumentFile.assessment_id == assessment.id, DocumentFile.task_id == task.id)
+            )).all()
+            document_ids = [row.id for row in document_rows]
+            batch_run_ids = []
+            if document_ids:
+                batch_run_ids = (await self.db.execute(
+                    select(DocumentRunFile.analysis_run_id)
+                    .join(DocumentAnalysisRun, DocumentAnalysisRun.id == DocumentRunFile.analysis_run_id)
+                    .where(
+                        DocumentRunFile.document_file_id.in_(document_ids),
+                        DocumentAnalysisRun.run_kind == "batch",
+                    )
+                )).scalars().all()
+            await self.db.execute(delete(DocumentFile).where(
+                DocumentFile.assessment_id == assessment.id,
+                DocumentFile.task_id == task.id,
+            ))
+            await self.db.execute(delete(DocumentAnalysisRun).where(DocumentAnalysisRun.task_id == task.id))
+            if batch_run_ids:
+                await self.db.execute(delete(DocumentAnalysisRun).where(DocumentAnalysisRun.id.in_(batch_run_ids)))
+            from app.services.knowledge_graph import knowledge_graph
+            for document_id in document_ids:
+                await knowledge_graph.purge_file(self.db, document_id)
+            await knowledge_graph.purge_task(self.db, task.id)
+            for _, document_path in document_rows:
+                await file_storage.delete_file(document_path)
             finding_ids = select(Finding.id).where(
                 Finding.project_id == assessment.project_id,
                 Finding.clause_id.like(f"DOC-TASK-{task.id}-%"),
@@ -1184,22 +1107,21 @@ class FlowEngine:
 
         document_task_ids = [task.id for task in tasks if task.task_type == "doc_review"]
         if document_task_ids:
-            from app.models.evidence import Evidence
+            from app.models.document_knowledge import DocumentAnalysisRun, DocumentFile
             from app.models.finding import Finding
             from app.models.remediation import RemediationTicket
             from app.services.file_storage import file_storage
             assessment = await self.get_assessment(phase.assessment_id)
-            clause_ids = [f"DOC-TASK-{task_id}" for task_id in document_task_ids]
-            evidences = (await self.db.execute(
-                select(Evidence).where(
-                    Evidence.project_id == assessment.project_id,
-                    Evidence.clause_id.in_(clause_ids),
-                )
+            document_paths = (await self.db.execute(
+                select(DocumentFile.storage_path)
+                .where(DocumentFile.assessment_id == assessment.id)
             )).scalars().all()
-            for evidence in evidences:
-                if evidence.file_path:
-                    await file_storage.delete_file(evidence.file_path)
-                await self.db.delete(evidence)
+            await self.db.execute(delete(DocumentFile).where(DocumentFile.assessment_id == assessment.id))
+            await self.db.execute(delete(DocumentAnalysisRun).where(DocumentAnalysisRun.phase_id == phase.id))
+            from app.services.knowledge_graph import knowledge_graph
+            await knowledge_graph.purge_phase(self.db, phase.id)
+            for document_path in document_paths:
+                await file_storage.delete_file(document_path)
             finding_ids = select(Finding.id).where(
                 Finding.project_id == assessment.project_id,
                 or_(*[Finding.clause_id.like(f"DOC-TASK-{task_id}-%") for task_id in document_task_ids]),
@@ -1222,12 +1144,18 @@ class FlowEngine:
         from app.models.finding import Finding
         from app.models.questionnaire import QuestionnaireRecord
         from app.models.remediation import RemediationTicket
+        from app.models.document_knowledge import DocumentAnalysisRun, DocumentFile
         from app.services.file_storage import file_storage
+        from app.services.knowledge_graph import knowledge_graph
 
         finding_ids = select(Finding.id).where(Finding.project_id == project_id)
         questionnaire_ids = select(QuestionnaireRecord.id).where(QuestionnaireRecord.project_id == project_id)
         evidence_paths = (await self.db.execute(
             select(Evidence.file_path).where(Evidence.project_id == project_id, Evidence.file_path.is_not(None))
+        )).scalars().all()
+        document_paths = (await self.db.execute(
+            select(DocumentFile.storage_path)
+            .where(DocumentFile.project_id == project_id)
         )).scalars().all()
 
         await self.db.execute(delete(RemediationTicket).where(RemediationTicket.project_id == project_id))
@@ -1237,7 +1165,10 @@ class FlowEngine:
         await self.db.execute(delete(QuestionnaireRecord).where(QuestionnaireRecord.project_id == project_id))
         await self.db.execute(delete(Finding).where(Finding.project_id == project_id))
         await self.db.execute(delete(ProjectAssessment).where(ProjectAssessment.project_id == project_id))
-        for file_path in evidence_paths:
+        await self.db.execute(delete(DocumentFile).where(DocumentFile.project_id == project_id))
+        await self.db.execute(delete(DocumentAnalysisRun).where(DocumentAnalysisRun.project_id == project_id))
+        await knowledge_graph.purge_project(self.db, project_id)
+        for file_path in {*evidence_paths, *document_paths}:
             await file_storage.delete_file(file_path)
 
     async def restart_assessment(self, assessment_id: int, mode: str = "reset") -> Assessment:
@@ -1290,92 +1221,6 @@ class FlowEngine:
 
         logger.info(f"Assessment {assessment_id} reset to not_started")
         return assessment
-
-    async def validate_classification_document(
-        self,
-        project_id: int,
-        document_content: str,
-    ) -> dict:
-        """
-        严格验证定级报告与项目等级是否一致
-
-        Args:
-            project_id: 项目ID
-            document_content: 文档内容（已提取的文本）
-
-        Returns:
-            验证结果字典
-        """
-        from app.models.project import Project
-
-        # 获取项目等级
-        result = await self.db.execute(
-            select(Project).where(Project.id == project_id)
-        )
-        project = result.scalar_one_or_none()
-        if not project:
-            return {
-                "match": False,
-                "error": "项目不存在",
-            }
-
-        project_level = project.compliance_level  # "二级" or "三级"
-
-        # 从文档中提取定级信息
-        document_level = self._extract_classification_level(document_content)
-
-        if not document_level:
-            return {
-                "match": False,
-                "project_level": project_level,
-                "document_level": None,
-                "error": "未能从文档中识别出定级信息，请确认文档包含明确的等保定级（如'等保二级'或'等保三级'）",
-            }
-
-        if document_level != project_level:
-            return {
-                "match": False,
-                "project_level": project_level,
-                "document_level": document_level,
-                "error": f"文档中定级为 {document_level}，与项目等级 {project_level} 不一致。请重新上传正确的定级报告。",
-            }
-
-        return {
-            "match": True,
-            "project_level": project_level,
-            "document_level": document_level,
-            "message": f"定级验证通过：项目等级 {project_level} 与文档定级一致",
-        }
-
-    def _extract_classification_level(self, content: str) -> Optional[str]:
-        """
-        从文档内容中提取定级信息
-
-        支持的格式：
-        - 等保二级 / 等保三级
-        - 二级 / 三级
-        - 等保 2 级 / 等保 3 级
-        """
-        if not content:
-            return None
-
-        # 优先级匹配
-        patterns = [
-            (r'等保\s*[三3]\s*级', '三级'),
-            (r'等保\s*[二2]\s*级', '二级'),
-            (r'定级\s*[三3]\s*级', '三级'),
-            (r'定级\s*[二2]\s*级', '二级'),
-            (r'等级\s*[三3]\s*级', '三级'),
-            (r'等级\s*[二2]\s*级', '二级'),
-            (r'(?<![一二三四五六七八九\d])[三3]\s*级(?![一二三四五六七八九\d])', '三级'),
-            (r'(?<![一二三四五六七八九\d])[二2]\s*级(?![一二三四五六七八九\d])', '二级'),
-        ]
-
-        for pattern, level in patterns:
-            if re.search(pattern, content):
-                return level
-
-        return None
 
     # ========== 事件管理 ==========
     

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.core.secret_box import decrypt_json, encrypt_json
 from app.models.assessment import TaskInstance
 from app.models.asset import Asset
 from app.services.flow_engine import get_flow_engine
@@ -46,15 +47,24 @@ def _aggregate(task_type: str, targets: list[str], results: list[object]) -> dic
     }
 
 
-async def queue_assessment_task(task: TaskInstance, asset_ids: list[int], user_id: int, db: AsyncSession) -> None:
+async def queue_assessment_task(
+    task: TaskInstance,
+    asset_ids: list[int],
+    user_id: int,
+    db: AsyncSession,
+    credentials: dict[str, dict] | None = None,
+) -> None:
+    execution = {
+        "mode": "automated",
+        "state": "queued",
+        "asset_ids": asset_ids,
+        "user_id": user_id,
+        "queued_at": datetime.utcnow().isoformat(),
+    }
+    if credentials:
+        execution["credential_envelope"] = encrypt_json(credentials)
     task.result = {
-        "execution": {
-            "mode": "automated",
-            "state": "queued",
-            "asset_ids": asset_ids,
-            "user_id": user_id,
-            "queued_at": datetime.utcnow().isoformat(),
-        }
+        "execution": execution
     }
     task.lease_owner = None
     task.lease_expires_at = None
@@ -84,6 +94,17 @@ async def _run_claimed_task(task_id: int) -> None:
             await db.commit()
             return
 
+        try:
+            credentials = decrypt_json(execution["credential_envelope"]) if execution.get("credential_envelope") else {}
+        except ValueError as exc:
+            task.status = "failed"
+            task.completed_at = datetime.utcnow()
+            task.result = {"status": "failed", "error": str(exc), "execution": {"mode": "automated", "state": "failed"}}
+            task.lease_owner = None
+            task.lease_expires_at = None
+            await db.commit()
+            return
+
         semaphore = asyncio.Semaphore(max(1, min(settings.ASSESSMENT_MAX_CONCURRENT, 10)))
 
         async def execute_target(target: str):
@@ -94,11 +115,13 @@ async def _run_claimed_task(task_id: int) -> None:
                         target=target,
                         project_id=assessment.project_id,
                         user_id=int(user_id),
+                        params=credentials.get(target) or {},
                     )
 
         results = await asyncio.gather(*(execute_target(target) for target in targets), return_exceptions=True)
         final_result = _aggregate(task.task_type, targets, results)
-        final_result["execution"] = {**execution, "state": "finished", "finished_at": datetime.utcnow().isoformat()}
+        public_execution = {key: value for key, value in execution.items() if key != "credential_envelope"}
+        final_result["execution"] = {**public_execution, "state": "finished", "finished_at": datetime.utcnow().isoformat()}
         task.lease_owner = None
         task.lease_expires_at = None
         if final_result["status"] in {"completed", "partial"}:
@@ -142,6 +165,11 @@ async def process_pending_assessment_tasks(db: AsyncSession, limit: int = 10) ->
         if claim.rowcount == 1:
             claimed.append(task.id)
     await db.commit()
-    for task_id in claimed:
-        await _run_claimed_task(task_id)
+    semaphore = asyncio.Semaphore(max(1, settings.ASSESSMENT_MAX_CONCURRENT))
+
+    async def run_task(task_id: int) -> None:
+        async with semaphore:
+            await _run_claimed_task(task_id)
+
+    await asyncio.gather(*(run_task(task_id) for task_id in claimed))
     return len(claimed)
