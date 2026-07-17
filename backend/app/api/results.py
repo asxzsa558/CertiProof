@@ -11,12 +11,12 @@ from app.models.project import Project
 from app.models.scan_task import ScanTask, ScanTaskStatus
 from app.models.finding import Finding
 from app.models.evidence import Evidence
-from app.models.remediation import RemediationTicket
 from app.models.document_knowledge import DocumentBlock, DocumentFile
 from app.models.monitoring import ScanHistory
 from app.models.change_snapshot import ChangeSnapshot
 from app.services.audit import record_audit_event
 from app.services.file_storage import file_storage
+from app.services.verification_service import delete_verification_data
 from app.schemas.result import (
     ScanTaskResponse,
     ScanTaskDetail,
@@ -53,7 +53,7 @@ async def _delete_scan_records(db: AsyncSession, scan_task_ids: list[int]) -> tu
         evidences = (await db.execute(select(Evidence).where(Evidence.finding_id.in_(finding_ids)))).scalars().all()
         file_paths = [evidence.file_path for evidence in evidences if evidence.file_path]
         file_bytes = sum(evidence.file_size or 0 for evidence in evidences if evidence.file_path)
-        await db.execute(delete(RemediationTicket).where(RemediationTicket.finding_id.in_(finding_ids)))
+        await delete_verification_data(db, findings[0].project_id, finding_ids)
         await db.execute(delete(Evidence).where(Evidence.finding_id.in_(finding_ids)))
         await db.execute(delete(Finding).where(Finding.id.in_(finding_ids)))
     await db.execute(delete(ScanHistory).where(ScanHistory.scan_task_id.in_(scan_task_ids)))

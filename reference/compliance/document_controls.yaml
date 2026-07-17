@@ -454,7 +454,7 @@ documents:
 
   security_strategy:
     name: "信息安全策略文件"
-    aliases: ["信息安全策略文件", "安全策略", "网络安全策略"]
+    aliases: ["信息安全策略文件", "安全策略", "网络安全策略", "网络与信息安全总体策略"]
     controls:
       - id: "DOC-STR-001"
         title: "策略目标与原则"

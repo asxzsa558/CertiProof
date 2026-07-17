@@ -58,7 +58,6 @@ class ExecutionEngine:
             "cme": "crackmapexec_scan",
             "baseline": "baseline_check",
             "linux_baseline": "baseline_check",
-            "generate_pdf_report": "generate_html_report",
         }
         return aliases.get(capability_name, capability_name)
 
@@ -183,7 +182,7 @@ class ExecutionEngine:
         client = MCPGatewayClient()
         params = self._ssh_params(parameters)
         try:
-            result = await client.call(tool_name, params)
+            result = await client.call_with_progress(tool_name, params)
             return self._gateway_payload(result)
         except Exception as e:
             return self._ssh_unavailable_payload(parameters, e)
@@ -202,6 +201,13 @@ class ExecutionEngine:
     def _tool_display_status(self, data: Dict) -> str:
         if not isinstance(data, dict):
             return "success"
+        if data.get("tool_status") == "warning":
+            return "warning"
+        error = str(data.get("tool_error") or data.get("connection_error") or "").lower()
+        if (data.get("reachable") is False or data.get("scan_completed") is False) and any(marker in error for marker in (
+            "connection refused", "errno 111", "can't connect to server", "service not listening",
+        )):
+            return "skipped"
         if data.get("scan_completed") is False or data.get("success") is False or data.get("reachable") is False:
             return "warning"
         return "success"
@@ -312,6 +318,7 @@ class ExecutionEngine:
         results = []
         action_ids = []
         success_count = 0
+        warning_count = 0
         failed_count = 0
 
         for i, step in enumerate(plan):
@@ -369,15 +376,19 @@ class ExecutionEngine:
 
                 # 根据能力类型调用不同的处理器
                 result = await self._execute_capability(capability_name, parameters, user_id, project_id, db)
+                execution_status = self._tool_display_status(result)
 
                 results.append({
                     "capability": capability_name,
-                    "status": "success",
+                    "status": execution_status,
                     "target": parameters.get("target", "unknown"),
                     "parameters": safe_parameters,
                     "result": result,
                 })
-                success_count += 1
+                if execution_status == "success":
+                    success_count += 1
+                else:
+                    warning_count += 1
                 if step_result_callback:
                     await step_result_callback(checkpoint_index, results[-1])
 
@@ -387,7 +398,7 @@ class ExecutionEngine:
                         action_type=capability_name,
                         parameters=safe_parameters,
                         result=result,
-                        status="success"
+                        status=execution_status,
                     )
 
                     # 缓存结果
@@ -396,7 +407,7 @@ class ExecutionEngine:
 
                 # 通知执行完成
                 if progress_callback and task_id:
-                    progress_callback(task_id, i, len(plan), capability_name, "completed")
+                    progress_callback(task_id, i, len(plan), capability_name, "completed" if execution_status == "success" else execution_status)
 
                 logger.info(f"Capability {capability_name} executed successfully")
 
@@ -430,6 +441,7 @@ class ExecutionEngine:
             "results": results,
             "action_ids": action_ids,
             "success_count": success_count,
+            "warning_count": warning_count,
             "failed_count": failed_count,
         }
 
@@ -528,6 +540,7 @@ class ExecutionEngine:
 
         # 统计结果
         success_count = sum(1 for r in processed_results if r.get("status") == "success")
+        warning_count = sum(1 for r in processed_results if r.get("status") in ("warning", "skipped"))
         failed_count = sum(1 for r in processed_results if r.get("status") in ("failed", "cancelled"))
         cancelled_count = sum(1 for r in processed_results if r.get("status") == "cancelled")
 
@@ -542,6 +555,7 @@ class ExecutionEngine:
         return {
             "results": processed_results,
             "success_count": success_count,
+            "warning_count": warning_count,
             "failed_count": failed_count,
             "cancelled_count": cancelled_count,
             "asset_results": asset_results,
@@ -576,7 +590,11 @@ class ExecutionEngine:
                         f"Retry succeeded for {capability_name}({target}) "
                         f"on attempt {attempt + 1}"
                     )
-                return {"status": "success", "result": result, "attempts": attempt + 1}
+                return {
+                    "status": self._tool_display_status(result),
+                    "result": result,
+                    "attempts": attempt + 1,
+                }
             except Exception as e:
                 last_error = e
                 logger.warning(
@@ -899,15 +917,6 @@ class ExecutionEngine:
             return await self._ping_asset(parameters, user_id, project_id, db)
 
         # 整改管理类能力
-        elif capability_name == "create_remediation_ticket":
-            return await self._create_remediation_ticket(parameters, user_id, project_id, db)
-
-        elif capability_name == "list_remediation_tickets":
-            return await self._list_remediation_tickets(parameters, user_id, project_id, db)
-
-        elif capability_name == "update_ticket_status":
-            return await self._update_ticket_status(parameters, user_id, project_id, db)
-
         # 报告生成类能力
         elif capability_name == "generate_html_report":
             return await self._generate_html_report(parameters, user_id, project_id, db)
@@ -1323,7 +1332,7 @@ class ExecutionEngine:
         from app.mcp.gateway_client import MCPGatewayClient
 
         client = MCPGatewayClient()
-        result = await client.call("testssl_scan", {
+        result = await client.call_with_progress("testssl_scan", {
             "target": parameters["target"],
             "port": parameters.get("port", 443),
             **({"timeout": parameters["timeout"]} if "timeout" in parameters else {}),
@@ -1345,7 +1354,7 @@ class ExecutionEngine:
         if "timeout" in parameters:
             params["timeout"] = parameters["timeout"]
 
-        result = await client.call("nuclei_scan", params)
+        result = await client.call_with_progress("nuclei_scan", params)
         return self._gateway_payload(result, allow_tool_failed=True)
 
     async def _scan_weak_passwords(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
@@ -1353,7 +1362,7 @@ class ExecutionEngine:
         from app.mcp.gateway_client import MCPGatewayClient
 
         client = MCPGatewayClient()
-        result = await client.call("hydra_bruteforce", {
+        result = await client.call_with_progress("hydra_bruteforce", {
             "target": parameters["target"],
             "service": parameters.get("service", "ssh"),
             "port": parameters.get("port", 22),
@@ -1893,154 +1902,90 @@ class ExecutionEngine:
                 "packet_loss": data.get("packet_loss", 100),
             }
 
-    async def _create_remediation_ticket(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
-        """创建整改工单"""
-        from app.models.remediation import RemediationTicket, RemediationStatus
-        from app.models.finding import Finding
-        from sqlalchemy import select
-
-        finding_id = parameters.get("finding_id")
-        if not finding_id:
-            return {"message": "请指定发现 ID"}
-
-        result = await db.execute(
-            select(Finding).where(Finding.id == finding_id, Finding.project_id == project_id)
-        )
-        finding = result.scalar_one_or_none()
-        if not finding:
-            return {"message": "发现不存在或不属于当前项目"}
-
-        ticket = RemediationTicket(
-            finding_id=finding_id,
-            project_id=project_id,
-            assigned_by=user_id,
-            title=parameters.get("title", f"整改: {finding.clause_name or finding.clause_id}"),
-            description=parameters.get("description"),
-            priority=parameters.get("priority", "medium"),
-            status=RemediationStatus.OPEN,
-        )
-        db.add(ticket)
-        await db.flush()
-        await db.refresh(ticket)
-
-        return {
-            "message": f"整改工单已创建: {ticket.title}",
-            "ticket_id": ticket.id,
-            "status": ticket.status.value,
-            "priority": ticket.priority,
-        }
-
-    async def _list_remediation_tickets(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
-        """列出整改工单"""
-        from app.models.remediation import RemediationTicket
-        from sqlalchemy import select
-
-        query = select(RemediationTicket)
-
-        pid = parameters.get("project_id", project_id)
-        if pid:
-            query = query.where(RemediationTicket.project_id == pid)
-
-        status_filter = parameters.get("status")
-        if status_filter:
-            from app.models.remediation import RemediationStatus
-            try:
-                query = query.where(RemediationTicket.status == RemediationStatus(status_filter))
-            except ValueError:
-                pass
-
-        result = await db.execute(query.order_by(RemediationTicket.created_at.desc()).limit(50))
-        tickets = result.scalars().all()
-
-        return {
-            "message": f"共 {len(tickets)} 个整改工单",
-            "tickets": [
-                {
-                    "id": t.id,
-                    "title": t.title,
-                    "status": t.status.value,
-                    "priority": t.priority,
-                    "finding_id": t.finding_id,
-                    "created_at": t.created_at.isoformat() if t.created_at else None,
-                }
-                for t in tickets
-            ],
-        }
-
-    async def _update_ticket_status(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
-        """更新工单状态"""
-        from app.models.remediation import RemediationTicket, RemediationStatus
-        from sqlalchemy import select
-
-        ticket_id = parameters.get("ticket_id")
-        if not ticket_id:
-            return {"message": "请指定工单 ID"}
-
-        result = await db.execute(select(RemediationTicket).where(RemediationTicket.id == ticket_id))
-        ticket = result.scalar_one_or_none()
-        if not ticket:
-            return {"message": "工单不存在"}
-
-        new_status = parameters.get("status")
-        if not new_status:
-            return {"message": "请指定新状态"}
-
-        try:
-            ticket.status = RemediationStatus(new_status)
-        except ValueError:
-            return {"message": f"无效状态: {new_status}"}
-
-        if parameters.get("resolution_notes"):
-            ticket.resolution_notes = parameters["resolution_notes"]
-        if parameters.get("skip_reason"):
-            ticket.skip_reason = parameters["skip_reason"]
-
-        if new_status in ("resolved", "verified", "closed", "skipped"):
-            from datetime import datetime
-            ticket.resolved_at = datetime.utcnow()
-
-        await db.flush()
-
-        return {
-            "message": f"工单 #{ticket.id} 状态已更新为 {new_status}",
-            "ticket_id": ticket.id,
-            "status": new_status,
-        }
-
     async def _generate_html_report(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """生成 HTML 报告"""
-        from app.services.report_service import generate_html_report
+        from sqlalchemy import select
+        from app.models.assessment import Assessment, PhaseInstance, TaskInstance
+        from app.services.flow_engine import get_flow_engine
+        from app.services.report_service import create_report_artifact, ensure_report_generation_ready, get_latest_report_artifact, report_artifact_payload
 
         pid = parameters.get("project_id", project_id)
         if not pid:
             return {"message": "请指定项目 ID"}
 
+        task = None
         try:
-            html = await generate_html_report(db, pid)
+            if not await self._project_for_user_id(db, pid, user_id, "report:export"):
+                return {"message": "项目不存在或无权生成报告"}
+            assessment = (await db.execute(select(Assessment).where(
+                Assessment.project_id == pid
+            ).order_by(Assessment.created_at.desc()).limit(1))).scalar_one_or_none()
+            if not assessment:
+                return {"message": "当前项目尚未创建等保测评"}
+            phase = (await db.execute(select(PhaseInstance).where(
+                PhaseInstance.assessment_id == assessment.id,
+                PhaseInstance.phase_id == "report",
+            ))).scalar_one_or_none()
+            task = (await db.execute(select(TaskInstance).where(
+                TaskInstance.phase_id == phase.id,
+                TaskInstance.task_type == "html_report",
+            ))).scalar_one_or_none() if phase else None
+            latest = await get_latest_report_artifact(db, pid, assessment_id=assessment.id)
+            if task and task.status == "completed" and latest and latest.status == "current":
+                return {"message": f"正式报告 V{latest.version} 已存在", "artifact": report_artifact_payload(latest)}
+            if not phase or phase.status != "active" or not task or task.status != "todo":
+                return {"message": "请先完成整改与复测，并进入生成报告阶段"}
+            flow = get_flow_engine(db)
+            await ensure_report_generation_ready(db, pid, assessment.id)
+            await flow.start_task(task.id)
+            artifact = await create_report_artifact(
+                db,
+                project_id=pid,
+                assessment_id=assessment.id,
+                task_id=task.id,
+                generated_by=user_id,
+            )
+            await flow.complete_task(task.id, {
+                "status": "completed",
+                "format": "html",
+                "artifact": report_artifact_payload(artifact),
+                "summary": artifact.snapshot["summary"],
+            })
             return {
-                "message": f"HTML 报告已生成（{len(html.encode('utf-8'))} 字节）",
+                "message": f"正式 HTML 报告 V{artifact.version} 已生成",
                 "project_id": pid,
                 "format": "html",
-                "size_bytes": len(html.encode("utf-8")),
+                "size_bytes": artifact.html_size,
+                "artifact": report_artifact_payload(artifact),
             }
         except Exception as e:
+            await db.rollback()
+            failed_task = await db.get(TaskInstance, task.id) if task else None
+            if failed_task and failed_task.status == "in_progress":
+                failed_task.status = "todo"
+                failed_task.started_at = None
+                await db.commit()
             return {"message": f"报告生成失败: {str(e)}"}
 
     async def _generate_json_report(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
-        """生成 JSON 报告"""
-        from app.services.report_service import generate_json_report
+        """读取正式报告使用的 JSON 快照"""
+        from app.services.report_service import get_latest_report_artifact
 
         pid = parameters.get("project_id", project_id)
         if not pid:
             return {"message": "请指定项目 ID"}
 
         try:
-            report_data = await generate_json_report(db, pid)
+            if not await self._project_for_user_id(db, pid, user_id, "report:export"):
+                return {"message": "项目不存在或无权读取报告"}
+            artifact = await get_latest_report_artifact(db, pid)
+            if not artifact:
+                return {"message": "该项目尚未生成正式报告"}
             return {
-                "message": f"JSON 报告已生成",
+                "message": f"正式报告 V{artifact.version} 的 JSON 快照已读取",
                 "project_id": pid,
                 "format": "json",
-                "report": report_data,
+                "report": artifact.snapshot,
             }
         except Exception as e:
             return {"message": f"报告生成失败: {str(e)}"}
@@ -2184,10 +2129,10 @@ class ExecutionEngine:
 - 更新项目
 - 删除项目
 
-📝 **整改管理**
-- 创建整改工单
-- 列出工单
-- 更新工单状态
+📝 **整改与复测**
+- 在项目测评页查看问题
+- 提交改进文档并复测
+- 重新执行技术检测
 
 📄 **报告生成**
 - 生成 HTML 报告

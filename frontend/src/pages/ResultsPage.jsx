@@ -30,7 +30,7 @@ function ResultsPage() {
   const [scanTasks, setScanTasks] = useState([])
   const [project, setProject] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState('completed')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [selectedRowKeys, setSelectedRowKeys] = useState([])
   const [deleting, setDeleting] = useState(false)
 
@@ -230,7 +230,7 @@ function ResultsPage() {
               <div className="summary-value" style={{ color: '#52c41a' }}>{scanTasks.filter(t => t.status === 'completed').length}</div>
             </Card>
             <Card size="small" className="summary-card">
-              <div className="summary-label">风险发现</div>
+              <div className="summary-label">风险命中</div>
               <div className="summary-value" style={{ color: scanTasks.reduce((a, t) => a + t.high_severity_count, 0) > 0 ? '#ff4d4f' : '#52c41a' }}>
                 {scanTasks.reduce((a, t) => a + t.findings_count, 0)}
               </div>

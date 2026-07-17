@@ -38,7 +38,7 @@
     .lead { max-width:790px; color:#a9bfce; font-size:16px; line-height:1.9; }
     .signals { display:flex; flex-wrap:wrap; gap:8px; margin-top:27px; }
     .signals span { padding:7px 10px; color:#b7d9e5; border:1px solid var(--line); background:rgba(9,31,48,.62); font-size:11px; }
-    .flow { display:grid; grid-template-columns:repeat(5,1fr); max-width:1100px; margin:0 auto 58px; border-block:1px solid var(--line); }
+    .flow { display:grid; grid-template-columns:repeat(4,1fr); max-width:1100px; margin:0 auto 58px; border-block:1px solid var(--line); }
     .flow div { position:relative; padding:18px 14px; border-right:1px solid var(--line); }
     .flow div:last-child { border:0; }
     .flow b { display:block; color:var(--cyan); font:600 10px/1 ui-monospace,monospace; }
@@ -79,7 +79,7 @@
   <div class="progress" aria-hidden="true"></div>
   <div class="layout">
     <aside>
-      <div class="brand"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImdvbGRHcmFkIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6I0Q0QUYzNyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjUwJSIgc3R5bGU9InN0b3AtY29sb3I6I0M1QTU1QSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiNCODk0MUYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImdvbGRHcmFkQnJpZ2h0IiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6I0U4QzU0NyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjUwJSIgc3R5bGU9InN0b3AtY29sb3I6I0Q0QUYzNyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiNDNUE1NUEiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9InNoaWVsZEdyYWQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6IzFBM0E2QiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjUwJSIgc3R5bGU9InN0b3AtY29sb3I6IzBCMUQzQSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiMwNTBFMUYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImlubmVyQmx1ZSIgeDE9IjAlIiB5MT0iMCUiIHgyPSIwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojMEYyNDQ3Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3R5bGU9InN0b3AtY29sb3I6IzBCMUQzQSIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CgogIDwhLS0g5pyA5aSW5bGC6YeR6Imy5Y6a6L65IC0tPgogIDxjaXJjbGUgY3g9IjEwMCIgY3k9IjEwMCIgcj0iOTgiIGZpbGw9Im5vbmUiIHN0cm9rZT0idXJsKCNnb2xkR3JhZCkiIHN0cm9rZS13aWR0aD0iNCIvPgogIDwhLS0g5qyh5aSW5bGC57uG6YeR57q/IC0tPgogIDxjaXJjbGUgY3g9IjEwMCIgY3k9IjEwMCIgcj0iOTMiIGZpbGw9Im5vbmUiIHN0cm9rZT0idXJsKCNnb2xkR3JhZEJyaWdodCkiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjciLz4KICA8IS0tIOWGheWxgua3seiTneWhq+WFhe+8iOiuqSBMb2dvIOacieWOmuW6puaEn+eahOWFs+mUru+8iSAtLT4KICA8Y2lyY2xlIGN4PSIxMDAiIGN5PSIxMDAiIHI9IjkxIiBmaWxsPSJ1cmwoI2lubmVyQmx1ZSkiLz4KICA8IS0tIOWGheWciOmHkeiJsue7hue6v++8iOWinuWKoOWxguasoe+8iSAtLT4KICA8Y2lyY2xlIGN4PSIxMDAiIGN5PSIxMDAiIHI9Ijg0IiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjZ29sZEdyYWQpIiBzdHJva2Utd2lkdGg9IjEuMiIgb3BhY2l0eT0iMC42Ii8+CiAgPCEtLSDmnIDlhoXlsYLoo4XppbDph5Hnur8gLS0+CiAgPGNpcmNsZSBjeD0iMTAwIiBjeT0iMTAwIiByPSI4MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ1cmwoI2dvbGRHcmFkKSIgc3Ryb2tlLXdpZHRoPSIwLjgiIG9wYWNpdHk9IjAuNCIvPgoKICA8IS0tIOS4iuW8p+aWh+Wtl+i3r+W+hCAtLT4KICA8cGF0aCBpZD0idG9wQXJjIiBkPSJNIDM1LDEwMCBhIDY1LDY1IDAgMCwxIDEzMCwwIiBmaWxsPSJub25lIi8+CiAgPCEtLSDkuIvlvKfmloflrZfot6/lvoQgLS0+CiAgPHBhdGggaWQ9ImJvdHRvbUFyYyIgZD0iTSAxNjUsMTAwIGEgNjUsNjUgMCAwLDEgLTEzMCwwIiBmaWxsPSJub25lIi8+CgogIDwhLS0g5LiK5byn5paH5a2XIFZFUklTVVJFIC0tPgogIDx0ZXh0IGZpbGw9InVybCgjZ29sZEdyYWRCcmlnaHQpIiBmb250LWZhbWlseT0iR2VvcmdpYSwgJ1RpbWVzIE5ldyBSb21hbicsIHNlcmlmIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIiBsZXR0ZXItc3BhY2luZz0iMy41Ij4KICAgIDx0ZXh0UGF0aCBocmVmPSIjdG9wQXJjIiBzdGFydE9mZnNldD0iNTAlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5WRVJJU1VSRTwvdGV4dFBhdGg+CiAgPC90ZXh0PgogIDwhLS0g5LiL5byn5paH5a2XIElOVEVMTElHRU5DRSAtLT4KICA8dGV4dCBmaWxsPSJ1cmwoI2dvbGRHcmFkKSIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsICdUaW1lcyBOZXcgUm9tYW4nLCBzZXJpZiIgZm9udC1zaXplPSI5IiBmb250LXdlaWdodD0iNjAwIiBsZXR0ZXItc3BhY2luZz0iMi41Ij4KICAgIDx0ZXh0UGF0aCBocmVmPSIjYm90dG9tQXJjIiBzdGFydE9mZnNldD0iNTAlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5JTlRFTExJR0VOQ0U8L3RleHRQYXRoPgogIDwvdGV4dD4KCiAgPCEtLSDnm77niYwgLSDlrp7lv4PloavlhYXvvIzmnInljprluqbmhJ8gLS0+CiAgPHBhdGggZD0iTTEwMCw1MiBMMTMyLDY4IEwxMzIsMTA4IEMxMzIsMTMwIDExNiwxNDYgMTAwLDE1NCBDODQsMTQ2IDY4LDEzMCA2OCwxMDggTDY4LDY4IFoiIGZpbGw9InVybCgjc2hpZWxkR3JhZCkiIHN0cm9rZT0idXJsKCNnb2xkR3JhZEJyaWdodCkiIHN0cm9rZS13aWR0aD0iMi41Ii8+CiAgPCEtLSDnm77niYzlhoXovrnpq5jlhYnvvIjlop7liqDnq4vkvZPmhJ/vvIkgLS0+CiAgPHBhdGggZD0iTTEwMCw1OCBMMTI2LDcyIEwxMjYsMTA2IEMxMjYsMTI0IDExMywxMzggMTAwLDE0NSBDODcsMTM4IDc0LDEyNCA3NCwxMDYgTDc0LDcyIFoiIGZpbGw9Im5vbmUiIHN0cm9rZT0idXJsKCNnb2xkR3JhZCkiIHN0cm9rZS13aWR0aD0iMC44IiBvcGFjaXR5PSIwLjUiLz4KICA8IS0tIOebvueJjOmrmOWFie+8iOW3puS4iu+8iSAtLT4KICA8cGF0aCBkPSJNMTAwLDU2IEwxMjgsNzAgTDEyOCwxMDAiIGZpbGw9Im5vbmUiIHN0cm9rZT0idXJsKCNnb2xkR3JhZEJyaWdodCkiIHN0cm9rZS13aWR0aD0iMSIgb3BhY2l0eT0iMC40Ii8+CgogIDwhLS0g5a+55Yu+IC0g5Yqg57KX77yM5pu06YaS55uuIC0tPgogIDxwb2x5bGluZSBwb2ludHM9Ijg0LDEwMCA5NSwxMTMgMTIwLDgyIiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjZ29sZEdyYWRCcmlnaHQpIiBzdHJva2Utd2lkdGg9IjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDwhLS0g5a+55Yu+6auY5YWJIC0tPgogIDxwb2x5bGluZSBwb2ludHM9Ijg0LDEwMCA5NSwxMTMgMTIwLDgyIiBmaWxsPSJub25lIiBzdHJva2U9IiNFOEM1NDciIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBvcGFjaXR5PSIwLjYiLz4KPC9zdmc+" alt=""><div><strong>CertiProof</strong><small>PRODUCT DESIGN / v3.4</small></div></div>
+      <div class="brand"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMDAgMjAwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImdvbGRHcmFkIiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6I0Q0QUYzNyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjUwJSIgc3R5bGU9InN0b3AtY29sb3I6I0M1QTU1QSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiNCODk0MUYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImdvbGRHcmFkQnJpZ2h0IiB4MT0iMCUiIHkxPSIwJSIgeDI9IjEwMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6I0U4QzU0NyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjUwJSIgc3R5bGU9InN0b3AtY29sb3I6I0Q0QUYzNyIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiNDNUE1NUEiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9InNoaWVsZEdyYWQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMCUiIHkyPSIxMDAlIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3R5bGU9InN0b3AtY29sb3I6IzFBM0E2QiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjUwJSIgc3R5bGU9InN0b3AtY29sb3I6IzBCMUQzQSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0eWxlPSJzdG9wLWNvbG9yOiMwNTBFMUYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImlubmVyQmx1ZSIgeDE9IjAlIiB5MT0iMCUiIHgyPSIwJSIgeTI9IjEwMCUiPgogICAgICA8c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojMEYyNDQ3Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3R5bGU9InN0b3AtY29sb3I6IzBCMUQzQSIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CgogIDwhLS0g5pyA5aSW5bGC6YeR6Imy5Y6a6L65IC0tPgogIDxjaXJjbGUgY3g9IjEwMCIgY3k9IjEwMCIgcj0iOTgiIGZpbGw9Im5vbmUiIHN0cm9rZT0idXJsKCNnb2xkR3JhZCkiIHN0cm9rZS13aWR0aD0iNCIvPgogIDwhLS0g5qyh5aSW5bGC57uG6YeR57q/IC0tPgogIDxjaXJjbGUgY3g9IjEwMCIgY3k9IjEwMCIgcj0iOTMiIGZpbGw9Im5vbmUiIHN0cm9rZT0idXJsKCNnb2xkR3JhZEJyaWdodCkiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjciLz4KICA8IS0tIOWGheWxgua3seiTneWhq+WFhe+8iOiuqSBMb2dvIOacieWOmuW6puaEn+eahOWFs+mUru+8iSAtLT4KICA8Y2lyY2xlIGN4PSIxMDAiIGN5PSIxMDAiIHI9IjkxIiBmaWxsPSJ1cmwoI2lubmVyQmx1ZSkiLz4KICA8IS0tIOWGheWciOmHkeiJsue7hue6v++8iOWinuWKoOWxguasoe+8iSAtLT4KICA8Y2lyY2xlIGN4PSIxMDAiIGN5PSIxMDAiIHI9Ijg0IiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjZ29sZEdyYWQpIiBzdHJva2Utd2lkdGg9IjEuMiIgb3BhY2l0eT0iMC42Ii8+CiAgPCEtLSDmnIDlhoXlsYLoo4XppbDph5Hnur8gLS0+CiAgPGNpcmNsZSBjeD0iMTAwIiBjeT0iMTAwIiByPSI4MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ1cmwoI2dvbGRHcmFkKSIgc3Ryb2tlLXdpZHRoPSIwLjgiIG9wYWNpdHk9IjAuNCIvPgoKICA8IS0tIOS4iuW8p+aWh+Wtl+i3r+W+hCAtLT4KICA8cGF0aCBpZD0idG9wQXJjIiBkPSJNIDM1LDEwMCBhIDY1LDY1IDAgMCwxIDEzMCwwIiBmaWxsPSJub25lIi8+CiAgPCEtLSDkuIvlvKfmloflrZfot6/lvoQgLS0+CiAgPHBhdGggaWQ9ImJvdHRvbUFyYyIgZD0iTSAxNjUsMTAwIGEgNjUsNjUgMCAwLDEgLTEzMCwwIiBmaWxsPSJub25lIi8+CgogIDwhLS0g5LiK5byn5paH5a2XIFZFUklTVVJFIC0tPgogIDx0ZXh0IGZpbGw9InVybCgjZ29sZEdyYWRCcmlnaHQpIiBmb250LWZhbWlseT0iR2VvcmdpYSwgJ1RpbWVzIE5ldyBSb21hbicsIHNlcmlmIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIiBsZXR0ZXItc3BhY2luZz0iMy41Ij4KICAgIDx0ZXh0UGF0aCBocmVmPSIjdG9wQXJjIiBzdGFydE9mZnNldD0iNTAlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5WRVJJU1VSRTwvdGV4dFBhdGg+CiAgPC90ZXh0PgogIDwhLS0g5LiL5byn5paH5a2XIElOVEVMTElHRU5DRSAtLT4KICA8dGV4dCBmaWxsPSJ1cmwoI2dvbGRHcmFkKSIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsICdUaW1lcyBOZXcgUm9tYW4nLCBzZXJpZiIgZm9udC1zaXplPSI5IiBmb250LXdlaWdodD0iNjAwIiBsZXR0ZXItc3BhY2luZz0iMi41Ij4KICAgIDx0ZXh0UGF0aCBocmVmPSIjYm90dG9tQXJjIiBzdGFydE9mZnNldD0iNTAlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5JTlRFTExJR0VOQ0U8L3RleHRQYXRoPgogIDwvdGV4dD4KCiAgPCEtLSDnm77niYwgLSDlrp7lv4PloavlhYXvvIzmnInljprluqbmhJ8gLS0+CiAgPHBhdGggZD0iTTEwMCw1MiBMMTMyLDY4IEwxMzIsMTA4IEMxMzIsMTMwIDExNiwxNDYgMTAwLDE1NCBDODQsMTQ2IDY4LDEzMCA2OCwxMDggTDY4LDY4IFoiIGZpbGw9InVybCgjc2hpZWxkR3JhZCkiIHN0cm9rZT0idXJsKCNnb2xkR3JhZEJyaWdodCkiIHN0cm9rZS13aWR0aD0iMi41Ii8+CiAgPCEtLSDnm77niYzlhoXovrnpq5jlhYnvvIjlop7liqDnq4vkvZPmhJ/vvIkgLS0+CiAgPHBhdGggZD0iTTEwMCw1OCBMMTI2LDcyIEwxMjYsMTA2IEMxMjYsMTI0IDExMywxMzggMTAwLDE0NSBDODcsMTM4IDc0LDEyNCA3NCwxMDYgTDc0LDcyIFoiIGZpbGw9Im5vbmUiIHN0cm9rZT0idXJsKCNnb2xkR3JhZCkiIHN0cm9rZS13aWR0aD0iMC44IiBvcGFjaXR5PSIwLjUiLz4KICA8IS0tIOebvueJjOmrmOWFie+8iOW3puS4iu+8iSAtLT4KICA8cGF0aCBkPSJNMTAwLDU2IEwxMjgsNzAgTDEyOCwxMDAiIGZpbGw9Im5vbmUiIHN0cm9rZT0idXJsKCNnb2xkR3JhZEJyaWdodCkiIHN0cm9rZS13aWR0aD0iMSIgb3BhY2l0eT0iMC40Ii8+CgogIDwhLS0g5a+55Yu+IC0g5Yqg57KX77yM5pu06YaS55uuIC0tPgogIDxwb2x5bGluZSBwb2ludHM9Ijg0LDEwMCA5NSwxMTMgMTIwLDgyIiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjZ29sZEdyYWRCcmlnaHQpIiBzdHJva2Utd2lkdGg9IjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDwhLS0g5a+55Yu+6auY5YWJIC0tPgogIDxwb2x5bGluZSBwb2ludHM9Ijg0LDEwMCA5NSwxMTMgMTIwLDgyIiBmaWxsPSJub25lIiBzdHJva2U9IiNFOEM1NDciIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBvcGFjaXR5PSIwLjYiLz4KPC9zdmc+" alt=""><div><strong>CertiProof</strong><small>PRODUCT DESIGN / v4.9</small></div></div>
       <div class="toc-label">文档目录</div>
       <nav><a href="#section-1"><span>01</span>一、项目概括</a>
 <a class="sub" href="#section-2"><span>·</span>1.1 目标用户</a>
@@ -96,7 +96,7 @@
 <a class="sub" href="#section-13"><span>·</span>4.2 组织态势 Dashboard</a>
 <a class="sub" href="#section-14"><span>·</span>4.3 项目与资产工作台</a>
 <a class="sub" href="#section-15"><span>·</span>4.4 项目执行页</a>
-<a class="sub" href="#section-16"><span>·</span>4.5 5 阶段等保自查流程</a>
+<a class="sub" href="#section-16"><span>·</span>4.5 4 阶段等保自查流程</a>
 <a class="sub" href="#section-17"><span>·</span>4.6 文档合规检查</a>
 <a class="sub" href="#section-18"><span>·</span>4.7 技术检测与工具执行</a>
 <a class="sub" href="#section-19"><span>·</span>4.8 证据、Finding 与整改复测</a>
@@ -125,20 +125,21 @@
 <a href="#section-42"><span>07</span>七、体验原则</a>
 <a href="#section-43"><span>08</span>八、当前仍需关注的问题</a>
 <a href="#section-44"><span>09</span>九、验收口径</a>
-<a href="#section-45"><span>10</span>十、架构记忆</a>
-<a class="sub" href="#section-46"><span>·</span>10.1 维护规则</a>
-<a class="sub" href="#section-47"><span>·</span>10.2 当前关键决策</a></nav>
-      <div class="aside-meta">最后更新 2026-07-15<br>CertiProof Team</div>
+<a class="sub" href="#section-45"><span>·</span>9.1 最近一次综合验收</a>
+<a href="#section-46"><span>10</span>十、架构记忆</a>
+<a class="sub" href="#section-47"><span>·</span>10.1 维护规则</a>
+<a class="sub" href="#section-48"><span>·</span>10.2 当前关键决策</a></nav>
+      <div class="aside-meta">最后更新 2026-07-17<br>CertiProof Team</div>
     </aside>
     <main>
       <div class="toolbar"><span class="version">CERTIPROOF / PRODUCT BLUEPRINT</span><button type="button" onclick="window.print()">打印文档</button></div>
       <header class="hero">
         <div class="eyebrow">// ENTERPRISE COMPLIANCE SELF-ASSESSMENT</div>
         <h1>CertiProof<br>产品设计文档</h1>
-        <p class="lead">面向被测评企业的等保合规自查平台，从资产与文档检查出发，贯通差距发现、整改跟踪、复测验证和 HTML 报告。</p>
+        <p class="lead">面向被测评企业的等保合规自查平台，从资产与文档检查出发，贯通差距发现、直接整改复测和 HTML 报告。</p>
         <div class="signals"><span>企业自查</span><span>自动化检测</span><span>文档合规</span><span>整改闭环</span><span>HTML 报告</span></div>
       </header>
-      <section class="flow" aria-label="五阶段测评流程"><div><b>01</b><span>差距分析</span></div><div><b>02</b><span>现场测评</span></div><div><b>03</b><span>整改加固</span></div><div><b>04</b><span>复测验证</span></div><div><b>05</b><span>生成报告</span></div></section>
+      <section class="flow" aria-label="四阶段测评流程"><div><b>01</b><span>差距分析</span></div><div><b>02</b><span>现场测评</span></div><div><b>03</b><span>整改与复测</span></div><div><b>04</b><span>生成报告</span></div></section>
       <article><blockquote>本文档是 CertiProof 当前产品设计与系统架构的唯一权威说明，覆盖定位、模块、数据边界、逐步流程、异常处理和验收口径。</blockquote>
 <h2 id="section-1">一、项目概括<a href="#section-1" aria-label="链接到本节">#</a></h2>
 <p>CertiProof 是面向被测评企业的等保合规自查平台，目标不是替代测评机构，而是帮助企业在正式测评前回答四个问题：</p>
@@ -148,7 +149,7 @@
 <div class="table-wrap"><table><thead><tr><th>用户</th><th>主要诉求</th></tr></thead><tbody><tr><td>企业安全负责人</td><td>快速掌握组织整体合规态势、风险分布、项目进度和整改状态</td></tr><tr><td>项目执行人员</td><td>管理项目资产、上传制度文档、执行安全工具、跟踪复测结果</td></tr><tr><td>运维/系统负责人</td><td>根据发现项定位责任资产、提交整改内容、配合复测</td></tr><tr><td>管理者/审阅者</td><td>查看报告、项目进度、角色权限和审计结果</td></tr></tbody></table></div>
 <h3 id="section-3">1.2 产品边界<a href="#section-3" aria-label="链接到本节">#</a></h3>
 <p>CertiProof 聚焦企业自查和整改闭环：</p>
-<ul><li>支持自动化文档检查、技术检测、差距发现、整改跟踪、复测验证、HTML 报告。</li><li>不做测评机构的人员访谈、人工深度测评流程管理。</li><li>PDF 报告不是 MVP 主格式，当前报告中心以 HTML 报告为核心。</li><li>自动化结论以“标准库 + 证据提取 + 模型判证 + 规则引擎汇总”为主，不要求人工确认后才生成差距结果。</li></ul>
+<ul><li>支持自动化文档检查、技术检测、差距发现、直接整改复测和 HTML 报告。</li><li>不做测评机构的人员访谈、人工深度测评流程管理。</li><li>PDF 报告不是 MVP 主格式，当前报告中心以 HTML 报告为核心。</li><li>自动化结论以“标准库 + 证据提取 + 模型判证 + 规则引擎汇总”为主，不要求人工确认后才生成差距结果。</li></ul>
 <h2 id="section-4">二、项目结构<a href="#section-4" aria-label="链接到本节">#</a></h2>
 <pre><code class="language-text">CertiProof/
 ├── frontend/               # React 前端应用
@@ -176,7 +177,7 @@
 <h3 id="section-5">2.1 前端页面结构<a href="#section-5" aria-label="链接到本节">#</a></h3>
 <div class="table-wrap"><table><thead><tr><th>路由</th><th>页面</th><th>产品作用</th></tr></thead><tbody><tr><td><code>/login</code>、<code>/register</code></td><td>登录/注册</td><td>进入组织工作区，建立用户和组织身份</td></tr><tr><td><code>/dashboard</code></td><td>组织态势 Dashboard</td><td>查看全局项目进度、风险队列、资产暴露面、工具遥测、权限治理入口</td></tr><tr><td><code>/projects</code></td><td>项目与资产工作台</td><td>管理项目、资产矩阵、归档/恢复、演示项目和资产授权范围</td></tr><tr><td><code>/projects/:projectId</code></td><td>项目执行页</td><td>承载 AI 对话、工具执行、等保测评、文档上传、整改复测</td></tr><tr><td><code>/projects/:projectId/results</code></td><td>检测结果</td><td>查看项目扫描任务、检测结果和详情</td></tr><tr><td><code>/reports</code></td><td>报告中心</td><td>生成、预览和下载 HTML 报告</td></tr><tr><td><code>/settings/organization</code></td><td>组织与角色权限</td><td>管理成员、角色和权限</td></tr><tr><td><code>/settings/models</code></td><td>模型配置</td><td>配置 AI 模型和供应商</td></tr></tbody></table></div>
 <h3 id="section-6">2.2 后端能力结构<a href="#section-6" aria-label="链接到本节">#</a></h3>
-<div class="table-wrap"><table><thead><tr><th>层级</th><th>主要模块</th><th>产品职责</th></tr></thead><tbody><tr><td>API 层</td><td>auth、projects、assets、chat、assessments、remediation、reports、dashboard、organizations</td><td>对前端提供组织、项目、测评、文档分析、检测、整改、报告等接口</td></tr><tr><td>编排层</td><td>Orchestrator、AI Engine、Execution Engine、Context Manager</td><td>理解用户指令，生成执行计划，调度工具，恢复任务和组织结果</td></tr><tr><td>业务层</td><td>Flow Engine、Document Pipeline、Document Control Engine、Evidence、Remediation、Report、Change Detection</td><td>支撑 5 阶段测评、文档合规、证据整改、复测、报告和变更提示</td></tr><tr><td>数据层</td><td>Project、Asset、Assessment、Finding、Evidence、RemediationTicket、ScanTask、Organization、Role、Archive</td><td>持久化项目、资产、流程、结果、权限和归档信息</td></tr><tr><td>工具层</td><td>MCP Gateway、security/web/db/network/windows/ssh/ocr servers</td><td>执行端口、漏洞、Web、数据库、弱口令、基线、OCR 等检测</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>层级</th><th>主要模块</th><th>产品职责</th></tr></thead><tbody><tr><td>API 层</td><td>auth、projects、assets、chat、assessments、verification、reports、dashboard、organizations</td><td>对前端提供组织、项目、测评、文档分析、检测、复测、报告等接口</td></tr><tr><td>编排层</td><td>Orchestrator、AI Engine、Execution Engine、Context Manager</td><td>理解用户指令，生成执行计划，调度工具，恢复任务和组织结果</td></tr><tr><td>业务层</td><td>Flow Engine、Document Pipeline、Document Control Engine、Evidence、Verification、Report、Change Detection</td><td>支撑 4 阶段测评、文档合规、直接复测、报告和变更提示</td></tr><tr><td>数据层</td><td>Project、Asset、Assessment、Finding、Evidence、VerificationRun/Item、FindingEvent、ScanTask、Organization、Role、Archive</td><td>持久化项目、资产、流程、结果、复测、权限和归档信息</td></tr><tr><td>工具层</td><td>MCP Gateway、security/web/db/network/windows/ssh/ocr servers</td><td>执行端口、漏洞、Web、数据库、弱口令、基线、OCR 等检测</td></tr></tbody></table></div>
 <h3 id="section-7">2.3 运行架构与调用边界<a href="#section-7" aria-label="链接到本节">#</a></h3>
 <div class="diagram-shell"><pre class="mermaid">flowchart TB
   U[&quot;用户 / Browser&quot;] --&gt; FE[&quot;React 前端&quot;]
@@ -187,16 +188,17 @@
     AUTH[&quot;Auth / RBAC&quot;]
     FLOW[&quot;Flow Engine&quot;]
     ORCH[&quot;Orchestrator / AI Engine&quot;]
-    DOMAIN[&quot;文档、证据、整改、报告、变更、归档&quot;]
+    DOMAIN[&quot;文档、证据、复测、报告、变更、归档&quot;]
   end
   API --&gt; AUTH
   API --&gt; FLOW
   API --&gt; ORCH
   API --&gt; DOMAIN
 
-  FLOW --&gt; WORKER[&quot;Worker / Execution Engine&quot;]
-  ORCH --&gt; WORKER
-  DOMAIN --&gt; WORKER
+  FLOW --&gt; QUEUES[&quot;五类持久任务队列&quot;]
+  ORCH --&gt; QUEUES
+  DOMAIN --&gt; QUEUES
+  QUEUES --&gt; WORKER[&quot;文档 / 测评技术 / 交互 / 复测 / 维护 Worker&quot;]
   WORKER --&gt;|&quot;统一工具契约&quot;| GW[&quot;MCP Gateway&quot;]
 
   subgraph TOOLS[&quot;隔离工具服务&quot;]
@@ -217,10 +219,10 @@
 <p>边界规则：</p>
 <ul><li>API 负责授权和创建持久化意图，不在请求生命周期内等待长扫描完成。</li><li>Worker 负责长任务执行；任务状态、进度和结果必须写入数据库，前端内存不是事实源。</li><li>MCP Gateway 只负责工具路由、健康和统一调用，不负责项目权限或业务结论。</li><li>Tool Server 返回真实工具结果和错误事实，不直接决定等保合规结论。</li><li>LLM 可以理解指令和证据，但目标范围、权限、检查标准和最终规则结论由确定性代码约束。</li></ul>
 <p>Flow Engine 不并入 Orchestrator 或 AI Engine。三者协作但所有权不同：</p>
-<div class="table-wrap"><table><thead><tr><th>模块</th><th>权威职责</th><th>不能负责</th></tr></thead><tbody><tr><td>Flow Engine</td><td>五阶段、阶段依赖、任务状态机、进度、重置、事件和审计事实</td><td>自然语言理解、自由生成流程状态</td></tr><tr><td>Orchestrator</td><td>接收入口请求、组合上下文、编排 Skill/能力、聚合异步结果</td><td>绕过 Flow Engine 直接改测评状态</td></tr><tr><td>AI Engine</td><td>把自然语言转换为受约束的结构化计划和参数</td><td>决定权限、资产范围、最终合规结论</td></tr><tr><td>Execution Engine / Worker</td><td>领取持久任务，执行工具或文档流水线并回写结果</td><td>定义五阶段业务规则</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>模块</th><th>权威职责</th><th>不能负责</th></tr></thead><tbody><tr><td>Flow Engine</td><td>四阶段、阶段依赖、任务状态机、进度、重置、事件和审计事实</td><td>自然语言理解、自由生成流程状态</td></tr><tr><td>Orchestrator</td><td>接收入口请求、组合上下文、编排 Skill/能力、聚合异步结果</td><td>绕过 Flow Engine 直接改测评状态</td></tr><tr><td>AI Engine</td><td>把自然语言转换为受约束的结构化计划和参数</td><td>决定权限、资产范围、最终合规结论</td></tr><tr><td>Execution Engine / Worker</td><td>领取持久任务，执行工具或文档流水线并回写结果</td><td>定义四阶段业务规则</td></tr></tbody></table></div>
 <p>集成方式是“Orchestrator 调用 Flow Engine 的命令，Flow Engine 把需执行任务交给 Worker，执行结果再由 Flow Engine 推进状态”。保持独立可以让暂停、重启、重置和审计不依赖 LLM 输出，并避免对话层故障破坏测评事实。</p>
 <h3 id="section-8">2.4 数据与存储职责<a href="#section-8" aria-label="链接到本节">#</a></h3>
-<div class="table-wrap"><table><thead><tr><th>存储</th><th>保存内容</th><th>生命周期</th></tr></thead><tbody><tr><td>PostgreSQL</td><td>用户、组织、角色、项目、资产、测评、任务、Finding、证据、整改、快照、归档、报告元数据及文档内容块</td><td>业务事实源，按权限和删除规则持久化</td></tr><tr><td>Redis</td><td>短期缓存、队列协调和临时状态</td><td>可重建，不作为最终结果唯一来源</td></tr><tr><td>文件存储</td><td>上传原文、证据附件和需保留的解析附件；HTML 报告按需生成</td><td>跟随项目、测评和文件删除策略</td></tr><tr><td>pgvector</td><td>当前有效文档内容块的 1024 维语义向量和 HNSW 索引</td><td>嵌入、精确/向量混合召回和替换清理均为 <code>implemented</code>；可由内容块重建</td></tr><tr><td>Apache AGE 标准图谱</td><td>标准、文档类型、检查项、证据要求、判断规则和整改建议</td><td>引擎、版本记录和 10 类/80 必检点入图 <code>implemented</code>；全局保护、版本化、项目清理不可删除</td></tr><tr><td>Apache AGE 证据图谱</td><td>文件、内容块与检查项的支持、部分支持或矛盾关系</td><td>文档流水线自动同步、文件替换和项目/组织清理均为 <code>implemented</code></td></tr><tr><td>日志</td><td>服务健康、任务链路、工具错误和审计事件</td><td>脱敏并按运维保留期轮转</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>存储</th><th>保存内容</th><th>生命周期</th></tr></thead><tbody><tr><td>PostgreSQL</td><td>用户、组织、角色、项目、资产、测评、任务、Finding、证据、复测、快照、归档、报告元数据及文档内容块</td><td>业务事实源，按权限和删除规则持久化</td></tr><tr><td>Redis</td><td>短期缓存、队列协调和临时状态</td><td>可重建，不作为最终结果唯一来源</td></tr><tr><td>文件存储</td><td>上传原文、证据附件、需保留的解析附件和版本化 HTML 报告</td><td>报告与 JSON 快照、哈希和版本元数据关联；跟随项目删除策略清理</td></tr><tr><td>pgvector</td><td>当前有效文档内容块的 1024 维语义向量和 HNSW 索引</td><td>嵌入、精确/向量混合召回和替换清理均为 <code>implemented</code>；可由内容块重建</td></tr><tr><td>Apache AGE 标准图谱</td><td>标准、文档类型、检查项、证据要求、判断规则和整改建议</td><td>引擎、版本记录和 10 类/80 必检点入图 <code>implemented</code>；全局保护、版本化、项目清理不可删除</td></tr><tr><td>Apache AGE 证据图谱</td><td>文件、内容块与检查项的支持、部分支持或矛盾关系</td><td>文档流水线自动同步、文件替换和项目/组织清理均为 <code>implemented</code></td></tr><tr><td>日志</td><td>服务健康、任务链路、工具错误和审计事件</td><td>脱敏并按运维保留期轮转</td></tr></tbody></table></div>
 <p>Apache AGE 是 PostgreSQL 的属性图扩展，也就是本系统实际使用的图谱引擎，不是前端图谱组件。它用节点和关系表达“标准版本 → 文档类别 → 检查项 → 证据要求 → 判断规则 → 整改建议”以及“项目文件 → 内容块 → 支持/矛盾检查项”。选择 AGE 是为了与业务表、pgvector、事务、权限、备份和高可用共用 PostgreSQL，同时使用 Apache License 2.0，避免额外部署和授权商业图数据库。关系事实放 AGE，敏感原文和业务状态仍留在 PostgreSQL，语义相似度仍由 pgvector 负责。</p>
 <p>核心所有权：Project 是业务隔离边界，Organization 是权限隔离边界，Assessment 是测评状态边界，ScanTask/DocumentRun 是异步执行边界，Finding 是整改闭环起点，Evidence 是所有结论的追溯依据。</p>
 <div class="diagram-shell"><pre class="mermaid">flowchart LR
@@ -240,7 +242,7 @@
   RESET --&gt; OBJECT
   RESET -.-&gt;|&quot;保护，不删除&quot;| STANDARD</pre></div>
 <h3 id="section-9">2.5 容器部署与可复现构建<a href="#section-9" aria-label="链接到本节">#</a></h3>
-<ul><li>Git 仓库保存完整源码、锁文件、Dockerfile、Compose 编排、迁移和标准库；不依赖本机生成且被忽略的 <code>frontend/dist</code>。</li><li>前端镜像采用多阶段构建：Node 20 容器执行 <code>npm ci</code> 和 Vite 构建，再把静态产物复制到轻量 Python 静态服务镜像。</li><li>全新部署先由 <code>.env.example</code> 创建根目录 <code>.env</code>，并必须替换数据库密码和至少 32 位的 <code>SECRET_KEY</code>。</li><li><code>docker compose up -d --build</code> 是标准启动入口；<code>migrate</code> 服务先完成数据库迁移、pgvector/Apache AGE 初始化和标准图谱装载，业务服务再启动。</li><li>PostgreSQL、Redis、上传材料、OCR 模型和向量模型分别使用持久卷；普通 <code>down</code> 不删除数据，只有明确清库时才使用 <code>down -v</code>。</li><li>模型权重不进入 Git。向量模型和 OCR/视觉模型首次使用时从模型源下载到持久卷，后续启动复用缓存。</li><li>可复现构建仍依赖部署环境能够访问 Docker 镜像源、npm/Python 软件源和首次模型下载源；这些外部网络失败必须与源码构建失败区分显示。</li></ul>
+<ul><li>Git 仓库保存完整源码、锁文件、Dockerfile、Compose 编排、迁移和标准库；不依赖本机生成且被忽略的 <code>frontend/dist</code>。</li><li>前端镜像采用多阶段构建：Node 20 容器执行 <code>npm ci</code> 和 Vite 构建，再把静态产物复制到轻量 Python 静态服务镜像。</li><li>全新部署先由 <code>.env.example</code> 创建根目录 <code>.env</code>，并必须替换数据库密码和至少 32 位的 <code>SECRET_KEY</code>。</li><li><code>docker compose up -d --build</code> 是标准启动入口；<code>migrate</code> 服务先完成数据库迁移、pgvector/Apache AGE 初始化和标准图谱装载，业务服务再启动。</li><li>PostgreSQL、Redis、上传材料、OCR 模型和向量模型分别使用持久卷；普通 <code>down</code> 不删除数据，只有明确清库时才使用 <code>down -v</code>。</li><li>模型权重不进入 Git。向量模型和 OCR/视觉模型首次使用时从模型源下载到持久卷，后续启动复用缓存。</li><li>可复现构建仍依赖部署环境能够访问 Docker 镜像源、npm/Python 软件源和首次模型下载源；这些外部网络失败必须与源码构建失败区分显示。</li><li><code>acceptance</code> Compose profile 提供隔离的受控 SSH/HTTP/HTTPS 靶机，用真实端口、认证、协议和漏洞工具结果验收完整流程；它不属于生产服务，也不替代已授权公网抽样。</li></ul>
 <div class="diagram-shell"><pre class="mermaid">flowchart LR
   CLONE[&quot;Git clone：源码与锁文件&quot;] --&gt; ENV[&quot;由 .env.example 创建 .env&quot;]
   ENV --&gt; BUILD[&quot;Docker Compose build&quot;]
@@ -252,15 +254,15 @@
   FEIMG --&gt; READY[&quot;Web / API 健康检查&quot;]
   LAZY --&gt; READY</pre></div>
 <h2 id="section-10">三、信息架构<a href="#section-10" aria-label="链接到本节">#</a></h2>
-<p>产品主线按“组织 → 项目 → 资产/文档/检测 → 发现项 → 整改 → 复测 → 报告”组织。</p>
+<p>产品主线按“组织 → 项目 → 资产/文档/检测 → Finding → 直接整改与复测 → 报告”组织。</p>
 <pre><code class="language-text">组织
   ├── Dashboard：整体态势、项目矩阵、风险队列、工具遥测、权限概览
   ├── 项目
   │   ├── 资产：IP、域名、云资源、授权范围、服务暴露
-  │   ├── 等保自查：5 阶段流程
+  │   ├── 等保自查：4 阶段流程
   │   ├── AI 对话：自然语言、快捷按钮、/ 命令
   │   ├── 工具结果：单资产/多资产聚合结果
-  │   ├── 证据与整改：Finding、整改工单、跳过、复测
+  │   ├── 整改与复测：Finding、改进文档、技术复测、逐项结果
   │   └── 报告：HTML 报告
   ├── 资产矩阵：跨项目资产视图
   ├── 报告中心：项目报告列表
@@ -268,35 +270,34 @@
 <h2 id="section-11">四、核心模块<a href="#section-11" aria-label="链接到本节">#</a></h2>
 <h3 id="section-12">4.1 登录、组织与权限<a href="#section-12" aria-label="链接到本节">#</a></h3>
 <p>产品目标：</p>
-<ul><li>支持多组织、多成员协作。</li><li>通过角色权限控制项目、资产、扫描、整改、报告和组织设置能力。</li><li>在 Dashboard 和组织设置页展示当前角色拥有的权限范围，避免用户不知道“能做什么”。</li></ul>
+<ul><li>支持多组织、多成员协作。</li><li>通过角色权限控制项目、资产、扫描、复测、报告和组织设置能力。</li><li>在 Dashboard 和组织设置页展示当前角色拥有的权限范围，避免用户不知道“能做什么”。</li></ul>
 <p>核心功能：</p>
 <ul><li>登录、注册、Token 认证。</li><li>组织成员管理。</li><li>角色创建、权限赋予、成员角色变更。</li><li>项目访问和操作权限校验。</li><li>关键操作保留审计记录。</li></ul>
 <h3 id="section-13">4.2 组织态势 Dashboard<a href="#section-13" aria-label="链接到本节">#</a></h3>
 <p>产品目标：</p>
 <ul><li>作为用户进入系统后的指挥台。</li><li>展示“项目整体进度、风险处置压力、资产暴露面、工具健康度、权限治理状态”。</li><li>不承载对话指令，避免与项目执行页重复。</li></ul>
 <p>核心功能：</p>
-<ul><li>项目测评进度矩阵：按项目展示 5 阶段进度、问题数量、整改状态和下一步动作。</li><li>资产暴露面拓扑：以组织、项目、资产、服务为节点展示暴露关系，支持点击资产查看右侧详情。</li><li>风险处置队列：按状态筛选待确认、处理中、已闭环风险。</li><li>工具遥测：展示安全工具状态、可用性、最近执行情况。</li><li>角色与权限治理：展示组织成员、角色和权限数量级，跳转到权限配置页。</li></ul>
+<ul><li>项目测评进度矩阵：按项目展示 4 阶段进度、问题数量、复测状态和下一步动作。</li><li>资产暴露面拓扑：以组织、项目、资产、服务为节点展示暴露关系，支持点击资产查看右侧详情。</li><li>风险处置队列：按状态筛选待确认、处理中、已闭环风险。</li><li>工具遥测：展示安全工具状态、可用性、最近执行情况。</li><li>角色与权限治理：展示组织成员、角色和权限数量级，跳转到权限配置页。</li></ul>
 <h3 id="section-14">4.3 项目与资产工作台<a href="#section-14" aria-label="链接到本节">#</a></h3>
 <p>产品目标：</p>
 <ul><li>将项目管理和资产管理合并成一个高密度工作区。</li><li>支持项目多了、资产多了之后仍能筛选、查看、归档和进入项目执行。</li></ul>
 <p>核心功能：</p>
-<ul><li>创建、编辑、归档、恢复、删除项目。</li><li>一键创建演示项目，用模拟资产、文档、发现项、整改和报告验证完整流程。</li><li>资产矩阵：跨项目查看 IP、域名、云资源、风险、所属项目和授权状态。</li><li>资产增删改查。</li><li>资产授权范围确认，未确认资产不应被默认用于扫描。</li><li><code>/assets</code> 旧入口重定向到 <code>/projects?view=assets</code>。</li></ul>
+<ul><li>创建、编辑、归档、恢复、删除项目。</li><li>一键创建演示项目，用模拟资产、文档、发现项、复测和报告验证完整流程。</li><li>资产矩阵：跨项目查看 IP、域名、云资源、风险、所属项目和授权状态。</li><li>资产增删改查。</li><li>资产授权范围确认，未确认资产不应被默认用于扫描。</li><li><code>/assets</code> 旧入口重定向到 <code>/projects?view=assets</code>。</li></ul>
 <h3 id="section-15">4.4 项目执行页<a href="#section-15" aria-label="链接到本节">#</a></h3>
 <p>产品目标：</p>
-<ul><li>项目内所有实操集中在一个页面完成。</li><li>左侧/主区域保留足够聊天空间，因为自然语言执行检测是核心体验。</li><li>右侧展示等保进度、证据整改、变更提示等项目状态。</li></ul>
+<ul><li>项目内所有实操集中在一个页面完成。</li><li>左侧/主区域保留足够聊天空间，因为自然语言执行检测是核心体验。</li><li>右侧展示等保进度、整改复测、变更提示等项目状态。</li></ul>
 <p>核心功能：</p>
 <ul><li>AI 对话执行：用户可输入“对所有资产做 Web 扫描”等自然语言。</li><li>快捷按钮、<code>/</code> 命令和聊天指令共用同一工具目录，避免入口不一致。</li><li>多任务并发：执行中的扫描不阻塞用户输入下一条指令。</li><li>历史输入：支持回车发送、方向键调出历史命令。</li><li>结果展示：单资产、多资产、组合工具统一为聚合结果卡。</li><li>任务恢复：刷新后恢复运行中/已完成任务状态。</li></ul>
-<h3 id="section-16">4.5 5 阶段等保自查流程<a href="#section-16" aria-label="链接到本节">#</a></h3>
+<h3 id="section-16">4.5 4 阶段等保自查流程<a href="#section-16" aria-label="链接到本节">#</a></h3>
 <p>CertiProof 当前正式流程为：</p>
 <div class="diagram-shell"><pre class="mermaid">flowchart LR
   GAP[&quot;01 差距分析&lt;br/&gt;文档检查 + 基础技术检测&quot;] --&gt; FIELD[&quot;02 现场测评&lt;br/&gt;全资产深度检测&quot;]
-  FIELD --&gt; REM[&quot;03 整改加固&lt;br/&gt;工单 + 新证据&quot;]
-  REM --&gt; RETEST[&quot;04 复测验证&lt;br/&gt;文档与技术重检&quot;]
-  RETEST --&gt; REPORT[&quot;05 生成报告&lt;br/&gt;HTML 自查报告&quot;]
-  RETEST --&gt;|&quot;仍存在或新增问题&quot;| REM</pre></div>
-<div class="table-wrap"><table><thead><tr><th>阶段</th><th>产品目标</th><th>主要内容</th></tr></thead><tbody><tr><td>差距分析</td><td>快速识别初始不符合项</td><td>10 个核心文档检查，基础技术检测，生成初始 Finding</td></tr><tr><td>现场测评</td><td>执行更完整的自动化检测</td><td>全资产组合扫描、Web 深度扫描、数据库、SNMP、Windows/AD、SSH 基线等</td></tr><tr><td>整改加固</td><td>将发现项转化为可跟踪事项</td><td>整改工单、责任人、优先级、状态流转、跳过原因</td></tr><tr><td>复测验证</td><td>验证整改是否有效</td><td>文档重新分析、技术复测、整改前后对比</td></tr><tr><td>生成报告</td><td>输出企业自查结果</td><td>HTML 报告，包含问题清单、状态、时长、时间线和变更提示</td></tr></tbody></table></div>
+  FIELD --&gt; VERIFY[&quot;03 整改与复测&lt;br/&gt;改进文档 + 技术重检&quot;]
+  VERIFY --&gt; REPORT[&quot;04 生成报告&lt;br/&gt;HTML 自查报告&quot;]
+  VERIFY --&gt;|&quot;仍存在、新增或无法验证&quot;| VERIFY</pre></div>
+<div class="table-wrap"><table><thead><tr><th>阶段</th><th>产品目标</th><th>主要内容</th></tr></thead><tbody><tr><td>差距分析</td><td>快速识别初始不符合项</td><td>10 个核心文档检查，基础技术检测，生成初始 Finding</td></tr><tr><td>现场测评</td><td>执行更完整的自动化检测</td><td>全资产组合扫描、Web 深度扫描、数据库、SNMP、Windows/AD、SSH 基线等</td></tr><tr><td>整改与复测</td><td>直接验证问题是否已改善</td><td>文档整类重新分析、技术问题按资产/能力复测、前后对比、逐项结果</td></tr><tr><td>生成报告</td><td>输出企业自查结果</td><td>HTML 报告，包含问题清单、状态、时长、时间线和变更提示</td></tr></tbody></table></div>
 <p>流程要求：</p>
-<ul><li>支持整体重置、阶段重置、子项重置。</li><li>完全重置时，测评进度、证据、整改、复测状态应一起重置。</li><li>部分重置只影响对应阶段或子项，不破坏其他阶段历史。</li><li>“系统定级、备案”等旧模板阶段不再作为正式流程展示。</li></ul>
+<ul><li>支持整体重置、阶段重置、子项重置。</li><li>完全重置先停止当前项目的运行任务，再永久删除该项目全部测评派生数据和文件；项目、资产、成员权限、计划配置、标准库、标准图谱及审计日志保留。</li><li>单项重置清理该任务及其派生结论；阶段重置同时清理该阶段及所有下游阶段，避免保留失效报告。</li><li>已完成任务的普通“重新执行”不是重置：它只生成新的执行记录并更新当前检测事实，必须保留已修复问题和既有复测时间线。</li><li>正式阶段不能跳过或跨阶段执行；正式任务只有系统确认“不适用”时才能标记 N/A。</li><li>手动激活阶段也必须校验全部前序阶段已完成；报告生成前再次校验差距分析、现场测评和整改复测状态，不能依赖曾经写入的完成标记绕过门禁。</li><li>启动迁移和进度校准会把越级保存为 active/completed 的下游阶段恢复为 pending，同时保留已执行任务结果，待前序阶段完成后再按真实结果推进。</li><li>流程 100% 只表示四阶段任务均已处理，不表示全部合规；合规分、活动问题和无法验证项必须独立展示。</li><li>总体测评进度取四个阶段真实进度的平均值，阶段未全部完成时也能反映已执行工作；<code>completed_phases</code> 仍单独表示完整结束的阶段数。</li><li>合规分按可可靠判定的检查点计算：文档取每个任务/检查点的最新结论，技术检测按正式任务及稳定 Finding 归并；<code>pass/fixed</code> 计满分、<code>partial</code> 计半分、活动问题计 0 分。</li><li><code>unable/not_tested/failed/running</code> 不得伪装成通过，也不直接塞入分母制造假低分；页面必须同时展示可靠检测覆盖率、无法判定数量和不适用数量。仍有未完成正式任务时合规分保持未出具状态。</li><li>测评完成页必须根据活动问题和覆盖率显示“全部修复、仍有待处理、存在无法验证项”等状态，并可展开查看处理汇总和每次重新检查运行，不允许出现空白阶段详情。</li><li>“系统定级、备案”等旧模板阶段不再作为正式流程展示。</li></ul>
 <h3 id="section-17">4.6 文档合规检查<a href="#section-17" aria-label="链接到本节">#</a></h3>
 <p>产品目标：</p>
 <ul><li>对批量上传的企业材料做自动归类、取证和合规判断。</li><li>支持多文件共同提供证据。</li><li>输出能追溯到文件、页码、段落、表格或图片文字的证据。</li><li>文件名不规范只提示，不阻止内容分析。</li></ul>
@@ -323,32 +324,31 @@
   LLM --&gt; RULE[&quot;规则引擎：pass / partial / fail / unable&quot;]
   RULE --&gt; CLOSED[&quot;Evidence → Finding → 整改 → 复测 → 报告&quot;]</pre></div>
 <p>内容解析：</p>
-<ul><li>支持 DOCX、PDF、TXT、MD、常见图片以及安全解压后的批量材料。</li><li>DOCX 提取段落、表格、页眉页脚、列表和内嵌图片文字。</li><li>PDF 提取原生文本、页码、坐标和阅读顺序；扫描件或复杂版式调用 OCR/视觉模型。</li><li>原生解析与视觉结果自动补充和交叉验证；重复内容合并，冲突内容保留来源及置信度。</li><li>每个内容块记录文件、页码、章节、类型、坐标、正文、表格、来源、置信度和内容哈希。</li></ul>
+<ul><li>支持 DOCX、PDF、TXT、MD、常见图片以及安全解压后的批量材料。</li><li>DOCX 提取段落、表格、页眉页脚、列表和内嵌图片文字。</li><li>PDF 提取原生文本、页码、坐标和阅读顺序；扫描件或复杂版式调用 OCR/视觉模型。</li><li>原生解析与视觉结果自动补充和交叉验证；重复内容合并，冲突内容保留来源及置信度。</li><li>每个内容块记录文件、页码、章节、类型、坐标、正文、表格、来源、置信度和内容哈希。</li><li>PDF/OCR 超时、服务暂时不可用和连接中断等瞬时错误按文件最多尝试 3 次，并显示当前尝试次数；文件损坏、格式不支持等确定性错误不重试。</li><li>必需文档未提供，或文件名可以可靠归类但三次仍无法提取正文时，该文档任务必须形成 <code>unable/not_tested</code> 结果和 Finding，不能静默遗漏或永久停留在待执行。</li></ul>
 <p>标准与证据架构：</p>
 <ul><li>10 类核心文档至少包含 80 个必检点，每项包含标准依据、必需证据、通过条件、缺失条件、严重程度和整改建议。</li><li>正式知识图谱是运行时标准库；YAML 只用于初始化、版本控制、导入导出和灾难恢复。</li><li>图谱引擎采用 Apache AGE，不使用 Neo4j Enterprise/Aura 等商业授权能力。AGE 使用 Apache License 2.0，并与 PostgreSQL 的事务、权限、备份和高可用体系共用同一数据底座。</li><li>PostgreSQL 保存业务事实和带位置内容块，对象存储保存原文件和解析产物，pgvector 保存当前有效内容块的语义索引；图谱节点只保存业务 ID、哈希和关系，不复制整篇敏感原文。</li><li>标准图谱保存“标准、文档类型、检查项、证据要求、判断规则、整改建议”关系；证据图谱保存“文件、章节、内容块、检查项、支持/部分支持/矛盾”关系。</li><li>向量检索负责语义召回，关键词检索负责数字、时限、标准编号和否定词，图谱负责补充相邻段落、表格和跨文件关系。</li><li>LLM 只根据检查标准和候选原文输出结构化证据判断，不能自行创造标准或直接决定总分。</li><li>结论只有 <code>pass</code>、<code>partial</code>、<code>fail</code>、<code>unable</code> 四类；提取失败或模型不可用时必须是 <code>unable</code>，不能算通过。</li><li>同一个文档类问题在证据与整改中归并展示，可展开查看不同检查点。</li></ul>
 <p>首批标准库范围：</p>
 <div class="table-wrap"><table><thead><tr><th>文档类别</th><th>最低检查重点</th></tr></thead><tbody><tr><td>信息安全管理制度</td><td>适用范围、管理原则、职责、制度生命周期、监督与违规处理</td></tr><tr><td>信息安全管理机构设置文件</td><td>组织架构、负责人、岗位职责、授权关系、沟通与汇报机制</td></tr><tr><td>人员安全管理制度</td><td>入职、在岗、调岗、离职、培训、保密、账号与权限回收</td></tr><tr><td>安全建设管理制度</td><td>需求、方案、开发、测试、上线、外包、验收和变更控制</td></tr><tr><td>安全运维管理制度</td><td>日常运维、访问控制、介质、备份、恶意代码、变更和应急处置</td></tr><tr><td>信息安全事件应急预案</td><td>事件分级、组织职责、报告、响应、恢复、演练和复盘</td></tr><tr><td>安全事件管理制度</td><td>发现、登记、升级、调查、处置、证据保存和关闭机制</td></tr><tr><td>安全审计管理制度</td><td>审计范围、日志内容、留存、保护、审阅、告警和责任分离</td></tr><tr><td>系统安全方案</td><td>系统边界、资产、网络、主机、应用、数据、安全控制和实施路线</td></tr><tr><td>信息安全策略文件</td><td>安全目标、治理原则、风险偏好、责任、例外、评审和发布机制</td></tr></tbody></table></div>
 <p>图谱核心实体和关系：</p>
-<div class="table-wrap"><table><thead><tr><th>类型</th><th>核心实体/关系</th><th>作用</th></tr></thead><tbody><tr><td>标准实体</td><td>StandardEdition、DocumentType、Control、EvidenceRequirement、DecisionRule、RemediationGuidance</td><td>定义检查依据和最终裁决条件</td></tr><tr><td>内容实体</td><td>Document、Page、Section、Block、Table、ImageText</td><td>保存文档结构和可定位原文</td></tr><tr><td>业务实体</td><td>Organization、Project、Assessment、DocumentRun、Finding、RemediationTicket</td><td>连接文档分析与产品闭环</td></tr><tr><td>结构关系</td><td>CONTAINS、NEXT、CHILD_OF、REFERENCES</td><td>扩展相邻段落、表格和跨文件上下文</td></tr><tr><td>判证关系</td><td>SUPPORTS、PARTIALLY_SUPPORTS、CONTRADICTS、MISSING_FOR</td><td>保存检查项与证据之间的可解释关系</td></tr><tr><td>闭环关系</td><td>PRODUCES、REMEDIATED_BY、RETESTED_BY、RESOLVES</td><td>连接结论、整改动作和复测结果</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>类型</th><th>核心实体/关系</th><th>作用</th></tr></thead><tbody><tr><td>标准实体</td><td>StandardEdition、DocumentType、Control、EvidenceRequirement、DecisionRule、RemediationGuidance</td><td>定义检查依据和最终裁决条件</td></tr><tr><td>内容实体</td><td>Document、Page、Section、Block、Table、ImageText</td><td>保存文档结构和可定位原文</td></tr><tr><td>业务实体</td><td>Organization、Project、Assessment、DocumentRun、Finding、VerificationRun/Item</td><td>连接文档分析与产品闭环</td></tr><tr><td>结构关系</td><td>CONTAINS、NEXT、CHILD_OF、REFERENCES</td><td>扩展相邻段落、表格和跨文件上下文</td></tr><tr><td>判证关系</td><td>SUPPORTS、PARTIALLY_SUPPORTS、CONTRADICTS、MISSING_FOR</td><td>保存检查项与证据之间的可解释关系</td></tr><tr><td>闭环关系</td><td>PRODUCES、REMEDIATED_BY、RETESTED_BY、RESOLVES</td><td>连接结论、整改动作和复测结果</td></tr></tbody></table></div>
 <p>数据生命周期：</p>
 <ul><li>文件和内容块使用 SHA-256 去重，相同内容不重复解析和嵌入。</li><li>只为当前有效材料保留在线向量；临时 OCR 页面、失败任务和可重建缓存自动清理。</li><li>图谱只保存有效实体、结构和证据关系，不保存全部临时候选结果。</li><li>提供重置本次测评、清空项目文档数据、初始化组织业务数据三级清理能力，标准图谱独立保护。</li></ul>
-<p>实现验收：<code>check_document_hybrid_retrieval.py</code> 使用真实 1024 维嵌入验证精确与向量混合召回；<code>check_full_mvp_flow.py</code> 使用真实 LLM 完成初检、11 个差距、整改材料复测、0.88 改善值和 HTML 报告；<code>check_data_lifecycle.py</code> 验证文件、内容块、向量、扫描结果、项目证据图谱和标准图谱的清理边界。</p>
+<p>实现验收：<code>check_document_hybrid_retrieval.py</code> 使用真实 1024 维嵌入验证精确与向量混合召回；<code>check_full_mvp_flow.py</code> 使用真实文档分析完成初检、11 个差距、整改材料复测、0.94 改善值和 HTML 报告；<code>check_data_lifecycle.py</code> 验证文件、内容块、向量、扫描结果、项目证据图谱和标准图谱的清理边界。</p>
 <h3 id="section-18">4.7 技术检测与工具执行<a href="#section-18" aria-label="链接到本节">#</a></h3>
 <p>产品目标：</p>
 <ul><li>让用户用自然语言、快捷按钮或命令触发稳定的安全检测。</li><li>多资产结果必须带资产归属，不让聊天窗口被大量零散消息刷屏。</li><li>工具失败时给出具体原因，而不是只显示“失败”。</li></ul>
 <p>当前工具能力：</p>
 <div class="table-wrap"><table><thead><tr><th>类别</th><th>能力</th></tr></thead><tbody><tr><td>端口与存活</td><td>高危端口、自定义端口、全端口、高速扫描、批量存活</td></tr><tr><td>SSL/TLS</td><td>证书、协议、套件、风险项检测</td></tr><tr><td>漏洞扫描</td><td>nuclei 漏洞模板扫描</td></tr><tr><td>Web 检测</td><td>Nikto、目录爆破、Web 模糊测试、SQL 注入检测、Web 发现</td></tr><tr><td>弱口令</td><td>SSH 等服务弱口令检测</td></tr><tr><td>数据库</td><td>Redis、MySQL、MongoDB、Memcached、Oracle 综合检测</td></tr><tr><td>网络设备</td><td>SNMP walk/get/bruteforce、网络设备检查</td></tr><tr><td>Windows/AD/SMB</td><td>SMB 枚举、Windows/AD 安全检查</td></tr><tr><td>基线配置</td><td>自动识别系统后的 SSH/审计/服务/文件权限/MAC 等检查</td></tr><tr><td>组合扫描</td><td><code>/all</code>、<code>/tech</code> 等组合检测矩阵</td></tr><tr><td>诊断</td><td>MCP Gateway、工具服务、二进制依赖、参数烟测</td></tr></tbody></table></div>
 <p>结果要求：</p>
-<ul><li>返回结构统一为 <code>status、target、capability、data、metadata、error</code>。</li><li>多资产结果合并为一个聚合卡片，可按资产展开详情。</li><li>端口 filtered、timeout、connection refused、auth failed、missing credential 等要明确区分。</li><li>工具执行完成但无发现时，也要展示“检测了什么、覆盖了哪些资产、为什么无发现”。</li><li>复制按钮输出可读文本，不能出现 <code>[object Object]</code>。</li></ul>
+<ul><li>返回结构统一为 <code>status、target、capability、data、metadata、error</code>。</li><li>多资产结果合并为一个聚合卡片，可按资产展开详情。</li><li>端口 filtered、timeout、connection refused、auth failed、missing credential 等要明确区分。</li><li>工具执行完成但无发现时，也要展示“检测了什么、覆盖了哪些资产、为什么无发现”。</li><li><code>ScanTask.status=completed</code> 只表示执行生命周期结束；结果必须继续区分“未发现问题、发现风险、部分完成、无法完成、不适用”。</li><li><code>ScanTask.status</code> 与 <code>control_state</code> 必须同步进入 running/completed/failed/cancelled；恢复、刷新和遥测不能把已结束任务继续显示为排队中。</li><li>组合任务全部子工具因服务未开放而跳过时结论为“不适用”，部分子工具失败时保留成功结果并显示“部分完成”，不得误报正常。</li><li>SNMP 等协议工具无响应时返回失败或无法完成，并清理依赖库初始化噪声，不能以顶层成功包装空结果。</li><li>项目页工具遥测从持久化 ScanTask 读取最近结果，不依赖聊天消息；刷新、切换页面或重启服务后结论仍可恢复。</li><li>复制按钮输出可读文本，不能出现 <code>[object Object]</code>。</li></ul>
 <h3 id="section-19">4.8 证据、Finding 与整改复测<a href="#section-19" aria-label="链接到本节">#</a></h3>
 <p>产品目标：</p>
 <ul><li>将文档检查和技术检测产生的问题统一进入整改闭环。</li><li>整改不是简单“标记已修复”，而是提交新证据或重新执行对应检测。</li></ul>
 <p>核心功能：</p>
-<ul><li>自动生成 Finding：来源包括文档检查、技术检测、资产/端口变更。</li><li>同类文档问题聚合展示，展开后查看不同检查点。</li><li>整改工单支持状态：<code>open → in_progress → resolved → verified → closed</code>，并支持 <code>skipped</code>。</li><li>文档整改：上传新文档或新文本后，自动重新分析相关检查点。</li><li>技术整改：重新执行对应工具或对应资产检测。</li><li>复测结果更新 Finding 和整改进度。</li><li>支持跳过项，但必须记录跳过原因，并在报告中体现。</li></ul>
-<p>#### 整改 Skill 与业务边界</p>
-<p>当前实现已经提供 <code>create_remediation_ticket</code>、<code>list_remediation_tickets</code>、<code>update_ticket_status</code> 以及文档/技术复测接口，Orchestrator 可以调用这些确定性能力；但尚未形成独立、可版本化的“整改编排 Skill”配方。</p>
-<p>整改 Skill 的目标职责是：按 Finding 聚合根因，读取标准图谱中的整改建议，生成责任人、优先级、所需新证据和复测能力的结构化方案，并协调文档重分析或技术重测。它只能调用 Remediation、Flow Engine 和 Execution Engine 的公开命令，不能直接写数据库、手动把 Finding 改成通过、跳过复测或绕过权限。最终关闭仍由“完整复测成功且风险消失”的规则决定。</p>
-<div class="table-wrap"><table><thead><tr><th>能力</th><th>当前状态</th></tr></thead><tbody><tr><td>整改工单创建、查询、状态流转、跳过和复测接口</td><td><code>implemented</code></td></tr><tr><td>Orchestrator 调用整改原子能力</td><td><code>implemented</code></td></tr><tr><td>独立 <code>remediation_coordinator</code> Skill 配方、版本与回归测试</td><td><code>accepted-pending</code></td></tr></tbody></table></div>
+<ul><li>自动生成 Finding：来源包括文档检查、技术检测、资产/端口变更。</li><li>同类文档问题聚合展示，展开后查看不同检查点。</li><li>不建立虚假的工单系统；<code>Finding</code> 直接连接改进材料、技术复测和最终状态。</li><li>文档整改以该文档任务的当前有效多文件集合为边界；技术整改以资产、能力和稳定风险指纹为边界。</li><li><code>VerificationRun</code> 表示一次持久化复测，<code>VerificationItem</code> 保存每个 Finding 的初检观察、复测观察、前后对比和结论，<code>FindingEvent</code> 保存时间线。</li><li>复测结论为 <code>fixed</code>、<code>still_present</code>、<code>new</code>、<code>unable</code>、<code>cancelled</code>；只有 <code>fixed</code> 自动关闭 Finding。</li><li>网络、认证、参数、模型或工具条件不足时，Finding 保持待整改或无法验证；用户修正条件后重新检测，不能用管理性状态代替真实复测。</li><li>文档正文未可靠提取或模型未完成判证时，必须补充可解析材料、重新分析或恢复视觉/LLM 能力。</li><li>用户不能直接点击把问题改成通过；只有完整、可信的复测结果可以自动验证并关闭问题。</li><li>差距分析或现场测评中任何必检任务失败，都作为执行阻断项进入整改与复测工作区并阻止自动推进；用户仍可在没有运行中复测时选择“以当前结果生成报告”，报告必须把阻断原因和覆盖缺口原样披露。</li><li>同一个未完成检测如果已经生成 <code>not_tested</code> Finding，只计一次待处理问题，不能再叠加一个执行阻断项扩大整改分母。</li><li>“整改与复测阶段已结束”和“问题复核进度”是两个指标：用户选择按当前事实出报告可以结束本轮阶段，但未复核、仍存在和无法验证数量必须原样保留。</li></ul>
+<p>#### 整改编排边界</p>
+<p>Finding、文档/技术复测、自动裁决、阶段联动、重置清理和报告追溯已经按 5.10 节形成可信闭环。Orchestrator 后续可以增加整改建议编排，但只能调用 Verification、Flow Engine 和 Execution Engine 的公开命令，不能直接写数据库、手动把 Finding 改成通过、跳过复测或绕过权限。</p>
+<div class="table-wrap"><table><thead><tr><th>能力</th><th>当前状态</th></tr></thead><tbody><tr><td>Finding、复测运行、复测明细和时间线权威模型</td><td><code>implemented</code></td></tr><tr><td>文档/技术复测、阶段联动和自动裁决</td><td><code>implemented</code></td></tr><tr><td>Orchestrator 调用整改建议与复测原子能力</td><td><code>accepted-pending</code></td></tr></tbody></table></div>
 <h3 id="section-20">4.9 资产与端口变更检测<a href="#section-20" aria-label="链接到本节">#</a></h3>
 <p>产品目标：</p>
 <ul><li>当资产或端口暴露面发生变化时，提示用户重新评估。</li></ul>
@@ -358,7 +358,8 @@
 <p>产品目标：</p>
 <ul><li>报告要能读懂，不只是任务流水。</li><li>默认输出 HTML 报告，适合预览、分享和归档。</li></ul>
 <p>报告内容：</p>
-<ul><li>项目概况、资产范围、测评阶段进度。</li><li>初次检测发现的问题。</li><li>文档检查结果和证据来源。</li><li>技术检测结果和资产归属。</li><li>整改状态、跳过项、解决时长。</li><li>复测前后对比。</li><li>资产和端口变更提示。</li><li>风险和合规结论摘要。</li></ul>
+<ul><li>项目概况、资产范围、测评阶段进度。</li><li>初次检测发现的问题。</li><li>文档检查结果和证据来源。</li><li>技术检测结果和资产归属。</li><li>整改状态、仍存在项、无法验证项和解决时长。</li><li>复测前后对比。</li><li>资产和端口变更提示。</li><li>风险和合规结论摘要。</li></ul>
+<p>生成门禁：差距分析、现场测评和整改与复测必须按顺序完成，且前两个阶段的正式任务都已进入可披露终态；仍为 <code>todo/in_progress</code> 的必检任务会阻止报告生成。<code>failed/cancelled</code> 可以作为无法完成或不适用进入报告，但不能伪装成通过。报告快照必须从当前事实重新计算阶段进度，不能把未完成的上游阶段强制写成 100%。</p>
 <h3 id="section-22">4.11 归档能力<a href="#section-22" aria-label="链接到本节">#</a></h3>
 <p>产品目标：</p>
 <ul><li>项目完成后可以归档，减少工作区噪音，但保留可追溯资料。</li></ul>
@@ -371,7 +372,7 @@
 <ul><li>原生解析优先：<code>python-docx + pypdf + pypdfium2</code>，不是 AI 模型，适合 DOCX 和文本型 PDF。</li><li>轻量 OCR fallback：<code>RapidOCR 1.4.4 + ONNX Runtime</code>，适合普通扫描件、图片或原生文本不足的页面。</li><li>完整文档视觉模型：<code>PaddleOCR-VL-1.6</code>，适合复杂版式、表格、图表、图片文字和深度交叉验证。</li></ul>
 <p>实际模型与用途：</p>
 <div class="table-wrap"><table><thead><tr><th>组件</th><th>当前模型/运行时</th><th>用途</th><th>下载与加载</th></tr></thead><tbody><tr><td>文档语义向量</td><td><code>intfloat/multilingual-e5-large</code>，FastEmbed + ONNX Runtime，1024 维</td><td>把检查项和内容块转为向量，做语义召回；不负责合规判定</td><td>首次使用下载到 Docker <code>embedding_models</code> 卷，之后复用缓存</td></tr><tr><td>轻量 OCR</td><td><code>RapidOCR 1.4.4</code>，ONNX Runtime</td><td>识别普通扫描页文字和坐标</td><td>随 OCR 镜像安装，按页面懒执行</td></tr><tr><td>完整视觉解析</td><td><code>PaddleOCR-VL-1.6</code>，默认 CPU</td><td>解析版面、表格、图表标签和复杂页面</td><td>首次需要时懒加载到 <code>ocr_models</code> 卷；当前容器健康状态为 <code>lazy</code>，表示已配置但尚未加载</td></tr><tr><td>合规判证 LLM</td><td>组织模型配置中为“文档判证”用途选择的模型，不固定供应商</td><td>只针对检查项和候选证据输出结构化支持/部分/不支持/矛盾</td><td>由模型配置管理；本地文档默认不发送给外部视觉服务</td></tr></tbody></table></div>
-<p>自动策略：标准模式仅对原生为空、单页文字少于阈值或包含关键图片的页面调用 OCR；先运行 RapidOCR，结果为空、平均置信度低于 0.72、要求视觉优先或选择深度模式时，再调用 PaddleOCR-VL-1.6。深度模式会对 PDF 页面进行交叉验证。两种结果按位置、哈希和相似度融合并保留来源置信度。Paddle 原生运行时被隔离在子进程中，即使发生段错误或超时，OCR API 仍存活并返回 RapidOCR fallback 或 <code>unable</code>。</p>
+<p>自动策略：标准模式仅对原生为空、单页文字少于阈值或包含关键图片的页面调用 OCR；先运行 RapidOCR，结果为空、平均置信度低于 0.72、要求视觉优先或选择深度模式时，再调用 PaddleOCR-VL-1.6。深度模式会对 PDF 页面进行交叉验证。两种结果按位置、哈希和相似度融合并保留来源置信度。Paddle 原生运行时被隔离在子进程中，即使发生段错误或超时，OCR API 仍存活。原生正文可靠或轻量 OCR 已覆盖全部必需图片时，完整视觉失败只显示降级警告并继续；原生不足且必需视觉页面未完整覆盖时才返回 <code>unable</code>，不得生成完整合规结论。</p>
 <p>要求：</p>
 <ul><li>本地优先，不默认把企业文档发往外部视觉服务。</li><li>容器部署需能按环境选择后端模型。</li><li>模型不可用时返回 <code>unable</code>，不能默认为通过。</li></ul>
 <h2 id="section-24">五、关键用户流程<a href="#section-24" aria-label="链接到本节">#</a></h2>
@@ -379,8 +380,8 @@
 <h3 id="section-25">5.1 企业自查主流程<a href="#section-25" aria-label="链接到本节">#</a></h3>
 <p><strong>状态</strong>：<code>implemented</code>，文档合规子流程已按 5.7 节落地。</p>
 <p>前置条件：用户属于一个组织，已创建项目，并对需要检测的资产确认授权范围。</p>
-<ol><li>用户登录后进入组织 Dashboard，先查看跨项目测评进度、风险、资产暴露面和工具状态。</li><li>用户在项目与资产工作台创建项目，填写项目名称、等保等级和基本信息。</li><li>用户录入 IP、域名或云资源，并逐项确认资产属于本组织且允许执行安全检测。</li><li>系统为项目初始化唯一的五阶段测评实例及正式任务矩阵。</li><li>差距分析阶段分为“文档合规”和“基础技术检测”两条轨道；用户可以自动批量执行，也可以展开后手动执行单项。</li><li>每项完成后产生可追溯证据；不符合项生成 Finding 和整改工单，失败或条件不足显示为未完成，不能算通过。</li><li>现场测评对全部授权资产执行更完整的工具矩阵，允许单个资产或子工具失败，整体保留完整结果。</li><li>整改加固阶段按文档类别或技术来源聚合问题，用户提交新材料或重新执行对应技术检测。</li><li>复测验证比较初检和新结果，生成已修复、仍存在、新增和已跳过四类结论。</li><li>生成报告阶段基于当前项目事实生成 HTML 报告，涵盖资产、证据、问题、整改和复测结果。</li><li>项目完成后可归档为只读；需要继续工作时恢复项目，不复制项目数据。</li></ol>
-<p>核心数据流：<code>Organization → Project → Asset/Assessment → Evidence/ScanTask → Finding → RemediationTicket → Retest → HTML Report</code>。</p>
+<ol><li>用户登录后进入组织 Dashboard，先查看跨项目测评进度、风险、资产暴露面和工具状态。</li><li>用户在项目与资产工作台创建项目，填写项目名称、等保等级和基本信息。</li><li>用户录入 IP、域名或云资源，并逐项确认资产属于本组织且允许执行安全检测。</li><li>系统为项目初始化唯一的四阶段测评实例及正式任务矩阵。</li><li>差距分析阶段分为“文档合规”和“基础技术检测”两条轨道；用户可以自动批量执行，也可以展开后手动执行单项。</li><li>每项完成后产生可追溯证据；不符合项生成 Finding，失败或条件不足显示为未完成，不能算通过。</li><li>现场测评对全部授权资产执行更完整的工具矩阵，允许单个资产或子工具失败，整体保留完整结果。</li><li>整改与复测阶段按文档任务或技术来源聚合问题；用户既可在单个文档组内替换/补充材料，也可批量提交文件、文件夹、ZIP、RAR 或 7z。批量材料先自动归类，同类旧版本停用并保留审计，新版本随后重新检查该类全部未解决问题；技术问题按原资产和能力重新执行检测。</li><li>系统比较初检和复测结果，生成已修复、仍存在、新增、无法验证或已停止结论；未解决项继续留在本阶段。</li><li>当全部 Finding 都获得一次真实终态复核结论、没有活动复测且没有仍为 <code>failed</code> 的必检任务时，报告阶段自动开启；<code>still_present/new/unable</code> 继续保持活动问题并进入报告，不能伪装成已修复。</li><li>用户也可以在没有运行中复测时选择“以当前结果生成报告”。该动作结束本轮整改、保存当前问题快照并激活报告，但不会关闭尚未复核、仍存在、无法验证或执行阻断的问题；它们必须作为覆盖限制写入报告。之后再次发起复测会使该报告状态失效并重新打开整改阶段。</li><li>生成报告阶段基于当前项目事实生成 HTML 报告，涵盖资产、证据、问题和复测结果。</li><li>项目完成后可归档为只读；需要继续工作时恢复项目，不复制项目数据。</li></ol>
+<p>核心数据流：<code>Organization → Project → Asset/Assessment → Evidence/ScanTask → Finding → VerificationRun/Item → HTML Report</code>。</p>
 <p>验收要求：从空项目开始，不直接修改数据库，能够完成一次“发现问题、整改、复测、生成报告”的闭环。</p>
 <h3 id="section-26">5.2 注册、登录、组织与角色权限<a href="#section-26" aria-label="链接到本节">#</a></h3>
 <p><strong>状态</strong>：<code>implemented</code>。</p>
@@ -390,7 +391,7 @@
 <p>验收要求：使用只读角色访问组织设置、执行扫描或删除项目时必须失败，而读取项目和报告仍可成功。</p>
 <h3 id="section-27">5.3 组织 Dashboard<a href="#section-27" aria-label="链接到本节">#</a></h3>
 <p><strong>状态</strong>：<code>implemented</code>。</p>
-<ol><li>用户选定组织后进入 <code>/dashboard</code>，后端按组织范围聚合项目、资产、Finding、扫描任务、测评和角色数据。</li><li>项目测评进度矩阵按项目展示五阶段完成度、问题数、整改状态和下一步动作；进度来自阶段和任务事实，不使用证据数量代替测评进度。</li><li>资产暴露面拓扑按“组织、项目、资产、服务”构图；资产和端口增多时仍以真实关系连线，不把项目或资产伪装成风险节点。</li><li>点击资产节点后，右侧展示资产地址、类型、所属项目、开放服务、风险和最近检测状态。</li><li>风险处置队列展示可识别的问题标题、资产、来源工具、严重程度和状态，不使用笼统的“自动化技术检测”代替真实来源。</li><li>工具遥测展示不同工具图标、名称、健康状态、最近执行时间和成功失败情况，不要求用户点击后才知道工具名称。</li><li>角色与权限治理展示成员、角色和权限数量，并进入组织设置页继续管理。</li></ol>
+<ol><li>用户选定组织后进入 <code>/dashboard</code>，后端按组织范围聚合项目、资产、Finding、扫描任务、测评和角色数据。</li><li>项目测评进度矩阵按项目展示四阶段完成度、问题数、复测状态和下一步动作；进度来自阶段和任务事实，不使用证据数量代替测评进度。</li><li>资产暴露面拓扑按“组织、项目、资产、服务”构图；资产和端口增多时仍以真实关系连线，不把项目或资产伪装成风险节点。</li><li>点击资产节点后，右侧展示资产地址、类型、所属项目、开放服务、风险和最近检测状态。</li><li>风险处置队列展示可识别的问题标题、资产、来源工具、严重程度和状态，不使用笼统的“自动化技术检测”代替真实来源。</li><li>工具遥测展示不同工具图标、名称、健康状态、最近执行时间和成功失败情况，不要求用户点击后才知道工具名称。</li><li>角色与权限治理展示成员、角色和权限数量，并进入组织设置页继续管理。</li></ol>
 <p>交互规则：Dashboard 不提供聊天命令；拓扑、风险、工具和角色区域必须可滚动或伸缩；空数据展示明确空状态；任一聚合接口失败时局部降级，不应使整个 Dashboard 空白。</p>
 <h3 id="section-28">5.4 项目与资产生命周期<a href="#section-28" aria-label="链接到本节">#</a></h3>
 <p><strong>状态</strong>：<code>implemented</code>。</p>
@@ -398,7 +399,7 @@
 <p>异常规则：重复资产应归并或提示，不能在一次多资产任务中重复执行；域名解析失败必须显示 DNS 或连接原因；资产越权、格式错误或未确认授权时应在创建任务前失败。</p>
 <h3 id="section-29">5.5 测评初始化、状态推进与重置<a href="#section-29" aria-label="链接到本节">#</a></h3>
 <p><strong>状态</strong>：<code>implemented</code>。</p>
-<ol><li>新建测评时只创建五个阶段：差距分析、现场测评、整改加固、复测验证、生成报告。</li><li>二级和三级共用五阶段骨架；三级现场测评额外包含网络设备和 Windows/AD/SMB 检测。</li><li>测评状态为 <code>not_started → in_progress → paused/completed</code>；阶段状态为 <code>pending/active/completed/skipped/failed</code>；任务状态为 <code>todo/in_progress/completed/failed/cancelled</code>。</li><li>启动测评后激活首个满足依赖的阶段；正式任务完成或跳过后更新阶段进度，阶段完成后激活下一阶段。</li><li>自动任务失败时保留失败结果，不自动把阶段内其他未完成任务标为通过；用户可以修正条件后重新执行。</li><li>支持暂停和继续测评；继续只恢复状态，不清空证据。</li><li>单项重置把对应任务恢复为 <code>todo</code>，清除该任务结果；文档任务同时删除关联文件、证据、Finding 和整改工单。</li><li>阶段重置清空该阶段所有任务结果和阶段输出；其他阶段数据不受影响。</li><li>完全重置把五阶段及任务恢复到初始状态，并清除项目级 Evidence、Finding、RemediationTicket 和测评输出；项目、资产、扫描历史和流程模板保留。</li><li>新文档合规子系统落地后，重置还必须同步删除对应内容块、向量、证据图谱关系和 OCR 中间产物。</li></ol>
+<ol><li>新建测评时只创建四个阶段：差距分析、现场测评、整改与复测、生成报告。</li><li>二级和三级共用四阶段骨架；三级现场测评额外包含网络设备和 Windows/AD/SMB 检测。</li><li>测评状态为 <code>not_started → in_progress → paused/completed</code>；阶段状态为 <code>pending/active/completed/failed</code>；任务状态为 <code>todo/in_progress/completed/failed/cancelled</code>。</li><li>启动测评后激活首个满足依赖的阶段；真实执行结果更新任务和执行覆盖率，全部正式任务到达终态后才进入下一阶段。</li><li>任意阶段的激活都重新校验全部前序阶段，不仅依赖模板中的 <code>depends_on</code>；旧数据或手动调用也不能跨阶段。</li><li>自动任务失败时保留失败结果，不自动把阶段内其他未完成任务标为通过；用户可以修正条件后重新执行。</li><li>支持暂停和继续测评；继续只恢复状态，不清空证据。</li><li>单项重置把对应任务恢复为 <code>todo</code>，清除该任务结果和由该任务派生的 Evidence、Finding、Verification 数据；文档任务同时清理关联文档分析产物。</li><li>已完成任务的普通重新执行使用非破坏性重跑：允许任务再次进入执行态，但不删除已修复 Finding、VerificationRun/Item 和下游报告历史；新结果通过稳定风险指纹更新当前事实。</li><li>阶段重置清空该阶段及所有下游阶段的任务、Finding、复测和当前报告输出；已有报告版本标记过期，避免继续引用失效的上游事实。</li><li>完全重置先将当前项目的扫描、文档分析、复测和正式任务置为取消，再把四阶段及任务恢复到初始状态；Worker 后续返回不得重新写回已删除结果。</li><li>完全重置永久删除该项目的 ScanTask/ScanHistory、ChangeSnapshot、ResultCache、ActionHistory、Evidence、Finding、Verification、文档原件与分析运行、内容块与向量、项目证据图谱、全部 HTML 报告版本及其物理文件；合规分归空，对话文本保留但旧结果卡标记为已重置。</li><li>完全重置不删除 Project、Asset、组织成员与权限、ScheduledScan 配置、全局标准库/标准图谱和追加式 AuditEvent；其他项目的数据必须保持不变。</li><li>四个正式阶段不能跳过或跨越；任务只有自动适用性判断得到明确“不适用”时才能进入 <code>cancelled/N/A</code>。</li><li>自动化检查结果只能由 Worker/执行器写入，页面和通用 API 不提供人工“完成”旁路。</li></ol>
 <div class="diagram-shell"><pre class="mermaid">stateDiagram-v2
   direction LR
 
@@ -407,7 +408,7 @@
     NotStarted --&gt; InProgress: 启动
     InProgress --&gt; Paused: 暂停
     Paused --&gt; InProgress: 继续
-    InProgress --&gt; Completed: 五阶段完成
+    InProgress --&gt; Completed: 四阶段完成
     Completed --&gt; InProgress: 重新打开
     Completed --&gt; NotStarted: 整体重置并清理测评产物
   }
@@ -416,10 +417,8 @@
     [*] --&gt; Pending
     Pending --&gt; Active: 依赖满足
     Active --&gt; PhaseCompleted: 正式任务完成
-    Active --&gt; Skipped: 明确跳过
     Active --&gt; Failed: 阶段失败
     PhaseCompleted --&gt; Pending: 阶段重置
-    Skipped --&gt; Pending: 阶段重置
   }
 
   state &quot;任务&quot; as TASK {
@@ -427,7 +426,7 @@
     Todo --&gt; Running: 执行
     Running --&gt; TaskCompleted: 完整完成
     Running --&gt; TaskFailed: 失败或停止
-    Todo --&gt; Cancelled: 跳过
+    Todo --&gt; Cancelled: 系统判定不适用
     TaskCompleted --&gt; Todo: 单项重置
     TaskFailed --&gt; Todo: 重试或重置
   }</pre></div>
@@ -439,14 +438,14 @@
 <h3 id="section-31">5.7 批量文档合规检查<a href="#section-31" aria-label="链接到本节">#</a></h3>
 <p><strong>状态</strong>：<code>implemented</code>，已完整替换旧文档检查实现，不迁移旧文档数据或保留旧算法分支。</p>
 <p>输入与限制：支持多文件、文件夹、ZIP、RAR、7z；MVP 文档格式为 DOCX、PDF、TXT、MD 和常见图片；单文件上限 100MB，单批默认最多 200 页。加密、分卷、嵌套压缩包和旧 DOC 明确拒绝或提示转换，不能静默跳过。</p>
-<ol><li>上传接口先校验权限、项目、测评任务、文件类型、体积、页数和压缩包安全，随后立即创建异步分析任务并返回任务 ID。</li><li>文件存储服务保存原文件，计算文件 SHA-256；相同文件不重复保存、解析和嵌入。</li><li>DOCX 原生解析段落、标题、列表、表格、页眉页脚和内嵌图片；PDF 原生解析文字层、页码、坐标和阅读顺序；TXT、MD 直接解析。</li><li>原生内容为空、字符质量异常、表格顺序混乱、页面含关键图片或用户选择深度模式时，调用轻量 OCR 或完整文档视觉模型补充。</li><li>融合器按页面位置、文本哈希和相似度合并内容；原生结果优先，视觉结果补缺，冲突内容同时保留来源和置信度。</li><li>每个内容块保存项目、测评、文件、页码、章节、块序号、类型、坐标、原文、表格结构、解析来源、置信度和内容哈希。</li><li>分类器根据文件名、文档标题、结构规则和 LLM 内容判断生成一个或多个候选类别；命名不规范只产生 <code>filename_warning</code>，不会阻止分析；无法分类的材料进入全局证据池。</li><li>系统从标准图谱读取当前检查项的标准依据、必需证据、完整条件、否定条件、严重程度和整改建议。</li><li>每个检查项先按项目、当前测评和有效文件过滤，再分别执行向量语义检索和关键词精确检索，通过合并排序得到候选块。</li><li>证据图谱补充候选块的同章节相邻段落、关联表格、跨文件引用和已有证据关系，避免只截取一句话失去上下文。</li><li>LLM 接收单个检查项和少量候选原文，逐条件输出 <code>support/partial/unsupported/contradict</code>、理由、引用块和置信度；模型不能修改检查标准。</li><li>规则引擎汇总必需条件：全部完整且无矛盾为 <code>pass</code>，有证据但不完整为 <code>partial</code>，可靠提取后缺失或矛盾为 <code>fail</code>，提取或模型不可用为 <code>unable</code>。</li><li><code>partial/fail</code> 生成 Finding 和整改工单；每条结论保存到原文件、页码、章节、表格或图片文字的证据关系。</li><li>前端持续显示上传、原生提取、视觉解析、融合、分类、标准检索、判证和结果生成进度；刷新后按任务 ID 恢复。</li></ol>
-<p>失败与恢复：文件损坏或格式不支持时只影响对应文件；OCR 不可用但原生内容可靠时可继续，依赖视觉内容的检查项为 <code>unable</code>；LLM 不可用时不得用关键词命中直接判定通过；任务超时后保留已完成阶段和可重试信息。</p>
+<ol><li>上传接口先校验权限、项目、测评任务、文件类型、体积、页数和压缩包安全，随后立即创建异步分析任务并返回任务 ID。</li><li>文件存储服务保存原文件，计算文件 SHA-256；相同文件不重复保存、解析和嵌入。</li><li>DOCX 原生解析段落、标题、列表、表格、页眉页脚和内嵌图片；PDF 原生解析文字层、页码、坐标和阅读顺序；TXT、MD 直接解析。</li><li>原生内容为空、字符质量异常、表格顺序混乱、页面含关键图片或用户选择深度模式时，调用轻量 OCR 或完整文档视觉模型补充。</li><li>融合器按页面位置、文本哈希和相似度合并内容；原生结果优先，视觉结果补缺，冲突内容同时保留来源和置信度。</li><li>每个内容块保存项目、测评、文件、页码、章节、块序号、类型、坐标、原文、表格结构、解析来源、置信度和内容哈希。</li><li>分类器根据文件名、文档标题、结构规则和 LLM 内容判断生成一个或多个候选类别；命名不规范只产生 <code>filename_warning</code>，不会阻止分析；无法分类的材料进入全局证据池。</li><li>系统从标准图谱读取当前检查项的标准依据、必需证据、完整条件、否定条件、严重程度和整改建议。</li><li>每个检查项先按项目、当前测评和有效文件过滤，再分别执行向量语义检索和关键词精确检索，通过合并排序得到候选块。</li><li>证据图谱补充候选块的同章节相邻段落、关联表格、跨文件引用和已有证据关系，避免只截取一句话失去上下文。</li><li>LLM 接收单个检查项和少量候选原文，逐条件输出 <code>support/partial/unsupported/contradict</code>、理由、引用块和置信度；模型不能修改检查标准。</li><li>规则引擎汇总必需条件：全部完整且无矛盾为 <code>pass</code>，有证据但不完整为 <code>partial</code>，可靠提取后缺失或矛盾为 <code>fail</code>，提取或模型不可用为 <code>unable</code>。</li><li><code>partial/fail</code> 生成 Finding；每条结论保存到原文件、页码、章节、表格或图片文字的证据关系。</li><li>前端持续显示上传、原生提取、视觉解析、融合、分类、标准检索、判证和结果生成进度；刷新后按任务 ID 恢复。</li><li>文档运行状态统一为 <code>queued → running → completed/failed/cancelled</code>；批量归类和单项文档检查均可从页面停止，停止不是分析失败，也不能被迟到结果覆盖。</li><li>Worker 为运行记录写入执行者、心跳和 15 分钟滚动租约；进程中断后只领取租约过期任务，最多自动恢复 3 次，单次运行默认最长 240 分钟。</li><li>每个文件提取、融合和嵌入完成后立即持久化内容块与进度；恢复同一运行时复用已完成文件，只继续未完成文件，不从首个文件重复 OCR。</li><li>单文件内部的瞬时提取错误最多执行 3 次（首次 + 2 次重试），按 1 秒、2 秒退避，并在进度中显示第几次尝试；成功恢复记录 <code>recovered_after_retry</code>，三次失败记录最终原因和尝试次数。</li><li>必需类别缺少材料，或可归类文件最终不可读时，任务进入 <code>failed/unable</code> 并生成 <code>not_tested</code> Finding；整改批次上传可读新版本后重新分析该类别。</li></ol>
+<p>失败与恢复：文件损坏或格式不支持时只影响对应文件且不做无意义重试；OCR 不可用但原生内容可靠时可继续，依赖视觉内容的检查项为 <code>unable</code>；LLM 不可用时不得用关键词命中直接判定通过。用户停止时 Worker 取消当前 OCR/模型等待并保留已完成文件；超时或 Worker 中断时保留检查点并自动恢复，达到恢复上限后明确失败，不能永久停在“正在提取”。</p>
 <p>整改复测：上传整改材料后，以该任务当前有效文件集合重新分析受影响检查项；系统保存初检和复测结论快照用于对比，但不运行旧版数据结构或旧算法。新材料确认生效后清理被替换文件的在线向量和临时 OCR 产物。</p>
 <p>验收要求：至少覆盖文本 DOCX、含表格 DOCX、文本 PDF、扫描 PDF、混合 PDF、图片、多文件共同取证、错误文件、OCR 关闭、命名不规范和相互矛盾证据。</p>
 <h3 id="section-32">5.8 技术工具与多资产执行<a href="#section-32" aria-label="链接到本节">#</a></h3>
 <p><strong>状态</strong>：<code>implemented</code>。</p>
 <p>入口统一为项目页自然语言、快捷按钮、<code>/</code> 命令、测评任务和单项复测；所有入口必须解析到同一 Capability Registry 和参数契约。</p>
-<ol><li>指令层识别能力、资产范围和参数；“全部资产”固定解析为当前项目已授权资产，不接受模型生成的项目外目标。</li><li>执行策略校验当前角色的 <code>scan:execute</code> 权限、资产授权状态、工具风险级别和必需凭据。</li><li>后端为任务创建持久化 ScanTask，状态从 <code>pending</code> 进入 <code>running</code>，前端立即显示运行卡片，输入框保持可用。</li><li>多资产计划按“资产 × 能力”展开并去重；组合工具形成显式子任务矩阵，单个子工具失败不丢弃其他结果。</li><li>Execution Engine 统一能力别名和参数，按并发上限调度，通过 MCP Gateway 路由到对应 Tool Server。</li><li>Tool Server 执行真实二进制或协议检测，并返回原始结构；工具未安装、参数错误、网络不可达、端口拒绝、超时、认证失败和目标不适用必须区分。</li><li>执行层将每个结果归一化为 <code>status、target、capability、data、metadata、error</code>，组合结果增加子任务成功、警告、失败和跳过统计。</li><li>WebSocket 推送实时状态，轮询作为补充；完成事件必须携带完整结果。页面刷新后根据持久化任务恢复运行态或已完成结果。</li><li>前端把同一命令的多资产结果聚合为一张可展开卡片；每个资产显示 IP/域名、资产名称、工具、覆盖内容、风险和错误。</li><li>TaskExecutor 只从完整成功结果生成或关闭技术 Finding；失败、警告或部分执行不能被解释为“未发现风险”。</li></ol>
+<ol><li>指令层识别能力、资产范围和参数；“全部资产”固定解析为当前项目已授权资产，不接受模型生成的项目外目标。</li><li>执行策略校验当前角色的 <code>scan:execute</code> 权限、资产授权状态、工具风险级别和必需凭据。</li><li>后端为任务创建持久化 ScanTask，状态从 <code>pending</code> 进入 <code>running</code>，前端立即显示运行卡片，输入框保持可用。</li><li>多资产计划按“资产 × 能力”展开并去重；组合工具形成显式子任务矩阵，单个子工具失败不丢弃其他结果。</li><li>Execution Engine 统一能力别名和参数，按并发上限调度，通过 MCP Gateway 路由到对应 Tool Server。</li><li>Tool Server 执行真实二进制或协议检测，并返回原始结构；工具未安装、参数错误、网络不可达、端口拒绝、超时、认证失败和目标不适用必须区分。</li><li>执行层将每个结果归一化为 <code>status、target、capability、data、metadata、error</code>，组合结果增加子任务成功、警告、失败和跳过统计。</li><li>WebSocket 推送实时状态，轮询作为补充；完成事件必须携带完整结果。页面刷新后根据持久化任务恢复运行态或已完成结果。</li><li>前端把同一命令的多资产结果聚合为一张可展开卡片；每个资产显示 IP/域名、资产名称、工具、覆盖内容、风险和错误。</li><li>TaskExecutor 只从完整成功结果生成或更新技术 Finding；关闭历史 Finding 必须走整改与复测链路，失败、警告或部分执行不能被解释为“未发现风险”。</li><li>自动测评任务每 10 秒续租，租约默认 2 分钟；每个资产完成后立即写入 <code>asset_results</code> 检查点，Worker 恢复时跳过已完成资产，最多尝试 3 次。</li><li>停止请求先以 <code>cancel_requested_at</code> 和 <code>execution.state=cancelled</code> 持久化，再由 Worker 取消本地协程；MCP Client 调用 Gateway 取消接口，Tool Server 终止 nmap、nuclei、hydra、testssl 的实际进程组或关闭 SSH 协程。</li><li>完成与停止使用条件更新竞争：先成功写入的终态生效，迟到结果不能把 <code>cancelled/failed</code> 覆盖为 <code>completed</code>。</li><li>每次状态变化同时更新 <code>ScanTask.status</code> 和 <code>control_state</code>；部署迁移统一修正既有任务中“已完成/失败但仍显示排队”的状态。</li></ol>
 <div class="diagram-shell"><pre class="mermaid">sequenceDiagram
   autonumber
   actor U as 用户
@@ -481,35 +480,78 @@
     DB--&gt;&gt;FE: 完整聚合结果
     FE--&gt;&gt;U: 按资产展开风险与错误
   else Worker 中断
-    DB--&gt;&gt;W: 租约过期后重新领取或标记可重试失败
+    DB--&gt;&gt;W: 租约过期后领取未完成资产检查点
+  else 用户停止
+    FE-&gt;&gt;API: 停止 task_id
+    API-&gt;&gt;DB: cancel_requested_at / cancelled
+    W-&gt;&gt;GW: cancel tool_task_id
+    GW-&gt;&gt;TS: 终止进程组或 SSH 协程
+    TS--&gt;&gt;W: cancelled
   end</pre></div>
 <p>端口结果必须区分 <code>open</code>、<code>closed</code>、<code>filtered</code>、<code>unreachable</code>；SSH 端口扫描显示开放只代表 TCP 可建立，基线检查仍可能出现认证失败、连接拒绝或容器出口超时。SSL/Web/数据库等协议工具同样必须区分端口层可达和应用层握手成功。</p>
 <p>错误结果必须包含：发生在哪个资产、哪个工具、执行到哪一步、底层原因、是否可以重试以及建议检查的网络、凭据或参数。复制结果时递归序列化对象和数组，不能出现 <code>[object Object]</code>。</p>
+<p>顶层工具和组合子工具共用同一结果判定：<code>scan_completed=false</code>、<code>success=false</code>、<code>reachable=false</code> 或 <code>tool_status=warning</code> 必须归一化为 <code>warning</code>，单独计入“未完成/不可判定”，并展示工具原始原因；不得计入成功、不得生成“0 个问题”或“本次未发现问题”的安全结论。ScanTask 可以进入执行终态 <code>completed</code>，但结果可信度必须保持 <code>conditional</code>，相关 Finding 和复测项保持活动状态。</p>
 <h3 id="section-33">5.9 AI 对话、命令解析与并发任务<a href="#section-33" aria-label="链接到本节">#</a></h3>
-<p><strong>状态</strong>：<code>implemented</code>。</p>
-<ol><li>用户在 <code>/projects/:projectId</code> 输入自然语言、快捷命令或点击快捷按钮；回车发送，Shift+Enter 换行，方向上键查看历史输入。</li><li>确定性命令先由统一命令目录解析；需要语义理解时，AI Engine 根据当前项目、已授权资产和能力目录生成结构化 plan。</li><li>plan 必须通过能力名、参数、目标范围和权限校验；不完整 JSON、把“项目”当成 target、引用项目外资产等结果在执行前纠正或拒绝。</li><li>纯对话直接返回文字；有工具计划时立即创建任务并返回 task ID，不等待扫描完成。</li><li>每个任务独立执行，前一个长任务不能锁住输入框或阻止提交下一条命令。</li><li>聊天消息保存用户输入、AI 响应、任务 ID 和结果关联；任务进度通过 WebSocket 与轮询更新。</li><li>多资产任务只在聊天中产生一个聚合结果消息，详情按资产展开，检测结果中心保留独立执行记录。</li><li>自动滚动只在用户位于底部附近或发送新消息时触发；用户上滚查看历史后不得被后台进度强制拉回底部。</li><li>刷新项目页后恢复对话历史、运行任务和已完成结果；服务重启时以持久化 ScanTask 和 checkpoint 为准，无法恢复的进程必须明确失败而不是永久运行。</li><li>用户可以暂停、继续、停止或删除允许控制的任务；停止请求持久化，工作进程在安全检查点退出。</li></ol>
+<p><strong>状态</strong>：入口统一、持久化任务、进度恢复、多任务输入、独立 Worker 队列和受控并发均已 <code>implemented</code>；多 Agent 协作是 <code>accepted-pending</code>。</p>
+<ol><li>用户在 <code>/projects/:projectId</code> 输入自然语言、快捷命令或点击快捷按钮；回车发送，Shift+Enter 换行，方向上键查看历史输入。</li><li>自然语言默认由 AI Engine 根据当前项目、已授权资产和能力目录选择工具、组合步骤并生成结构化 plan；<code>/</code> 命令和快捷按钮只是同一能力目录中的显式工具别名，不建立另一套执行逻辑。</li><li>plan 必须通过能力名、参数、目标范围和权限校验；不完整 JSON、把“项目”当成 target、引用项目外资产等结果在执行前纠正、剔除或拒绝。</li><li>纯对话直接返回文字；有工具计划时立即创建任务并返回 task ID，不等待扫描完成。</li><li>每个任务独立执行，前一个长任务不能锁住输入框或阻止提交下一条命令。</li><li>聊天消息保存用户输入、AI 响应、任务 ID 和结果关联；任务进度通过 WebSocket 与轮询更新。</li><li>多资产任务只在聊天中产生一个聚合结果消息，详情按资产展开，检测结果中心保留独立执行记录。</li><li>自动滚动只在用户位于底部附近或发送新消息时触发；用户上滚查看历史后不得被后台进度强制拉回底部。</li><li>刷新项目页后恢复对话历史、运行任务和已完成结果；服务重启时以持久化 ScanTask 和 checkpoint 为准，无法恢复的进程必须明确失败而不是永久运行。</li><li>用户可以暂停、继续、停止或删除允许控制的任务；停止请求持久化，工作进程在安全检查点退出。</li><li>当前输入明确给出目标时，结构化计划只保留当前输入中出现的目标并按能力和参数去重；历史消息只能辅助理解指代，不能把上一条扫描目标再次加入新任务。</li><li>一个组合计划中某个参数无效或目标越界时，只剔除该子步骤并继续执行其余合法步骤；全部步骤都无效时才拒绝任务。LLM 是自然语言的主规划器；仅当当前指令同时明确写出项目资产和已知工具，而 LLM plan 缺参、引用历史目标或违反工具 schema 时，Orchestrator 才按当前输入做最小纠偏，不扩展成全局固定路由。</li><li>“Web 扫描”或“Web 漏洞扫描”是能力目录中 <code>nikto_scan</code> 的显式别名，其参数契约为 <code>target</code>；明确要求 SQL 注入且提供带查询参数的 URL 或 POST 数据时使用 <code>sqlmap_scan</code>。该映射用于约束工具 schema，不取代 LLM 对模糊目标、组合任务和上下文的判断。</li><li>自然语言、快捷按钮和 <code>/</code> 工具命令只是同一交互检测能力的三种入口，必须创建相同结构的独立 ScanTask；不按入口建立三套队列。Web 扫描 A 与随后提交的端口扫描 B 可以同时运行，谁先完成谁先回写自己的结果，暂停、失败和超时互不改变另一任务状态。</li><li>目标执行拓扑拆分为文档分析、测评技术检测、交互检测、整改与重新检查、低优先级维护五类持久队列和独立 Worker 池。每类配置并发上限、租约、心跳和背压；结果始终以任务 ID、项目 ID、资产和能力关联，不能依赖前端请求顺序。</li><li>Compose 分别运行 <code>document-worker</code>、<code>assessment-worker</code>、<code>interactive-worker</code>、<code>verification-worker</code> 和 <code>maintenance-worker</code>；页面区分“排队中”和“执行中”，<code>/ping</code> 与其他交互入口使用相同任务 ID、WebSocket 和轮询恢复链路。</li><li>多 Agent 协作在可靠队列完成后实施。Orchestrator Agent 负责任务分解和汇总，文档、网络、Web、主机等专业 Agent 拥有受限上下文和能力集合；Agent 通过持久任务和结构化结果协作，不能绕过 RBAC、资产范围、Flow Engine、规则裁决或直接写最终合规状态。MCP Tool Server 仍是工具，不视为 Agent。</li></ol>
+<div class="diagram-shell"><pre class="mermaid">flowchart LR
+  CHAT[&quot;自然语言&quot;] --&gt; INGRESS[&quot;统一交互入口&quot;]
+  QUICK[&quot;快捷按钮&quot;] --&gt; INGRESS
+  SLASH[&quot;/ 工具命令&quot;] --&gt; INGRESS
+  INGRESS --&gt; IQ[&quot;交互检测队列&quot;]
+  ASSESS[&quot;等保技术检测&quot;] --&gt; TQ[&quot;测评技术队列&quot;]
+  DOC[&quot;批量文档检查&quot;] --&gt; DQ[&quot;文档分析队列&quot;]
+  VERIFY[&quot;整改与重新检查&quot;] --&gt; VQ[&quot;重新检查队列&quot;]
+  MAINT[&quot;报告 / 归档 / 定时任务&quot;] --&gt; MQ[&quot;低优先级维护队列&quot;]
+  IQ --&gt; IW[&quot;交互 Worker 池&quot;]
+  TQ --&gt; TW[&quot;技术 Worker 池&quot;]
+  DQ --&gt; DW[&quot;文档 Worker 池&quot;]
+  VQ --&gt; VW[&quot;重新检查 Worker 池&quot;]
+  MQ --&gt; MW[&quot;维护 Worker 池&quot;]
+  IW --&gt; RESULT[&quot;按任务 ID 独立回写进度和结果&quot;]
+  TW --&gt; RESULT
+  DW --&gt; RESULT
+  VW --&gt; RESULT
+  MW --&gt; RESULT</pre></div>
 <h3 id="section-34">5.10 Finding、证据、整改与复测<a href="#section-34" aria-label="链接到本节">#</a></h3>
-<p><strong>状态</strong>：<code>implemented</code>，文档证据关系已随 5.7 节升级。</p>
-<ol><li>文档规则判定和技术检测共同产生 Finding；Finding 必须记录项目、来源任务、检查项/工具、资产或文件、严重程度、判定、描述和整改建议。</li><li>新 Finding 自动创建整改工单；技术问题按工具和资产归属展示，文档问题按文档类别聚合，组内展开不同检查项。</li><li>工单状态为 <code>open → in_progress → resolved → verified → closed</code>，也可从处理中进入 <code>skipped</code>；跳过必须填写原因并进入报告。</li><li>文档整改不是手动点击“通过”，而是上传新文件或文本后重新分析该类别全部检查项。</li><li>技术整改不是手动点击“通过”，而是对原资产重新执行原能力；需要凭据时再次明确收集。</li><li>复测结果与初检对比：原问题消失为已修复，仍命中为仍存在，新命中为新增，人工跳过为已跳过。</li><li>只有对应复测完整成功且风险消失时，Finding 才能自动进入 resolved，工单再经过验证进入 verified/closed。</li><li>复测失败、超时或工具部分执行时保留原 Finding，不得因为“本次没有返回风险”自动关闭。</li><li>证据卡展示原文件/资产、页码或工具、原文/原始发现、判定理由、首次发现时间、整改提交和复测时间线。</li><li>重置任务、阶段或测评时，按 5.5 节同步清理对应 Finding、Evidence、工单和复测关系，不能留下孤立数据。</li></ol>
+<p><strong>状态</strong>：<code>implemented</code>。Finding 直接复测模型、文档/技术复测 Worker、自动裁决、阶段联动、重置清理、项目页交互和报告追溯已经落地；不建立中间工单系统。</p>
+<ol><li><code>Finding</code> 是问题权威记录，使用项目、资产/文档范围、检查项/能力和风险指纹稳定标识问题；描述文字不能作为技术问题匹配主键。</li><li>整改与复测工作区按文档任务和技术来源聚合 Finding，同时列出差距分析/现场测评中执行失败的必检任务；用户首先看到“问题是什么、属于哪里、为什么不符合或为什么未完成”。</li><li>文档问题支持单类和批量两种整改入口。单类入口可追加文件或替换指定文件；批量入口接收多文件、文件夹、ZIP、RAR 或 7z，并复用差距分析的混合归类。可靠归类后，同类旧版本停用但保留文件与版本关系，新版本成为当前有效材料；无法可靠归类的文件只显示提示，不得更新整改结论。</li><li>单类或批量提交后，系统都以该文档任务当前有效的全部文件为输入，重新执行该类全部检查项，并为该类全部 <code>open</code> Finding 创建同一个文档 <code>VerificationRun</code>，而不是只检查用户点中的一个问题。</li><li>文档复测比较相同 <code>clause_id</code> 的初检与新结论；原问题消失且新结论可靠通过为 <code>fixed</code>，仍不完整为 <code>still_present</code>，新增不符合项为 <code>new</code>，解析/模型失败为 <code>unable</code>。</li><li>技术问题按资产、能力和稳定风险指纹创建复测项；相同资产与能力合并成一次真实执行，再把结果分发到相关 Finding，避免一个问题重复扫描一遍。</li><li>技术复测需要认证时重新收集凭据；密码、私钥正文和令牌只进入短期加密凭据封装，不得写入普通任务参数、日志、事件或报告。</li><li><code>VerificationRun</code> 状态为 <code>queued → running → completed/partial/failed/cancelled</code>；<code>VerificationItem</code> 结论为 <code>fixed/still_present/new/unable/cancelled</code>，并保存初检观察、复测观察、前后差异和错误。</li><li>复测运行保存心跳、租约和恢复次数；独立续租监视器在单个长工具调用期间也持续刷新租约，而不是只在能力组结束后续租。支持停止、继续和刷新恢复；Worker 失联后只重领未完成目标/能力组，迟到结果不能覆盖已停止终态。</li><li>只有 <code>fixed</code> 可以自动把 Finding 改为已修复；<code>still_present/new/unable/cancelled</code> 均保留或新增活动问题。</li><li>主流程不提供“接受风险”“手工通过”或“直接关闭”入口；未修复和无法验证项保持活动状态。报告可以如实披露这些问题，但只有修正材料、凭据、参数、网络或工具条件并真实复测为 <code>fixed</code> 才能关闭 Finding。</li><li>文档 Finding 若 <code>judgment=not_tested</code>，表示正文提取或模型判证尚未可靠完成；用户必须重新上传可解析材料、重新分析或恢复视觉/LLM 能力。</li><li>差距分析和现场测评的必检任务失败时，即使没有产生 Finding，也会作为 <code>execution_blocker</code> 阻止自动完成；修正网络、凭据或工具条件后可返回原阶段重试，也可生成带明确覆盖限制的当前状态报告。</li><li>当所有 Finding 均已获得 <code>fixed/still_present/new/unable</code> 终态复核、没有运行中的复测且没有执行阻断项时，“整改与复测”自动完成并激活报告。阶段自动完成表示复核覆盖完成，不表示所有风险已修复。</li><li>页面提供“以当前结果生成报告”：只在没有运行中复测时可用，明确显示将带入报告的待处理和无法验证数量。该动作仅结束本轮流程并保存问题快照，不提供“复测通过”“关闭问题”或伪造合规结论的能力。</li><li>用户以当前结果进入报告后，尚未复核、已取消、仍存在、无法验证和执行阻断均保持原状态并进入报告；再次提交改进文档或技术复测时，Flow Engine 清除报告快照、重新打开整改阶段并把报告任务恢复为 <code>todo</code>。</li><li>页面先显示明确的“下一步”，再展示当前问题、执行阻断、运行进度、停止/继续、前后对比和事件时间线。</li><li>单项、阶段和整体重置同步清理对应 VerificationRun、VerificationItem、FindingEvent 和派生状态；重开 Finding 或重置上游阶段时报告任务恢复为 <code>todo</code>。</li><li>HTML 报告读取同一事实模型，展示初检、重新检查、已修复、未解决、新增和无法验证，不从名称或任务完成百分比猜测结论。</li><li>工作区提供“待处理、已修复、无法验证、全部”四个筛选，文档与技术问题按来源聚合；初检后尚未重新检查的 <code>open</code> 和重新检查后仍存在的 <code>still_present</code> 都归入“待处理”。问题列表独立滚动，避免数据增多后挤出操作区。</li><li>文档组的首要动作是“上传改进文档并重新检查”，技术组的首要动作是“重新执行该项检测”。</li><li>每个 Finding 只显示一个当前权威状态：<code>待处理/复测后仍存在/已修复/无法验证/重新检查中</code>。完整复测历史收进“复测记录”弹窗，默认收起逐项明细，主工作区只保留最近一次摘要，<code>completed/partial/failed/cancelled</code> 都必须可追溯。</li><li>阶段显示“本轮结束”而不是“全部完成”；它表示本轮复核或用户快照已经结束，不表示全部 Finding 已修复或项目已经合规。</li></ol>
 <div class="diagram-shell"><pre class="mermaid">flowchart LR
   SOURCE[&quot;文档检查或技术检测&quot;] --&gt; FINDING[&quot;Finding：问题、来源、资产/文件、严重度&quot;]
-  FINDING --&gt; TICKET[&quot;整改工单：open&quot;]
-  TICKET --&gt; WORK[&quot;in_progress：责任人处理&quot;]
-  WORK --&gt;|&quot;文档问题&quot;| DOCFIX[&quot;提交新材料并重跑相关检查项&quot;]
-  WORK --&gt;|&quot;技术问题&quot;| TECHFIX[&quot;对原资产重跑原能力&quot;]
-  WORK --&gt;|&quot;无法处理并说明原因&quot;| SKIP[&quot;skipped&quot;]
-  DOCFIX --&gt; COMPARE[&quot;初检与复测对比&quot;]
-  TECHFIX --&gt; COMPARE
-  COMPARE --&gt;|&quot;完整复测且风险消失&quot;| RESOLVED[&quot;resolved → verified → closed&quot;]
-  COMPARE --&gt;|&quot;仍命中&quot;| EXISTS[&quot;仍存在：返回 in_progress&quot;]
-  COMPARE --&gt;|&quot;新命中&quot;| NEW[&quot;新增 Finding 与工单&quot;]
-  COMPARE --&gt;|&quot;失败、超时、部分执行&quot;| UNABLE[&quot;未完成：保留原 Finding&quot;]
-  EXISTS --&gt; WORK
-  NEW --&gt; WORK</pre></div>
+  FINDING --&gt;|&quot;文档问题&quot;| DOC[&quot;单类或批量提交改进文档&quot;]
+  DOC --&gt; CLASSIFY[&quot;混合归类 + 同类版本替换&quot;]
+  FINDING --&gt;|&quot;技术问题&quot;| TECH[&quot;按原资产 + 能力重新检测&quot;]
+  CLASSIFY --&gt; RUN[&quot;VerificationRun&lt;br/&gt;该类全部 open Finding&quot;]
+  TECH --&gt; RUN
+  RUN --&gt; ITEM[&quot;VerificationItem&lt;br/&gt;初检 / 复测 / 差异&quot;]
+  ITEM --&gt;|&quot;fixed&quot;| RESOLVED[&quot;Finding fixed&quot;]
+  ITEM --&gt;|&quot;still_present&quot;| EXISTS[&quot;原 Finding 保持 open&quot;]
+  ITEM --&gt;|&quot;new&quot;| NEW[&quot;创建新 Finding&quot;]
+  ITEM --&gt;|&quot;unable / cancelled&quot;| UNABLE[&quot;保留问题并修正条件后重试&quot;]
+  EXISTS --&gt; FINDING
+  NEW --&gt; FINDING
+  UNABLE --&gt; FINDING
+  RESOLVED --&gt; AUTO[&quot;全部问题已复核 + 无执行阻断&quot;]
+  EXISTS --&gt; AUTO
+  NEW --&gt; AUTO
+  UNABLE --&gt; AUTO
+  AUTO --&gt;|&quot;自动推进&quot;| REPORT[&quot;激活 HTML 报告&quot;]
+  FINDING --&gt; SNAPSHOT[&quot;用户选择以当前结果生成报告&quot;]
+  SNAPSHOT --&gt;|&quot;无运行中复测；保留所有问题与阻断&quot;| REPORT
+  REPORT --&gt;|&quot;再次发起复测&quot;| FINDING</pre></div>
+<p>实现验收：数据库迁移 <code>013_reopen_accepted_risks</code> 已在 PostgreSQL 执行，旧的管理性关闭捷径全部恢复为待整改；项目 70 的最新 Web 复测可逐项显示资产、工具、<code>still_present/new</code> 结果、原始发现和任务 ID。<code>check_verification_contract.py</code>、<code>check_verification_lifecycle.py</code> 和自动化测试通过。<code>build_real_compliance_documents.py</code> 与 <code>check_real_material_api_flow.py</code> 使用真实 DOCX、文本 PDF、扫描 PDF、批量材料和受控 SSH/Web 靶机，从空项目验证错误凭据失败、正确凭据重试、文档改进材料、技术复测、不适用项和四阶段 HTML 报告；报告明确保留已修复、仍存在和无法完成的覆盖限制。</p>
 <h3 id="section-35">5.11 HTML 报告生成<a href="#section-35" aria-label="链接到本节">#</a></h3>
 <p><strong>状态</strong>：<code>implemented</code>。</p>
-<ol><li>用户在报告中心或测评第五阶段选择项目生成报告。</li><li>后端校验 <code>report:read</code> 或 <code>report:export</code> 权限，读取当前项目、资产、五阶段进度、扫描、文档结论、Finding、整改和复测数据。</li><li>报告服务先构建统一报告模型，再生成独立 HTML；页面预览和下载使用同一模型，避免内容不一致。</li><li>报告按“执行摘要、范围、差距分析、现场测评、问题清单、整改状态、复测对比、变更提示、最终结论”组织。</li><li>每条问题显示资产或文档归属、来源工具/检查项、严重程度、状态、解决时长和可追溯证据。</li><li>未执行、执行失败、无法分析和无风险必须分开展示；覆盖率不足时不能给出“全部合规”结论。</li><li>已跳过项保留跳过原因；仍存在和新增问题进入最终风险摘要。</li><li>正式格式只保留 HTML，不生成或维护 PDF 主流程。</li></ol>
-<p>验收要求：测试报告必须同时包含技术初检问题、文档问题、整改动作、技术/文档复测、已修复与仍存在结果，而不是只有最终状态。</p>
+<ol><li>用户先结束本轮整改与复测；Flow Engine 激活第四阶段及唯一 <code>html_report</code> 任务。报告中心只预览和下载已生成版本，不绕过流程临时生成正式报告。</li><li>后端校验 <code>report:export</code> 权限，确认全部前序阶段完成、差距分析/现场测评正式任务均到达终态，并确认技术检测、文档分析和整改复测均无运行中任务；存在未执行或活动任务时拒绝生成并显示分类数量。</li><li>报告服务读取当前项目、资产、四阶段真实进度、扫描、文档结论、Finding、证据、复测和变更数据，构建一次不可变 JSON 快照；生成报告只能完成报告任务，不能反向把未完成上游阶段强制写成 100%。</li><li>服务根据同一快照渲染 HTML，计算 SHA-256 和文件大小，创建递增版本的 <code>ReportArtifact</code>；任务完成后测评才达到 100%。</li><li>预览、HTML 下载和 JSON 导出都读取同一个 <code>ReportArtifact</code>，不得在读取时重新拼接最新数据库事实。</li><li>报告按“执行摘要、范围、差距分析、现场测评、问题清单、整改状态、复测对比、变更提示、最终结论”组织。</li><li>每条问题显示资产或文档归属、来源工具/检查项、严重程度、状态、解决时长和可追溯证据。</li><li>未执行、执行失败、无法分析和无风险必须分开展示；覆盖率不足时不能给出“全部合规”结论。已跳过、仍存在、新增和无法验证项保留原结论。</li><li>新安全检测、文档上传/重新分析、整改复测或流程重置会把当前产物标记为 <code>stale</code>，记录原因并把报告任务恢复为 <code>todo</code>；旧版本保留追溯，重新生成得到下一版本。</li><li>报告使用正式任务类型和能力目录生成中文检测名称，不能暴露 <code>targeted</code> 等内部枚举或对象字符串；正式格式只保留 HTML，不维护 PDF 主流程。</li></ol>
+<div class="diagram-shell"><pre class="mermaid">stateDiagram-v2
+  [*] --&gt; 报告待生成: 整改与复测结束
+  报告待生成 --&gt; 生成中: 无运行中检测/文档/复测
+  生成中 --&gt; 当前版本: 保存JSON快照+HTML+哈希
+  当前版本 --&gt; 预览下载: 所有入口读取同一产物
+  当前版本 --&gt; 已过期: 新检测/新文档/新复测/重置
+  已过期 --&gt; 报告待生成: 报告任务恢复todo
+  报告待生成 --&gt; 当前版本: 生成V(n+1)</pre></div>
+<p>验收要求：测试报告必须同时包含技术初检问题、文档问题、整改动作、技术/文档复测、已修复与仍存在结果；同一版本的 HTML/JSON 哈希和内容保持稳定，新输入必须使旧版本过期。</p>
 <h3 id="section-36">5.12 资产与端口变更检测<a href="#section-36" aria-label="链接到本节">#</a></h3>
 <p><strong>状态</strong>：<code>implemented</code>。</p>
 <ol><li>系统在资产集合或有效端口扫描完成后生成项目快照。</li><li>新快照与上一个已确认快照比较，生成新增资产、删除资产、新增开放端口和关闭端口事件。</li><li>变更事件记录项目、资产、旧值、新值、检测来源和时间。</li><li>项目页显示“需要重新评估”提示，并允许跳转到对应资产或重新执行检测。</li><li>用户确认变更后事件从待处理队列移出，但审计信息仍可查询。</li><li>扫描失败或结果不完整时不得生成“端口已关闭”的变更结论。</li></ol>
@@ -521,27 +563,38 @@
 <ol><li>管理员在模型设置页创建供应商和模型配置，测试连接后才将其设为可用。</li><li>AI 对话、文档分类和证据判定按用途选择配置，不在业务代码中硬编码供应商。</li><li>文档解析模式包括原生解析优先、轻量 OCR fallback、完整文档视觉模型三层。</li><li>标准模式在原生结果为空或可疑时自动补充 OCR；深度模式对复杂页面做视觉交叉验证。</li><li>OCR 默认在本地容器处理企业材料；部署到不同 CPU/GPU 环境时允许切换推理后端，但对外保持统一 <code>document_page_parse</code> 契约。</li><li>模型不可用、超时或崩溃必须被隔离为单页/单任务错误，不能导致 Worker 永久占用或把检查判为通过。</li><li>模型密钥和文档凭据不得出现在 API 返回、日志、报告和架构文档中。</li></ol>
 <h3 id="section-39">5.15 诊断、健康与工具遥测<a href="#section-39" aria-label="链接到本节">#</a></h3>
 <p><strong>状态</strong>：<code>implemented</code>。</p>
-<ol><li><code>/health</code> 用于服务级存活检查；<code>/diagnostics/mcp/health</code> 汇总 MCP Gateway 和 Tool Server 健康状态。</li><li><code>/diagnostics/operations</code> 展示工具路由、依赖二进制和典型参数烟测结果。</li><li>单工具诊断使用安全测试参数验证路由、参数契约和返回结构，不把诊断失败解释为目标资产风险。</li><li>Dashboard 工具遥测读取健康与最近执行事实，显示工具名称、图标、成功率、最近错误和更新时间。</li><li>工具不可用时，执行入口仍可见但明确标记不可用；用户触发后快速失败并给出依赖或路由原因。</li><li>后端、Worker、Gateway 和 Tool Server 日志使用任务 ID、项目 ID、资产和能力名关联，但必须脱敏密码、密钥和令牌。</li></ol>
+<ol><li><code>/health</code> 用于服务级存活检查；<code>/diagnostics/mcp/health</code> 汇总 MCP Gateway 和 Tool Server 健康状态。</li><li>健康探测并发执行，避免低配置环境中多个 10 秒探测串行叠加；MCP Gateway 或工具路由不可用时整体为 <code>unhealthy</code>，单个工具服务降级、超时或缺少可选二进制时整体为 <code>degraded</code>，并保留具体服务和错误类型。</li><li><code>/diagnostics/operations</code> 展示工具路由、依赖二进制和典型参数烟测结果。</li><li>单工具诊断使用安全测试参数验证路由、参数契约和返回结构，不把诊断失败解释为目标资产风险。</li><li>Dashboard 工具遥测读取健康与最近执行事实，显示工具名称、图标、成功率、最近错误和更新时间。</li><li>工具不可用时，执行入口仍可见但明确标记不可用；用户触发后快速失败并给出依赖或路由原因。</li><li>后端、Worker、Gateway 和 Tool Server 日志使用任务 ID、项目 ID、资产和能力名关联，但必须脱敏密码、密钥和令牌。</li></ol>
 <h3 id="section-40">5.16 删除、清理与数据规模控制<a href="#section-40" aria-label="链接到本节">#</a></h3>
 <p><strong>状态</strong>：<code>implemented</code>。扫描结果删除、测评重置、项目文档清理、组织业务初始化、容量遥测和标准图谱保护已形成闭环。</p>
-<ol><li>检测结果页支持单选、多选和一键删除项目扫描结果；后端级联删除 ScanTask、关联 Finding 和结果数据，并返回实际删除数量。</li><li>测评单项、阶段和整体重置按 5.5 节清理各自范围，不允许只重置进度条。</li><li>文档文件和内容块按 SHA-256 去重；同一有效内容只保存一份原文和可复用嵌入。</li><li>向量索引只保留当前有效材料和检查所需命名空间；被替换材料的向量、临时页面和 OCR 缓存自动回收。</li><li>标准图谱独立于项目业务数据，只保存一套版本化标准关系；项目证据图谱只保存有效结构和确认使用的证据关系。</li><li>三级清理入口分别为：重置本次测评、清空项目文档业务数据、初始化组织业务数据。任何一级都不能删除标准图谱和系统角色模板。</li><li>删除采用后端事务和文件清理任务；部分文件删除失败时记录可重试清单，不能向前端假报全部成功。</li><li>存储遥测应展示原文件、解析产物、向量、OCR 缓存、扫描结果和报告各自占用，便于管理员决定清理范围。</li></ol>
-<p>删除边界：项目文档清理只删除文档运行、内容块、向量、文档 Finding/Evidence/整改和项目证据图谱，保留资产及技术扫描；组织业务初始化删除组织下全部项目业务数据，保留组织、成员、权限角色和全局标准图谱。数据库删除在事务内完成，物理文件在提交后删除，失败路径进入审计记录并返回前端重试清单。</p>
+<ol><li>检测结果页支持单选、多选和一键删除项目扫描结果；后端级联删除 ScanTask、关联 Finding 和结果数据，并返回实际删除数量。</li><li>测评单项、阶段和整体重置按 5.5 节清理各自范围，不允许只重置进度条。</li><li>文档文件和内容块按 SHA-256 去重；同一有效内容只保存一份原文和可复用嵌入。</li><li>向量索引只保留当前有效材料和检查所需命名空间；被替换材料的向量、临时页面和 OCR 缓存自动回收。</li><li>标准图谱独立于项目业务数据，只保存一套版本化标准关系；项目证据图谱只保存有效结构和确认使用的证据关系。</li><li>三级清理入口分别为：重置本次测评、清空项目文档业务数据、初始化组织业务数据。任何一级都不能删除标准图谱和系统角色模板。</li><li>删除采用后端事务和提交后的文件清理；物理文件删除是幂等操作并最多重试 3 次，仍失败时记录准确路径，不能向前端假报全部成功。</li><li>存储遥测展示原文件、解析产物、向量、OCR 缓存、扫描结果和报告各自占用；完全重置完成后显示实际删除记录数、文件数和释放字节。</li><li>测评完全重置提交数据库清理后再幂等删除物理文件；文件删除失败时返回准确残留路径和实际释放统计，不能把已删除的数据库事实伪装成仍可用。</li></ol>
+<p>删除边界：项目文档清理只删除文档运行、内容块、向量、文档 Finding/Evidence/Verification 和项目证据图谱，保留资产及技术扫描；测评完全重置删除当前项目全部测评派生事实但保留项目与资产；组织业务初始化删除组织下全部项目业务数据，保留组织、成员、权限角色和全局标准图谱。数据库删除在事务内完成，物理文件在提交后删除，失败路径进入返回结果和运维日志。</p>
+<div class="diagram-shell"><pre class="mermaid">flowchart LR
+  CLICK[&quot;用户确认完全重置&quot;] --&gt; STOP[&quot;停止项目运行任务&quot;]
+  STOP --&gt; DB[&quot;事务清理测评派生数据&quot;]
+  DB --&gt; GRAPH[&quot;清理项目证据图谱与向量&quot;]
+  GRAPH --&gt; FILES[&quot;提交后删除文档、证据和报告文件&quot;]
+  FILES --&gt; EMPTY[&quot;四阶段回到 0%，旧结果卡失效&quot;]
+  KEEP[&quot;保留项目、资产、权限、计划、标准和审计&quot;] -.边界.-&gt; EMPTY</pre></div>
 <h2 id="section-41">六、产品模块清单<a href="#section-41" aria-label="链接到本节">#</a></h2>
-<div class="table-wrap"><table><thead><tr><th>模块</th><th>权威职责</th><th>关键页面/入口</th><th>状态</th></tr></thead><tbody><tr><td>认证与组织</td><td>登录、注册、Token、组织上下文和成员管理</td><td>登录页、组织设置</td><td>implemented</td></tr><tr><td>角色权限</td><td>系统/自定义角色、权限赋予、成员调整和角色审计</td><td>Dashboard、组织设置</td><td>implemented</td></tr><tr><td>Dashboard</td><td>组织概况、项目矩阵、真实资产拓扑、风险队列、工具遥测</td><td><code>/dashboard</code></td><td>implemented</td></tr><tr><td>项目管理</td><td>创建、编辑、归档、恢复、删除和演示项目</td><td><code>/projects</code></td><td>implemented</td></tr><tr><td>资产管理</td><td>跨项目资产矩阵、授权确认、资产增删改查</td><td><code>/projects?view=assets</code></td><td>implemented</td></tr><tr><td>项目执行</td><td>AI 对话、快捷命令、并发任务、测评和聚合结果</td><td><code>/projects/:projectId</code></td><td>implemented</td></tr><tr><td>五阶段测评</td><td>阶段依赖、任务矩阵、进度、暂停、跳过和三级重置</td><td>项目执行页</td><td>implemented</td></tr><tr><td>文档解析</td><td>原生解析、OCR/视觉补充、内容块和融合</td><td>项目执行页、Worker、OCR Server</td><td>implemented</td></tr><tr><td>标准与检索</td><td>Apache AGE 标准/证据图谱、pgvector/关键词召回和规则裁决</td><td>后端文档服务</td><td>implemented</td></tr><tr><td>工具检测</td><td>端口、Web、漏洞、弱口令、数据库、SNMP、Windows、基线</td><td>项目执行页、MCP</td><td>implemented</td></tr><tr><td>任务与结果</td><td>持久任务、进度恢复、结果归一化、多资产聚合和批量删除</td><td>项目页、结果中心</td><td>implemented</td></tr><tr><td>整改复测</td><td>Finding、证据、工单、跳过、文档复测和技术复测</td><td>项目执行页</td><td>implemented</td></tr><tr><td>整改编排 Skill</td><td>按 Finding 生成结构化整改方案并协调文档/技术复测，不直接改结论</td><td>Orchestrator、Flow Engine、整改服务</td><td>accepted-pending</td></tr><tr><td>报告中心</td><td>当前项目事实的 HTML 报告预览和导出</td><td><code>/reports</code></td><td>implemented</td></tr><tr><td>变更检测</td><td>资产/端口快照、变更事件和重新评估提示</td><td>项目执行页</td><td>implemented</td></tr><tr><td>归档</td><td>项目只读归档、对话摘要、线程继续与恢复</td><td>项目列表、项目对话</td><td>implemented</td></tr><tr><td>压缩导出</td><td>HTML、JSON、证据索引和附件清单打包</td><td>归档/报告</td><td>accepted-pending</td></tr><tr><td>模型配置</td><td>LLM 供应商、用途配置、连接测试和 OCR 策略</td><td><code>/settings/models</code></td><td>implemented</td></tr><tr><td>数据生命周期</td><td>结果删除、三级清理、向量/OCR/图谱自动回收和容量遥测</td><td>结果页、项目设置、组织管理</td><td>implemented</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>模块</th><th>权威职责</th><th>关键页面/入口</th><th>状态</th></tr></thead><tbody><tr><td>认证与组织</td><td>登录、注册、Token、组织上下文和成员管理</td><td>登录页、组织设置</td><td>implemented</td></tr><tr><td>角色权限</td><td>系统/自定义角色、权限赋予、成员调整和角色审计</td><td>Dashboard、组织设置</td><td>implemented</td></tr><tr><td>Dashboard</td><td>组织概况、项目矩阵、真实资产拓扑、风险队列、工具遥测</td><td><code>/dashboard</code></td><td>implemented</td></tr><tr><td>项目管理</td><td>创建、编辑、归档、恢复、删除和演示项目</td><td><code>/projects</code></td><td>implemented</td></tr><tr><td>资产管理</td><td>跨项目资产矩阵、授权确认、资产增删改查</td><td><code>/projects?view=assets</code></td><td>implemented</td></tr><tr><td>项目执行</td><td>AI 对话、快捷命令、并发任务、测评和聚合结果</td><td><code>/projects/:projectId</code></td><td>implemented</td></tr><tr><td>四阶段测评</td><td>阶段依赖、任务矩阵、执行覆盖、严格门禁和三级重置</td><td>项目执行页</td><td>implemented</td></tr><tr><td>文档解析</td><td>原生解析、OCR/视觉补充、内容块和融合</td><td>项目执行页、Worker、OCR Server</td><td>implemented</td></tr><tr><td>标准与检索</td><td>Apache AGE 标准/证据图谱、pgvector/关键词召回和规则裁决</td><td>后端文档服务</td><td>implemented</td></tr><tr><td>工具检测</td><td>端口、Web、漏洞、弱口令、数据库、SNMP、Windows、基线</td><td>项目执行页、MCP</td><td>implemented</td></tr><tr><td>任务与结果</td><td>持久任务、进度恢复、结果归一化、多资产聚合和批量删除</td><td>项目页、结果中心</td><td>implemented</td></tr><tr><td>整改复测</td><td>Finding、VerificationRun/Item、自动裁决、时间线和阶段联动</td><td>项目执行页</td><td>implemented</td></tr><tr><td>整改建议编排</td><td>按 Finding 生成结构化整改建议并协调文档/技术复测，不直接改结论</td><td>Orchestrator、Flow Engine、Verification 服务</td><td>accepted-pending</td></tr><tr><td>报告中心</td><td>版本化正式 HTML 报告及其同源 JSON 快照的状态、预览和导出</td><td><code>/reports</code></td><td>implemented</td></tr><tr><td>变更检测</td><td>资产/端口快照、变更事件和重新评估提示</td><td>项目执行页</td><td>implemented</td></tr><tr><td>归档</td><td>项目只读归档、对话摘要、线程继续与恢复</td><td>项目列表、项目对话</td><td>implemented</td></tr><tr><td>压缩导出</td><td>HTML、JSON、证据索引和附件清单打包</td><td>归档/报告</td><td>accepted-pending</td></tr><tr><td>模型配置</td><td>LLM 供应商、用途配置、连接测试和 OCR 策略</td><td><code>/settings/models</code></td><td>implemented</td></tr><tr><td>数据生命周期</td><td>结果删除、三级清理、向量/OCR/图谱自动回收和容量遥测</td><td>结果页、项目设置、组织管理</td><td>implemented</td></tr></tbody></table></div>
 <h2 id="section-42">七、体验原则<a href="#section-42" aria-label="链接到本节">#</a></h2>
 <ul><li>对话是项目执行页核心入口，不能因为任务执行阻塞新输入。</li><li>Dashboard 只展示组织态势，不放对话指令。</li><li>快捷按钮、快捷命令、聊天指令必须共用同一能力目录。</li><li>多资产、多工具结果必须聚合展示，不能刷屏。</li><li>每个结果必须说明资产归属、执行内容、成功/失败原因和可操作下一步。</li><li>不确定、提取失败、工具不可用必须明确显示，不能伪装成通过。</li><li>文档合规判断必须引用标准库和证据位置，不能只靠 Prompt。</li><li>UI 风格保持高端网络安全 SaaS：深色、克制、清晰、可滚动、可展开。</li></ul>
 <h2 id="section-43">八、当前仍需关注的问题<a href="#section-43" aria-label="链接到本节">#</a></h2>
-<div class="table-wrap"><table><thead><tr><th>问题</th><th>当前边界</th><th>已确认处理方向</th></tr></thead><tbody><tr><td>标准库专业校准尚未完成</td><td>当前先保证 10 类文档、至少 80 个必检点和正确自动判证方法</td><td>主流程稳定后再由专业人员校准依据、阈值和扩展到 21 类文档</td></tr><tr><td>OCR/视觉模型存在环境差异</td><td>Apple Silicon、ARM64、CPU/GPU 和容器运行时可能影响推理后端</td><td>保持统一接口和三层策略，为各平台选择稳定后端并做真实文档回归</td></tr><tr><td>整改 Skill 尚未独立配方化</td><td>当前整改原子能力和复测闭环可用，但缺少可版本化的根因聚合与自动编排配方</td><td>增加 <code>remediation_coordinator</code> Skill，复用现有确定性接口，不复制整改业务状态机</td></tr><tr><td>公网工具受网络路径影响</td><td>容器出口、目标防火墙、限速和协议握手会造成 filtered、timeout 或 refused</td><td>结果严格区分端口状态、网络失败、认证失败和工具失败，并提供诊断入口</td></tr><tr><td>外部进程无法精确续跑</td><td>持久任务和检查点可恢复状态，但部分扫描器中断后只能从安全边界重试</td><td>由 Worker 租约发现中断，明确标记并按能力重试，不伪装持续运行</td></tr><tr><td>归档压缩尚未落地</td><td>项目和对话归档可用，但还没有完整离线包</td><td>增加 HTML、JSON、证据索引和附件清单的可验证压缩导出</td></tr><tr><td>Pydantic 2 迁移告警</td><td>当前测试全部通过，但部分 Schema 仍使用旧式 <code>Config</code></td><td>分批改为 <code>ConfigDict</code>，在 Pydantic 3 前消除弃用告警</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>问题</th><th>当前边界</th><th>已确认处理方向</th></tr></thead><tbody><tr><td>标准库专业校准尚未完成</td><td>当前先保证 10 类文档、至少 80 个必检点和正确自动判证方法</td><td>主流程稳定后再由专业人员校准依据、阈值和扩展到 21 类文档</td></tr><tr><td>OCR/视觉模型存在环境差异</td><td>Apple Silicon、ARM64、CPU/GPU 和容器运行时可能影响推理后端</td><td>保持统一接口和三层策略，为各平台选择稳定后端并做真实文档回归</td></tr><tr><td>AI 整改建议编排尚未落地</td><td>确定性 Finding 直接复测闭环可用，自然语言整改建议和批量复测编排仍是后续能力</td><td>通过公开命令生成整改建议并协调复测，不引入工单，也不拥有最终状态</td></tr><tr><td>公网工具受网络路径影响</td><td>容器出口、目标防火墙、限速和协议握手会造成 filtered、timeout 或 refused</td><td>结果严格区分端口状态、网络失败、认证失败和工具失败，并提供诊断入口</td></tr><tr><td>外部扫描器不支持进程内断点</td><td>Worker 已能按文件或资产检查点恢复，但 nmap、nuclei 等单次二进制进程中断后仍需重跑该未完成子工具</td><td>停止时终止实际进程；恢复时只重跑未完成资产/能力，不重复已完成检查点</td></tr><tr><td>归档压缩尚未落地</td><td>项目和对话归档可用，但还没有完整离线包</td><td>增加 HTML、JSON、证据索引和附件清单的可验证压缩导出</td></tr><tr><td>Pydantic 2 迁移告警</td><td>当前测试全部通过，但部分 Schema 仍使用旧式 <code>Config</code></td><td>分批改为 <code>ConfigDict</code>，在 Pydantic 3 前消除弃用告警</td></tr></tbody></table></div>
 <h2 id="section-44">九、验收口径<a href="#section-44" aria-label="链接到本节">#</a></h2>
 <p>当前产品是否可用，以这些场景验收：</p>
-<ul><li>注册后自动创建组织和管理员关系；只读角色不能执行扫描、重置测评或修改权限。</li><li>创建项目和资产后，未确认授权的资产不会进入“全部资产”扫描，项目外地址不会被 AI 错误注入。</li><li>新建项目后只出现 5 阶段流程。</li><li>Dashboard、项目页、报告页不再出现旧流程阶段。</li><li>差距分析的文档和技术区域可以分别自动批量执行，也保留单项手动执行。</li><li>批量上传文件、文件夹或压缩包后能看到逐阶段进度、文档分类、命名提示、检查点结论、证据位置和整改项。</li><li>DOCX 段落/表格/页眉页脚/图片、文本 PDF、扫描 PDF 和混合 PDF 均能产生带位置内容块。</li><li>向量、关键词和图谱联合检索能为同一检查项组合相邻段落、表格及跨文件证据。</li><li>文档解析失败时显示 <code>unable</code>，不算通过。</li><li>LLM 不可用时不得使用关键词命中直接判定文档通过。</li><li>对多个资产执行工具时，结果按资产聚合展示。</li><li>工具失败时能看到具体原因。</li><li>错误 SSH 密码只让依赖认证的任务失败，不能让整个差距分析显示全部通过。</li><li>同时提交两条长任务时，第二条可以立即创建，聊天输入不被第一条阻塞。</li><li>用户上滚查看历史消息时，后台进度不得强制滚动到底部。</li><li>手动工具测评、等保技术检测和组合扫描都能产生进度和结果。</li><li>失败或部分执行不能关闭历史 Finding；完整复测且风险消失后才能自动解决。</li><li>整改后通过上传新文档或重新执行工具完成复测。</li><li>完全重置测评时，进度、证据、整改、复测状态同步清空。</li><li>单项和阶段重置只清理对应范围，项目资产和无关扫描历史不丢失。</li><li>HTML 报告能展示初检、整改、复测和最终结论。</li><li>批量删除扫描结果后数据库关联记录和存储产物同步释放，不残留孤立 Finding。</li><li>清空项目文档数据时删除内容块、向量、证据图谱和 OCR 缓存，但标准图谱保持完整。</li></ul>
-<h2 id="section-45">十、架构记忆<a href="#section-45" aria-label="链接到本节">#</a></h2>
-<h3 id="section-46">10.1 维护规则<a href="#section-46" aria-label="链接到本节">#</a></h3>
+<ul><li>注册后自动创建组织和管理员关系；只读角色不能执行扫描、重置测评或修改权限。</li><li>创建项目和资产后，未确认授权的资产不会进入“全部资产”扫描，项目外地址不会被 AI 错误注入。</li><li>新建项目后只出现 4 阶段流程。</li><li>Dashboard、项目页、报告页不再出现旧流程阶段。</li><li>差距分析的文档和技术区域可以分别自动批量执行，也保留单项手动执行。</li><li>批量上传文件、文件夹或压缩包后能看到逐阶段进度、文档分类、命名提示、检查点结论、证据位置和整改项。</li><li>DOCX 段落/表格/页眉页脚/图片、文本 PDF、扫描 PDF 和混合 PDF 均能产生带位置内容块。</li><li>向量、关键词和图谱联合检索能为同一检查项组合相邻段落、表格及跨文件证据。</li><li>文档解析失败时显示 <code>unable</code>，不算通过。</li><li>PDF/OCR 暂时超时会显示尝试次数并最多执行 3 次；三次失败或必需文档缺失时形成可见 <code>unable/not_tested</code> Finding，不能静默漏项。</li><li>LLM 不可用时不得使用关键词命中直接判定文档通过。</li><li>对多个资产执行工具时，结果按资产聚合展示。</li><li>工具失败时能看到具体原因。</li><li>错误 SSH 密码只让依赖认证的任务失败，不能让整个差距分析显示全部通过。</li><li>同时提交两条长任务时，第二条可以立即创建，聊天输入不被第一条阻塞。</li><li>用户上滚查看历史消息时，后台进度不得强制滚动到底部。</li><li>手动工具测评、等保技术检测和组合扫描都能产生进度和结果。</li><li>失败或部分执行不能关闭历史 Finding；完整复测且风险消失后才能自动解决。</li><li>整改后通过上传改进文档或重新执行原资产/能力完成复测，不建立空转工单。</li><li>复测仍在运行时报告阶段保持锁定；没有运行中复测时，用户可以选择以当前结果生成报告。必检任务失败、文档结论不可靠、已取消复测、尚未复核、<code>still_present</code> 和 <code>unable</code> 都必须保留原状态并进入覆盖限制，不能计为修复或通过。</li><li>差距分析或现场测评仍有 <code>todo/in_progress</code> 正式任务时不能生成正式报告；报告快照不能把未完成上游阶段改写为 100%。</li><li>正式阶段不能跳过或跨越，自动化任务不能由页面人工标记完成。</li><li>完全重置测评时，进度、技术扫描、文档与向量、证据、Finding、整改复测、变更快照、缓存和全部报告版本同步清空，项目资产、权限、计划配置、标准库与审计记录保留。</li><li>单项和阶段重置只清理对应范围；只有明确点击完全重置才删除项目级全部测评历史。</li><li>已完成任务普通重跑不会删除已修复 Finding 和重新检查记录；只有明确点击单项、阶段或整体重置才执行对应清理。</li><li>HTML 报告能展示初检、整改、复测和最终结论。</li><li>正式报告由第四阶段生成并保存为递增版本；预览、HTML 和 JSON 使用同一快照，新检测或材料使旧版本明确过期。</li><li>HTML 报告中的工具名、资产、执行状态、检测结论和错误原因均为可读业务文本，不出现 <code>targeted</code>、对象字典或 <code>[object Object]</code>。</li><li>批量删除扫描结果后数据库关联记录和存储产物同步释放，不残留孤立 Finding。</li><li>清空项目文档数据时删除内容块、向量、证据图谱和 OCR 缓存，但标准图谱保持完整。</li><li>建立专用自动化验收项目和测试文件，从空项目真实跑完差距分析、现场测评、整改与复测和 HTML 报告；报告必须同时包含文档与技术初检问题、改进材料、已修复、仍存在、新增和无法复测场景。</li></ul>
+<h3 id="section-45">9.1 最近一次综合验收<a href="#section-45" aria-label="链接到本节">#</a></h3>
+<p><strong>执行日期</strong>：2026-07-17。下列结果来自当前 Docker Compose 运行环境，不是手工修改数据库得到的演示数字。</p>
+<div class="table-wrap"><table><thead><tr><th>验收层</th><th>实际覆盖</th><th>结果</th></tr></thead><tbody><tr><td>自动化测试</td><td>文档、图谱、资产范围、队列控制、复测、报告、重置、删除、工具语义、权限边界</td><td>93 项通过；保留 34 条 Pydantic 2 弃用告警，无测试失败</td></tr><tr><td>部署 API 烟测</td><td>临时项目、授权资产、四阶段初始化、技术任务、异步文档分析、报告门禁、完全重置、项目删除</td><td>通过；低配置环境中文档分析约 39 秒完成，临时项目和任务已自动清理</td></tr><tr><td>标准与检索</td><td>10 类核心文档、40 个控制域、80 个必检项、291 个标准图谱节点；精确检索 + 1024 维向量 + AGE 归属</td><td>通过</td></tr><tr><td>真实材料闭环</td><td>项目 <code>P-072</code> 从空项目上传 11 个文件，10 类正确归类、1 个无关文件保持未归类；覆盖 DOCX、文本 PDF、扫描 PDF、原生/OCR 路径</td><td>10 类文档检查全部形成结论</td></tr><tr><td>技术初检</td><td>受控靶机真实开放 SSH/HTTP/HTTPS；错误 SSH 密码与正确凭据分别执行；端口、漏洞、基线、弱口令、SSL、Web、数据库、SNMP、Windows/SMB 等进入结果矩阵</td><td>错误凭据明确失败；不适用、超时、风险和完成状态未互相冒充</td></tr><tr><td>整改与复测</td><td>3 类改进文档、未修改文档复核、技术问题按资产/能力重检、长时间漏洞工具调用</td><td>40 个问题中 5 个已修复、35 个保持待处理、3 个无法验证；长调用期间租约持续更新</td></tr><tr><td>正式报告</td><td>四阶段门禁、当前事实快照、HTML、哈希、版本、过期语义和可读业务文本</td><td>正式报告 V1 生成；本地验收副本为 <code>artifacts/certiproof-real-material-report.html</code></td></tr><tr><td>交互并发</td><td>连续提交 Web 扫描与双资产端口扫描，重复资产去重，独立任务 ID 和结果归属</td><td>最终镜像两次创建耗时 0.037 秒和 0.026 秒；结果分别归属 <code>e2e-target</code>、<code>redis</code></td></tr><tr><td>工具层</td><td>Docker 内部真实端口、异步进度、数据库组合、SSH 错误、Web/目录/模糊测试、SNMP、Windows/SMB</td><td>工具烟测通过；不可达和不匹配服务保持“未完成/无法判断”</td></tr><tr><td>已授权公网抽样</td><td><code>121.40.95.31</code> 高危端口、SSL、Web</td><td>主机可达，23 个端口为 filtered；SSL 90 秒、Web 120 秒超时均保留具体原因，未误报“无风险”</td></tr><tr><td>生命周期</td><td>文档、内容块、向量、证据图谱、扫描结果、文件和项目删除</td><td>临时数据已清理；291 个全局标准节点完整保留</td></tr><tr><td>UI</td><td>报告中心、项目执行页、检测列表、检测详情；桌面 1275px 与移动端 385px</td><td>无页面级横向溢出、无检测到的标题/按钮文字裁切、无控制台错误</td></tr><tr><td>构建与部署</td><td>Python 编译、Vite 生产构建、迁移、并发 MCP/AGE/向量诊断</td><td>核心路由与全部安全工具服务健康；当前 Apple Silicon/Colima 下完整文档视觉模型降级为轻量 OCR fallback，扫描 PDF 实测可完成</td></tr></tbody></table></div>
+<p>验收边界：公网目标受容器出口、防火墙和限速影响，工具“超时/filtered”是可信执行事实而不是平台故障；当前容器的完整文档视觉模型依赖 fallback 保证扫描件可用，复杂图表理解仍需在目标生产硬件上复验；标准库仍需后续专业校准，Pydantic 2 弃用告警应在升级 Pydantic 3 前消除。</p>
+<h2 id="section-46">十、架构记忆<a href="#section-46" aria-label="链接到本节">#</a></h2>
+<h3 id="section-47">10.1 维护规则<a href="#section-47" aria-label="链接到本节">#</a></h3>
 <ul><li><code>.opencode/plans/ARCHITECTURE.md</code> 是产品与系统架构的唯一 Markdown 事实源。</li><li><code>docs/certiproof-product-design.html</code> 由 Markdown 自动生成，只用于查阅和讲解，不手工修改。</li><li>文档只保留当前已实现设计和当前已经确认的目标设计，并明确区分两者。</li><li>功能重做采用一次性完整替换，不保留旧数据结构、旧接口、旧页面或兼容分支。</li><li>Git 历史只用于找回仍然有效的设计依据，已废弃方案不写入现行文档。</li></ul>
-<h3 id="section-47">10.2 当前关键决策<a href="#section-47" aria-label="链接到本节">#</a></h3>
-<div class="table-wrap"><table><thead><tr><th>领域</th><th>当前决定</th><th>影响范围</th><th>状态</th></tr></thead><tbody><tr><td>产品定位</td><td>面向被测企业的等保合规自查平台，不作为测评机构作业工具</td><td>全产品</td><td>implemented</td></tr><tr><td>流程</td><td>统一使用“差距分析、现场测评、整改加固、复测验证、生成报告”五阶段</td><td>测评、整改、报告</td><td>implemented</td></tr><tr><td>交互</td><td>Dashboard 展示组织态势，项目执行页以对话和自动化测评为核心</td><td>Dashboard、项目页</td><td>implemented</td></tr><tr><td>技术检测</td><td>快捷按钮、<code>/</code> 命令和自然语言共用能力目录，多资产结果统一聚合</td><td>对话、任务、结果</td><td>implemented</td></tr><tr><td>报告</td><td>HTML 是正式报告格式，不保留 PDF 主流程</td><td>报告中心</td><td>implemented</td></tr><tr><td>文档合规</td><td>混合解析、混合归类、混合检索、图谱补全、LLM 判证、规则裁决</td><td>文档、证据、整改、报告</td><td>implemented</td></tr><tr><td>标准库</td><td>运行时使用正式知识图谱，YAML 仅作初始化、导入导出和备份</td><td>标准、检索、判证</td><td>implemented</td></tr><tr><td>图谱引擎</td><td>使用 Apache AGE 属性图并与 PostgreSQL、pgvector 同库部署；不依赖商业版图数据库</td><td>标准、证据、部署、备份</td><td>implemented</td></tr><tr><td>可复现部署</td><td>Git 保存完整构建输入，前端在 Docker 内构建，Compose 自动迁移，模型按需下载到持久卷</td><td>构建、部署、升级、运维</td><td>implemented</td></tr><tr><td>数据策略</td><td>新文档子系统完整替换旧实现，旧数据不迁移，完成后从空数据验收</td><td>数据、接口、页面、测试</td><td>implemented</td></tr><tr><td>数据规模</td><td>在线索引只保留当前有效材料，并提供测评、项目、组织三级清理</td><td>向量、图谱、OCR、存储</td><td>implemented</td></tr><tr><td>流程边界</td><td>Flow Engine 独立拥有五阶段状态机，Orchestrator/AI Engine 只能通过命令调用</td><td>测评、对话、任务、审计</td><td>implemented</td></tr><tr><td>整改 Skill</td><td>原子整改能力已实现，独立整改编排 Skill 只做方案与协调，不拥有最终状态</td><td>整改、复测、Orchestrator</td><td>accepted-pending</td></tr><tr><td>架构记忆</td><td>讨论结论更新本文并重新生成独立 HTML；旧设计不进入现行正文</td><td>产品与系统文档</td><td>implemented</td></tr></tbody></table></div>
+<h3 id="section-48">10.2 当前关键决策<a href="#section-48" aria-label="链接到本节">#</a></h3>
+<div class="table-wrap"><table><thead><tr><th>领域</th><th>当前决定</th><th>影响范围</th><th>状态</th></tr></thead><tbody><tr><td>产品定位</td><td>面向被测企业的等保合规自查平台，不作为测评机构作业工具</td><td>全产品</td><td>implemented</td></tr><tr><td>流程</td><td>统一使用“差距分析、现场测评、整改与复测、生成报告”四阶段</td><td>测评、复测、报告</td><td>implemented</td></tr><tr><td>交互</td><td>Dashboard 展示组织态势，项目执行页以对话和自动化测评为核心</td><td>Dashboard、项目页</td><td>implemented</td></tr><tr><td>技术检测</td><td>快捷按钮、<code>/</code> 命令和自然语言共用能力目录，多资产结果统一聚合</td><td>对话、任务、结果</td><td>implemented</td></tr><tr><td>报告</td><td>HTML 是正式报告格式；第四阶段生成版本化 <code>ReportArtifact</code>，保存 JSON 快照、HTML、哈希和过期状态，不保留 PDF 主流程</td><td>报告中心、文件存储、数据生命周期</td><td>implemented</td></tr><tr><td>文档合规</td><td>混合解析、混合归类、混合检索、图谱补全、LLM 判证、规则裁决</td><td>文档、证据、整改、报告</td><td>implemented</td></tr><tr><td>标准库</td><td>运行时使用正式知识图谱，YAML 仅作初始化、导入导出和备份</td><td>标准、检索、判证</td><td>implemented</td></tr><tr><td>图谱引擎</td><td>使用 Apache AGE 属性图并与 PostgreSQL、pgvector 同库部署；不依赖商业版图数据库</td><td>标准、证据、部署、备份</td><td>implemented</td></tr><tr><td>可复现部署</td><td>Git 保存完整构建输入，前端在 Docker 内构建，Compose 自动迁移，模型按需下载到持久卷</td><td>构建、部署、升级、运维</td><td>implemented</td></tr><tr><td>数据策略</td><td>新文档子系统完整替换旧实现，旧数据不迁移，完成后从空数据验收</td><td>数据、接口、页面、测试</td><td>implemented</td></tr><tr><td>数据规模</td><td>在线索引只保留当前有效材料，并提供测评、项目、组织三级清理</td><td>向量、图谱、OCR、存储</td><td>implemented</td></tr><tr><td>长任务可靠性</td><td>文档按文件、技术检测按资产保存检查点；心跳租约检测失联；复测长工具调用由独立监视器持续续租；停止贯通 Worker、Gateway 与 Tool Server</td><td>文档、测评任务、复测、MCP、UI</td><td>implemented</td></tr><tr><td>瞬时失败重试</td><td>PDF/OCR 等瞬时提取错误按文件最多尝试 3 次并显示进度；确定性错误不重试，最终失败进入 unable/Finding</td><td>文档、Worker、复测、报告</td><td>implemented</td></tr><tr><td>流程边界</td><td>Flow Engine 独立拥有四阶段状态机，Orchestrator/AI Engine 只能通过命令调用</td><td>测评、对话、任务、审计</td><td>implemented</td></tr><tr><td>流程门禁</td><td>正式阶段不可跳过或跨越，自动化任务不可人工完成；运行中复测阻止报告，其他未解决、未复核、无法验证和执行阻断可由用户选择以当前快照进入报告并如实披露</td><td>测评、复测、报告</td><td>implemented</td></tr><tr><td>整改闭环</td><td>使用 Finding、VerificationRun、VerificationItem 和 FindingEvent 形成权威链路；只有真实复测可以关闭问题，用户可结束本轮整改并生成保留未解决项的当前状态报告</td><td>整改、复测、流程、报告</td><td>implemented</td></tr><tr><td>整改材料</td><td>支持单类上传和文件/文件夹/ZIP/RAR/7z 批量提交；可靠归类后替换同类当前版本并自动复测该类全部未解决检查点，旧版本保留审计</td><td>文档、整改、复测、存储</td><td>implemented</td></tr><tr><td>执行与结论</td><td>任务完成只代表执行终态；风险、受限、不适用和无发现独立归一化，流程进度不冒充合规分</td><td>项目页、结果、测评、报告</td><td>implemented</td></tr><tr><td>评分口径</td><td>合规分只基于可靠检查点；检测覆盖率、无法判定和不适用独立展示</td><td>项目页、完成页、报告</td><td>implemented</td></tr><tr><td>AI 编排与契约兜底</td><td>自然语言由 LLM 选择和组合工具；显式工具别名、当前资产、权限与参数 schema 由 Orchestrator 做最小纠偏，Web 扫描别名使用 Nikto 的 <code>target</code> 契约</td><td>AI Engine、Orchestrator、资产范围</td><td>implemented</td></tr><tr><td>独立任务调度</td><td>自然语言、快捷按钮和 <code>/</code> 命令共用交互检测队列；不同任务并发执行、独立返回，不因前一任务耗时而阻塞</td><td>对话、测评、文档、Worker、结果</td><td>implemented</td></tr><tr><td>Worker 隔离</td><td>文档、测评技术、交互检测、整改复查和维护任务使用独立持久队列与受控 Worker 池</td><td>Worker、部署、诊断、任务控制</td><td>implemented</td></tr><tr><td>受控验收环境</td><td>Compose <code>acceptance</code> profile 内置真实 SSH/HTTP/HTTPS 靶机，用于错误凭据、开放端口、Web/SSL、复测和报告自动验收</td><td>部署、工具、CI/本地验收</td><td>implemented</td></tr><tr><td>多 Agent 协作</td><td>在可靠队列之上增加 Orchestrator 与文档/网络/Web/主机专业 Agent；Tool Server 仍是工具，Flow Engine 和规则引擎保持最终状态权威</td><td>AI、编排、工具、测评</td><td>accepted-pending</td></tr><tr><td>未完整结果</td><td>顶层和组合工具的超时、无响应、受限或未完成统一计为 warning/不可判定，保留具体原因，不得冒充成功或零发现</td><td>执行、结果、复测、报告</td><td>implemented</td></tr><tr><td>重跑与重置</td><td>普通单项重跑保留整改/重新检查记录；显式单项、阶段、整体重置分别执行破坏性清理</td><td>测评、Finding、复测、报告</td><td>implemented</td></tr><tr><td>受限结论</td><td>技术未完成和文档 <code>not_tested</code> 都保持活动状态；完成真实复核后可在报告中保留 <code>still_present/unable</code>，但不能把它们关闭或计为通过</td><td>文档、技术、整改、报告</td><td>implemented</td></tr><tr><td>整改建议编排</td><td>后续能力只生成建议并协调确定性命令，不引入工单、不拥有最终状态</td><td>复测、Orchestrator</td><td>accepted-pending</td></tr><tr><td>架构记忆</td><td>讨论结论更新本文并重新生成独立 HTML；旧设计不进入现行正文</td><td>产品与系统文档</td><td>implemented</td></tr></tbody></table></div>
 <hr>
-<p><strong>文档版本</strong>: v3.4 <strong>最后更新</strong>: 2026-07-15 <strong>维护者</strong>: CertiProof Team</p></article>
+<p><strong>文档版本</strong>: v4.9 <strong>最后更新</strong>: 2026-07-17 <strong>维护者</strong>: CertiProof Team</p></article>
       <footer>CertiProof 产品设计文档 · 由 ARCHITECTURE.md 自动生成</footer>
     </main>
   </div>

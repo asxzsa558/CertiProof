@@ -56,14 +56,14 @@ const PERMISSION_GROUPS = [
 const statusLabel = {
   open: '待确认',
   in_progress: '处理中',
-  resolved: '已关闭',
-  verified: '复测通过',
+  fixed: '已修复',
+  verified: '已验证',
   closed: '已关闭',
   skipped: '已跳过',
   false_positive: '误报',
 }
 
-const closedRiskStatuses = new Set(['resolved', 'verified', 'closed', 'skipped', 'false_positive'])
+const closedRiskStatuses = new Set(['fixed', 'verified', 'closed', 'skipped', 'false_positive'])
 
 const severityLabel = {
   critical: '严重',
@@ -169,39 +169,9 @@ function Dashboard() {
     return () => window.clearInterval(refreshTimer)
   }, [currentOrg?.id])
 
-  const handleRiskAction = async (risk) => {
+  const handleRiskAction = (risk) => {
     if (!risk.project_id) return
-    if (risk.action !== '创建整改') {
-      navigate(`/projects/${risk.project_id}`)
-      return
-    }
-    if (!risk.finding_id) {
-      message.error('该风险缺少关联发现，无法创建整改工单')
-      return
-    }
-    setRiskActionId(risk.finding_id)
-    try {
-      await api.post(`/projects/${risk.project_id}/remediation/`, {
-        project_id: risk.project_id,
-        finding_id: risk.finding_id,
-        title: risk.risk || risk.control || '待整改问题',
-        description: risk.description || risk.risk || '',
-        remediation_plan: risk.remediation_plan || undefined,
-        priority: ['critical', 'high', 'medium', 'low'].includes(risk.severity) ? risk.severity : 'medium',
-      })
-      message.success('已创建整改工单')
-      await fetchDashboard({ silent: true })
-    } catch (error) {
-      const detail = errorMessage(error, '创建整改工单失败')
-      if (detail.includes('already exists') || detail.includes('已存在')) {
-        message.info('该问题已有整改工单')
-        navigate(`/projects/${risk.project_id}`)
-      } else {
-        message.error(detail)
-      }
-    } finally {
-      setRiskActionId(null)
-    }
+    navigate(`/projects/${risk.project_id}`)
   }
 
   const handleLogout = () => {
@@ -247,7 +217,7 @@ function Dashboard() {
     { key: 'all', label: '全部', count: dashboard.risk_queue.length },
     { key: 'open', label: '待确认', count: dashboard.risk_queue.filter((risk) => risk.status === 'open').length },
     { key: 'in_progress', label: '处理中', count: dashboard.risk_queue.filter((risk) => risk.status === 'in_progress').length },
-    { key: 'closed', label: '已闭环', count: dashboard.risk_queue.filter((risk) => closedRiskStatuses.has(risk.status)).length },
+    { key: 'closed', label: '已处置', count: dashboard.risk_queue.filter((risk) => closedRiskStatuses.has(risk.status)).length },
   ]
   const filteredRisks = riskFilter === 'all'
     ? dashboard.risk_queue
@@ -480,7 +450,7 @@ function Dashboard() {
                   <Button
                     size="small"
                     type="text"
-                    disabled={risk.action === '创建整改' && !canManageAssessments}
+                    disabled={!canManageAssessments && risk.action === '整改与复测'}
                     loading={riskActionId === risk.finding_id}
                     onClick={() => handleRiskAction(risk)}
                   >

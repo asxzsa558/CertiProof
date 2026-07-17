@@ -2,26 +2,30 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import contextlib
 import hashlib
 import io
 import logging
+import os
 import re
 import shutil
 import subprocess
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.database import AsyncSessionLocal
 from app.models.assessment import Assessment, PhaseInstance, TaskInstance
 from app.models.document_knowledge import (
     DocumentAnalysisRun,
@@ -48,6 +52,82 @@ MAX_BATCH_UNCOMPRESSED = 300 * 1024 * 1024
 
 class DocumentExtractionError(ValueError):
     pass
+
+
+class DocumentRunCancelled(Exception):
+    pass
+
+
+class DocumentRunTimedOut(Exception):
+    pass
+
+
+DOCUMENT_WORKER_ID = f"document-worker-{os.getenv('HOSTNAME', 'local')}-{os.getpid()}"
+
+
+async def _assert_run_active(db: AsyncSession, run: DocumentAnalysisRun) -> None:
+    await db.refresh(run, attribute_names=["status", "cancel_requested_at"])
+    if run.status == "cancelled" or run.cancel_requested_at:
+        raise DocumentRunCancelled("文档合规检查已停止")
+
+
+async def _touch_run(db: AsyncSession, run: DocumentAnalysisRun) -> None:
+    await _assert_run_active(db, run)
+    now = datetime.utcnow()
+    run.heartbeat_at = now
+    run.lease_expires_at = now + timedelta(minutes=settings.DOCUMENT_LEASE_MINUTES)
+    await db.commit()
+
+
+async def cancel_document_run(db: AsyncSession, run: DocumentAnalysisRun, reason: str = "") -> None:
+    if run.status not in {"queued", "running"}:
+        raise ValueError(f"文档分析状态为 {run.status}，不能停止")
+    now = datetime.utcnow()
+    progress = {
+        "stage": "cancelled",
+        "percent": int((run.progress or {}).get("percent") or 0),
+        "message": reason or "用户已停止文档合规检查",
+    }
+    stopped = await db.execute(
+        update(DocumentAnalysisRun)
+        .where(
+            DocumentAnalysisRun.id == run.id,
+            DocumentAnalysisRun.status.in_(["queued", "running"]),
+        )
+        .values(
+            status="cancelled",
+            cancel_requested_at=now,
+            completed_at=now,
+            lease_owner=None,
+            lease_expires_at=None,
+            progress=progress,
+        )
+    )
+    if stopped.rowcount != 1:
+        await db.rollback()
+        raise ValueError("文档分析已结束，不能再停止")
+    if run.task_id:
+        task = await db.get(TaskInstance, run.task_id)
+        if task and task.status == "in_progress":
+            await db.execute(
+                update(TaskInstance)
+                .where(TaskInstance.id == task.id, TaskInstance.status == "in_progress")
+                .values(
+                    status="failed",
+                    completed_at=now,
+                    cancel_requested_at=now,
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    result={
+                        "type": "doc_review",
+                        "status": "cancelled",
+                        "run_id": run.id,
+                        "error": reason or "用户已停止文档合规检查",
+                    },
+                )
+            )
+    await db.commit()
+    await db.refresh(run)
 
 
 def build_retest_comparison(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
@@ -339,9 +419,10 @@ async def _vision_blocks(
     start: int,
     analysis_mode: str,
     native_available: bool,
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[dict], list[str], int]:
     blocks: list[dict] = []
     warnings: list[str] = []
+    successful_images = 0
     async with httpx.AsyncClient(timeout=180) as client:
         for image_name, image_bytes in images:
             try:
@@ -366,10 +447,8 @@ async def _vision_blocks(
                 if result.get("status") != "success":
                     raise DocumentExtractionError(result.get("error") or "视觉解析服务未返回成功状态。")
                 payload = result.get("data", {})
-                warnings.extend(
-                    f"{image_name}: {warning}"
-                    for warning in payload.get("warnings") or []
-                )
+                warnings.extend(f"{image_name}: {warning}" for warning in payload.get("warnings") or [] if str(warning).strip())
+                image_block_count = 0
                 for item in payload.get("blocks") or []:
                     text = item.get("text") or ""
                     if not text.strip():
@@ -385,9 +464,15 @@ async def _vision_blocks(
                         table=item.get("table"),
                         bbox=item.get("bbox"),
                     ))
+                    image_block_count += 1
+                if image_block_count:
+                    successful_images += 1
+                else:
+                    warnings.append(f"{image_name}: OCR/视觉解析未提取到内容")
             except Exception as exc:
-                warnings.append(f"{image_name}: {exc}")
-    return blocks, warnings
+                detail = str(exc).strip() or exc.__class__.__name__
+                warnings.append(f"{image_name}: {detail}")
+    return blocks, warnings, successful_images
 
 
 def _deduplicate(blocks: list[dict]) -> list[dict]:
@@ -425,6 +510,21 @@ def normalize_analysis_mode(mode: str | None) -> str:
     return mode if mode in ANALYSIS_MODES else "standard"
 
 
+def _visual_coverage_state(
+    native: list[dict],
+    image_count: int,
+    successful_images: int,
+    warnings: list[str],
+) -> dict[str, bool]:
+    native_chars = len(re.sub(r"\s+", "", "".join(str(block.get("text") or "") for block in native)))
+    visual_required = image_count > 0 and native_chars < 80
+    return {
+        "visual_required": visual_required,
+        "visual_incomplete": visual_required and successful_images < image_count,
+        "visual_degraded": bool(warnings) or successful_images < image_count,
+    }
+
+
 async def extract_document(document_file: DocumentFile, analysis_mode: str = "standard") -> dict[str, Any]:
     analysis_mode = normalize_analysis_mode(analysis_mode)
     path = file_storage.base_path / str(document_file.storage_path)
@@ -448,17 +548,18 @@ async def extract_document(document_file: DocumentFile, analysis_mode: str = "st
     except Exception as exc:
         raise DocumentExtractionError(f"文件解析失败：{exc}") from exc
 
-    vision, warnings = await _vision_blocks(
+    vision, warnings, successful_images = await _vision_blocks(
         document_file,
         images,
         len(native),
         analysis_mode,
         bool(native),
-    ) if images else ([], [])
+    ) if images else ([], [], 0)
     blocks = _deduplicate([*native, *vision])
     if not blocks:
         detail = f"；视觉解析失败：{'；'.join(warnings)}" if warnings else ""
         raise DocumentExtractionError(f"未提取到可分析的文档内容{detail}")
+    visual_state = _visual_coverage_state(native, len(images), successful_images, warnings)
     return {
         "blocks": blocks,
         "analysis_mode": analysis_mode,
@@ -467,7 +568,9 @@ async def extract_document(document_file: DocumentFile, analysis_mode: str = "st
         "ocr_blocks": sum(1 for block in vision if block.get("source") == "ocr"),
         "vision_blocks": len(vision),
         "warnings": warnings,
-        "visual_incomplete": bool(warnings) and (analysis_mode == "deep" or not native),
+        "visual_images": len(images),
+        "visual_images_succeeded": successful_images,
+        **visual_state,
     }
 
 
@@ -477,6 +580,7 @@ async def create_document_run(
     project_id: int,
     user_id: int,
     analysis_mode: str | None = None,
+    run_parameters: dict[str, Any] | None = None,
 ) -> DocumentAnalysisRun:
     mode = normalize_analysis_mode(analysis_mode)
     phase = await db.get(PhaseInstance, task.phase_id)
@@ -492,6 +596,8 @@ async def create_document_run(
     )).scalars().all()
     if not files:
         raise DocumentExtractionError("该任务尚未上传或归类文档。")
+    from app.services.report_service import invalidate_report_artifacts
+    await invalidate_report_artifacts(db, project_id, "已重新分析文档材料")
     previous_run_id = (await db.execute(
         select(DocumentAnalysisRun.id).where(
             DocumentAnalysisRun.task_id == task.id,
@@ -506,15 +612,16 @@ async def create_document_run(
         requested_by=user_id,
         run_kind="retest" if previous_run_id else "initial",
         analysis_mode=mode,
-        parameters={"previous_run_id": previous_run_id},
+        parameters={"previous_run_id": previous_run_id, **(run_parameters or {})},
         status="queued",
         progress={"stage": "queued", "percent": 0, "message": "等待文档分析"},
     )
     db.add(run)
     await db.flush()
     db.add_all(DocumentRunFile(analysis_run_id=run.id, document_file_id=file.id) for file in files)
-    task.status = "in_progress"
-    task.result = {"type": "doc_review", "status": "queued", "run_id": run.id, "analysis_mode": mode, "progress": run.progress}
+    if not (run.parameters or {}).get("verification_run_id"):
+        task.status = "in_progress"
+        task.result = {"type": "doc_review", "status": "queued", "run_id": run.id, "analysis_mode": mode, "progress": run.progress}
     await db.commit()
     return run
 
@@ -528,12 +635,15 @@ async def create_document_batch_run(
     analysis_mode: str | None = None,
     skipped_files: list[str] | None = None,
     duplicate_files: list[dict] | None = None,
+    run_parameters: dict[str, Any] | None = None,
 ) -> DocumentAnalysisRun:
     mode = normalize_analysis_mode(analysis_mode)
     phase = await db.get(PhaseInstance, phase_id)
     assessment = await db.get(Assessment, phase.assessment_id) if phase else None
     if not phase or not assessment or assessment.project_id != project_id:
         raise DocumentExtractionError("批量文档不属于有效的测评流程。")
+    from app.services.report_service import invalidate_report_artifacts
+    await invalidate_report_artifacts(db, project_id, "已上传并分析新的批量文档")
     run = DocumentAnalysisRun(
         project_id=project_id,
         assessment_id=assessment.id,
@@ -546,6 +656,7 @@ async def create_document_batch_run(
         parameters={
             "skipped_files": skipped_files or [],
             "duplicate_files": duplicate_files or [],
+            **(run_parameters or {}),
         },
         progress={"stage": "queued", "percent": 0, "message": "等待批量文档归类"},
     )
@@ -558,6 +669,35 @@ async def create_document_batch_run(
     ).values(uploaded_in_run_id=run.id))
     await db.commit()
     return run
+
+
+async def _replace_batch_document_versions(
+    db: AsyncSession,
+    run: DocumentAnalysisRun,
+    classified: list[dict],
+) -> int:
+    """Deactivate prior files only for document categories present in a remediation batch."""
+    files_by_task: dict[int, list[int]] = {}
+    for item in classified:
+        files_by_task.setdefault(int(item["task_id"]), []).append(int(item["document_file_id"]))
+    replaced = 0
+    for task_id, current_ids in files_by_task.items():
+        old_files = list((await db.execute(select(DocumentFile).where(
+            DocumentFile.assessment_id == run.assessment_id,
+            DocumentFile.task_id == task_id,
+            DocumentFile.is_active.is_(True),
+            DocumentFile.id.not_in(current_ids),
+        ))).scalars().all())
+        replacement_id = current_ids[0]
+        for document in old_files:
+            document.is_active = False
+            document.replaced_by_id = replacement_id
+            await db.execute(update(DocumentBlock).where(
+                DocumentBlock.document_file_id == document.id
+            ).values(is_active=False, embedding=None))
+            await knowledge_graph.purge_file(db, document.id)
+        replaced += len(old_files)
+    return replaced
 
 
 async def _files_for_run(db: AsyncSession, run_id: int) -> list[DocumentFile]:
@@ -639,7 +779,10 @@ async def _persist_blocks(
     document_file.parse_status = "parsed"
     document_file.extraction_summary = {
         key: extraction[key]
-        for key in ("analysis_mode", "page_count", "native_blocks", "ocr_blocks", "vision_blocks", "warnings", "visual_incomplete")
+        for key in (
+            "analysis_mode", "page_count", "native_blocks", "ocr_blocks", "vision_blocks", "warnings",
+            "visual_images", "visual_images_succeeded", "visual_required", "visual_incomplete", "visual_degraded",
+        )
     }
     document_file.extraction_summary.update({
         "embedding_status": "ready" if embedding_model and not embedding_error else "unavailable",
@@ -687,6 +830,33 @@ async def _extract_and_store(
     run: DocumentAnalysisRun,
     document_file: DocumentFile,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    current_rows = (await db.execute(
+        select(DocumentBlock).where(
+            DocumentBlock.analysis_run_id == run.id,
+            DocumentBlock.document_file_id == document_file.id,
+        ).order_by(DocumentBlock.ordinal)
+    )).scalars().all()
+    if current_rows and document_file.parse_status == "parsed" and document_file.extraction_summary:
+        summary = dict(document_file.extraction_summary)
+        summary["cache_hit"] = True
+        return [{
+            "block_id": row.id,
+            "document_file_id": document_file.id,
+            "file_name": document_file.original_name,
+            "page": row.page_number,
+            "section": row.section_path[-1] if row.section_path else None,
+            "type": row.block_type,
+            "bbox": row.bbox,
+            "text": row.text,
+            "table": row.table_data,
+            "source": row.source,
+            "confidence": row.source_confidence,
+            "content_hash": row.content_sha256,
+            "metadata": row.metadata_json,
+            "embedding_model": row.embedding_model,
+            "embedding": list(row.embedding) if row.embedding is not None else None,
+        } for row in current_rows], summary
+
     cached_run_id = (await db.execute(
         select(DocumentBlock.analysis_run_id)
         .join(DocumentAnalysisRun, DocumentAnalysisRun.id == DocumentBlock.analysis_run_id)
@@ -734,6 +904,57 @@ async def _extract_and_store(
     summary = dict(document_file.extraction_summary or {})
     summary["cache_hit"] = False
     return blocks, summary
+
+
+_TRANSIENT_DOCUMENT_ERRORS = (
+    "readtimeout", "timeout", "timed out", "超时", "temporarily unavailable", "service unavailable",
+    "connection reset", "connection refused", "server disconnected", "remote protocol error",
+    "internal server error", "bad gateway", "gateway timeout", " 500", " 502", " 503", " 504",
+)
+
+
+def _is_transient_document_error(exc: Exception) -> bool:
+    message = f"{exc.__class__.__name__}: {exc}".lower()
+    return any(marker in message for marker in _TRANSIENT_DOCUMENT_ERRORS)
+
+
+def _extraction_failure_message(document_file: DocumentFile, exc: Exception) -> str:
+    attempts = int((document_file.extraction_summary or {}).get("attempts") or 1)
+    return f"{exc}（已尝试 {attempts} 次）" if attempts > 1 else str(exc)
+
+
+async def _extract_with_retry(
+    db: AsyncSession,
+    run: DocumentAnalysisRun,
+    document_file: DocumentFile,
+) -> tuple[list[dict], dict]:
+    attempts = max(1, settings.DOCUMENT_FILE_RETRY_ATTEMPTS)
+    for attempt in range(1, attempts + 1):
+        try:
+            blocks, summary = await _extract_and_store(db, run, document_file)
+            summary = {**summary, "attempts": attempt, "recovered_after_retry": attempt > 1}
+            document_file.extraction_summary = summary
+            return blocks, summary
+        except (DocumentRunCancelled, SQLAlchemyError):
+            raise
+        except Exception as exc:
+            retryable = _is_transient_document_error(exc)
+            document_file.extraction_summary = {
+                **(document_file.extraction_summary or {}),
+                "analysis_mode": run.analysis_mode,
+                "error": str(exc),
+                "attempts": attempt,
+                "retryable": retryable,
+            }
+            if not retryable or attempt >= attempts:
+                raise
+            run.progress = {
+                "stage": "native_extraction",
+                "percent": int((run.progress or {}).get("percent") or 5),
+                "message": f"{document_file.original_name} 提取超时，正在进行第 {attempt + 1}/{attempts} 次尝试",
+            }
+            await _touch_run(db, run)
+            await asyncio.sleep(min(2 ** (attempt - 1), 4))
 
 
 async def _persist_control_results(
@@ -824,6 +1045,7 @@ async def _persist_control_results(
 
 
 async def process_document_run(db: AsyncSession, run: DocumentAnalysisRun) -> None:
+    await _assert_run_active(db, run)
     task = await db.get(TaskInstance, run.task_id) if run.task_id else None
     if not task:
         raise DocumentExtractionError("关联的文档检查任务不存在。")
@@ -835,9 +1057,11 @@ async def process_document_run(db: AsyncSession, run: DocumentAnalysisRun) -> No
     previous_analysis = previous_run.result_summary if previous_run else None
     analysis_mode = run.analysis_mode
     user_id = run.requested_by or 0
+    is_verification = bool((run.parameters or {}).get("verification_run_id"))
 
     run.progress = {"stage": "native_extraction", "percent": 5, "message": "正在执行原生内容提取"}
-    task.result = {"type": "doc_review", "status": "processing", "run_id": run.id, "analysis_mode": analysis_mode, "progress": run.progress}
+    if not is_verification:
+        task.result = {"type": "doc_review", "status": "processing", "run_id": run.id, "analysis_mode": analysis_mode, "progress": run.progress}
     await db.commit()
 
     all_blocks: list[dict] = []
@@ -846,8 +1070,9 @@ async def process_document_run(db: AsyncSession, run: DocumentAnalysisRun) -> No
     extraction_failures = []
     visual_incomplete = False
     for index, document_file in enumerate(files):
+        await _touch_run(db, run)
         try:
-            blocks, extraction_summary = await _extract_and_store(db, run, document_file)
+            blocks, extraction_summary = await _extract_with_retry(db, run, document_file)
             total_pages += extraction_summary["page_count"]
             if total_pages > settings.DOCUMENT_MAX_TOTAL_PAGES:
                 raise DocumentExtractionError(f"文档总页数超过 {settings.DOCUMENT_MAX_TOTAL_PAGES} 页限制。")
@@ -859,16 +1084,23 @@ async def process_document_run(db: AsyncSession, run: DocumentAnalysisRun) -> No
                 "status": "parsed",
                 **extraction_summary,
             })
-        except SQLAlchemyError:
+        except (DocumentRunCancelled, SQLAlchemyError):
             raise
         except Exception as exc:
+            error_message = _extraction_failure_message(document_file, exc)
             document_file.parse_status = "failed"
-            document_file.extraction_summary = {"analysis_mode": analysis_mode, "error": str(exc)}
+            document_file.extraction_summary = {
+                **(document_file.extraction_summary or {}),
+                "analysis_mode": analysis_mode,
+                "error": str(exc),
+                "display_error": error_message,
+            }
             failure = {
                 "document_file_id": document_file.id,
                 "file_name": document_file.original_name,
                 "status": "failed",
-                "error": str(exc),
+                "error": error_message,
+                "attempts": (document_file.extraction_summary or {}).get("attempts", 1),
             }
             extraction_failures.append(failure)
             manifests.append(failure)
@@ -877,16 +1109,18 @@ async def process_document_run(db: AsyncSession, run: DocumentAnalysisRun) -> No
             "percent": 10 + int(45 * (index + 1) / len(files)),
             "message": f"已提取并融合 {index + 1}/{len(files)} 个文件",
         }
-        task.result = {"type": "doc_review", "status": "processing", "run_id": run.id, "analysis_mode": analysis_mode, "progress": run.progress}
-        await db.commit()
+        if not is_verification:
+            task.result = {"type": "doc_review", "status": "processing", "run_id": run.id, "analysis_mode": analysis_mode, "progress": run.progress}
+        await _touch_run(db, run)
 
     if not all_blocks:
         detail = "；".join(item["error"] for item in extraction_failures) or "没有可分析内容"
         raise DocumentExtractionError(f"全部文档均无法提取：{detail}")
 
     run.progress = {"stage": "retrieval", "percent": 65, "message": "正在从标准图谱召回检查项和候选证据"}
-    task.result = {"type": "doc_review", "status": "processing", "run_id": run.id, "analysis_mode": analysis_mode, "progress": run.progress}
-    await db.commit()
+    if not is_verification:
+        task.result = {"type": "doc_review", "status": "processing", "run_id": run.id, "analysis_mode": analysis_mode, "progress": run.progress}
+    await _touch_run(db, run)
     expected_name = task.name.split("文档检查：", 1)[1].strip() if "文档检查：" in task.name else task.name
     control_engine = await DocumentControlEngine.from_graph(db)
     analysis = await control_engine.analyze_retrieved(db, run.id, expected_doc_name=expected_name)
@@ -896,8 +1130,9 @@ async def process_document_run(db: AsyncSession, run: DocumentAnalysisRun) -> No
     analysis["run_id"] = run.id
     analysis["extraction_failures"] = extraction_failures
     run.progress = {"stage": "judging", "percent": 82, "message": "正在执行结构化证据判定"}
-    task.result = {"type": "doc_review", "status": "processing", "run_id": run.id, "analysis_mode": analysis_mode, "progress": run.progress}
-    await db.commit()
+    if not is_verification:
+        task.result = {"type": "doc_review", "status": "processing", "run_id": run.id, "analysis_mode": analysis_mode, "progress": run.progress}
+    await _touch_run(db, run)
     analysis = await control_engine.review_with_llm(db, user_id, analysis)
     if extraction_failures or visual_incomplete:
         reasons = []
@@ -912,18 +1147,40 @@ async def process_document_run(db: AsyncSession, run: DocumentAnalysisRun) -> No
         analysis["retest_comparison"] = build_retest_comparison(previous_analysis, analysis)
 
     run.progress = {"stage": "generating_results", "percent": 94, "message": "正在生成差距、整改和复测结果"}
-    task.result = {"type": "doc_review", "status": "processing", "run_id": run.id, "analysis_mode": analysis_mode, "progress": run.progress}
-    await db.commit()
+    if not is_verification:
+        task.result = {"type": "doc_review", "status": "processing", "run_id": run.id, "analysis_mode": analysis_mode, "progress": run.progress}
+    await _touch_run(db, run)
     await _persist_control_results(db, run, analysis)
     from app.api.assessments import _sync_document_gap_findings
     sync = await _sync_document_gap_findings(db, run.project_id, task, analysis, user_id)
     analysis["gap_sync"] = sync
-    task_result = {"type": "doc_review", "analysis": analysis, "document_file_ids": analysis["document_file_ids"], "run_id": run.id}
+    unable = analysis.get("status") == "unable"
+    task_result = {
+        "type": "doc_review",
+        "status": "unable" if unable else "completed",
+        "analysis": analysis,
+        "document_file_ids": analysis["document_file_ids"],
+        "run_id": run.id,
+        **({"error": analysis.get("message") or "文档合规分析无法形成可靠结论"} if unable else {}),
+    }
     from app.services.flow_engine import get_flow_engine
-    await get_flow_engine(db).complete_task(task.id, task_result)
+    await _assert_run_active(db, run)
+    if not is_verification:
+        if unable:
+            task.status = "failed"
+            task.completed_at = datetime.utcnow()
+            task.result = task_result
+            await db.commit()
+            await get_flow_engine(db).reconcile_phase_progress(task.phase_id)
+        else:
+            await get_flow_engine(db).complete_task(task.id, task_result)
+    else:
+        task.status = "failed" if unable else "completed"
+        task.result = task_result
+        task.completed_at = datetime.utcnow()
     run.status = "completed"
     run.result_summary = analysis
-    if analysis.get("status") == "unable":
+    if unable:
         run.error_code = None
         run.error_message = None
         run.progress = {
@@ -934,13 +1191,56 @@ async def process_document_run(db: AsyncSession, run: DocumentAnalysisRun) -> No
     else:
         run.progress = {"stage": "completed", "percent": 100, "message": "文档合规分析完成"}
     run.completed_at = datetime.utcnow()
+    run.lease_owner = None
+    run.lease_expires_at = None
     await db.commit()
 
 
+async def _record_batch_document_unable(
+    db: AsyncSession,
+    run: DocumentAnalysisRun,
+    task: TaskInstance,
+    message: str,
+    files: list[dict[str, Any]],
+) -> None:
+    """Make a missing or unreadable required document visible to findings and reports."""
+    analysis = {
+        "type": DOCUMENT_SOURCE,
+        "status": "unable",
+        "document_name": task.name.removeprefix("文档检查："),
+        "coverage": 0,
+        "confidence": 0,
+        "controls": [],
+        "gaps": [message],
+        "files": files,
+        "analysis_mode": run.analysis_mode,
+        "document_file_ids": [item["document_file_id"] for item in files if item.get("document_file_id")],
+        "run_id": run.id,
+        "message": message,
+    }
+    from app.api.assessments import _sync_document_gap_findings
+    analysis["gap_sync"] = await _sync_document_gap_findings(
+        db, run.project_id, task, analysis, run.requested_by or 0,
+    )
+    task.status = "failed"
+    task.completed_at = datetime.utcnow()
+    task.result = {
+        "type": "doc_review",
+        "status": "unable",
+        "analysis": analysis,
+        "document_file_ids": analysis["document_file_ids"],
+        "run_id": run.id,
+        "error": message,
+    }
+
+
 async def process_document_batch_run(db: AsyncSession, run: DocumentAnalysisRun) -> None:
+    await _assert_run_active(db, run)
     parameters = run.parameters or {}
+    verification_batch = bool(parameters.get("verification_batch"))
+    task_phase_id = int(parameters.get("document_task_phase_id") or run.phase_id)
     tasks = (await db.execute(
-        select(TaskInstance).where(TaskInstance.phase_id == run.phase_id, TaskInstance.task_type == "doc_review")
+        select(TaskInstance).where(TaskInstance.phase_id == task_phase_id, TaskInstance.task_type == "doc_review")
     )).scalars().all()
     task_by_name = {
         task.name.split("文档检查：", 1)[1].strip(): task
@@ -959,6 +1259,7 @@ async def process_document_batch_run(db: AsyncSession, run: DocumentAnalysisRun)
     classified: list[dict] = []
     unclassified: list[dict] = []
     affected_task_ids: set[int] = set()
+    unable_tasks: dict[int, dict[str, Any]] = {}
     total_pages = 0
     for index, document_file in enumerate(files):
         run.progress = {
@@ -966,9 +1267,9 @@ async def process_document_batch_run(db: AsyncSession, run: DocumentAnalysisRun)
             "percent": 5 + int(5 * index / len(files)),
             "message": f"正在处理 {index + 1}/{len(files)}：{document_file.original_name}",
         }
-        await db.commit()
+        await _touch_run(db, run)
         try:
-            blocks, extraction_summary = await _extract_and_store(db, run, document_file)
+            blocks, extraction_summary = await _extract_with_retry(db, run, document_file)
             total_pages += extraction_summary.get("page_count") or 0
             if total_pages > settings.DOCUMENT_MAX_TOTAL_PAGES:
                 raise DocumentExtractionError(f"文档总页数超过 {settings.DOCUMENT_MAX_TOTAL_PAGES} 页限制。")
@@ -993,26 +1294,65 @@ async def process_document_batch_run(db: AsyncSession, run: DocumentAnalysisRun)
                 })
             else:
                 unclassified.append({"document_file_id": document_file.id, "file_name": document_file.original_name, **classification})
-        except SQLAlchemyError:
+        except (DocumentRunCancelled, SQLAlchemyError):
             raise
         except Exception as exc:
+            error_message = _extraction_failure_message(document_file, exc)
             document_file.parse_status = "failed"
-            document_file.extraction_summary = {"analysis_mode": run.analysis_mode, "error": str(exc)}
-            unclassified.append({
-                "document_file_id": document_file.id,
-                "file_name": document_file.original_name,
-                "status": "unclassified",
-                "naming_status": "unable",
-                "reason": str(exc),
-                "confidence": 0,
-            })
+            document_file.extraction_summary = {
+                **(document_file.extraction_summary or {}),
+                "analysis_mode": run.analysis_mode,
+                "error": str(exc),
+                "display_error": error_message,
+            }
+            fallback = engine.classify_blocks(document_file.original_name, [])
+            matched_task = task_by_name.get(fallback.get("document_name"))
+            if fallback.get("status") == "classified" and matched_task:
+                classification = {
+                    **fallback,
+                    "extraction_status": "unable",
+                    "extraction_error": error_message,
+                    "extraction_attempts": (document_file.extraction_summary or {}).get("attempts", 1),
+                    "reason": f"{fallback.get('reason')}，但内容提取失败：{error_message}",
+                }
+                document_file.task_id = matched_task.id
+                document_file.classification = classification
+                classified.append({
+                    "document_file_id": document_file.id,
+                    "file_name": document_file.original_name,
+                    "task_id": matched_task.id,
+                    **classification,
+                })
+                if verification_batch:
+                    affected_task_ids.add(matched_task.id)
+                else:
+                    unable_tasks[matched_task.id] = {
+                        "message": f"已按文件名识别为“{fallback.get('document_name')}”，但未能提取可分析正文：{error_message}",
+                        "files": [{
+                            "document_file_id": document_file.id,
+                            "file_name": document_file.original_name,
+                            "status": "failed",
+                            "error": error_message,
+                            "attempts": (document_file.extraction_summary or {}).get("attempts", 1),
+                        }],
+                    }
+            else:
+                unclassified.append({
+                    "document_file_id": document_file.id,
+                    "file_name": document_file.original_name,
+                    "status": "unclassified",
+                    "naming_status": "unable",
+                    "reason": error_message,
+                    "confidence": 0,
+                })
         run.progress = {
             "stage": "classification",
             "percent": 10 + int(60 * (index + 1) / len(files)),
             "message": f"已识别 {index + 1}/{len(files)} 个文档",
         }
-        await db.commit()
+        await _touch_run(db, run)
 
+    replaced_files = await _replace_batch_document_versions(db, run, classified) if verification_batch else 0
     missing = []
     for document_name, task in task_by_name.items():
         has_document = (await db.execute(
@@ -1025,6 +1365,17 @@ async def process_document_batch_run(db: AsyncSession, run: DocumentAnalysisRun)
         if not has_document:
             missing.append({"task_id": task.id, "document_name": document_name})
 
+    if not verification_batch:
+        for item in missing:
+            unable_tasks.setdefault(item["task_id"], {
+                "message": f"本次材料包未提供或未能可靠归类“{item['document_name']}”，无法完成该项合规检查。",
+                "files": [],
+            })
+        for task_id, detail in unable_tasks.items():
+            task = await db.get(TaskInstance, task_id)
+            if task:
+                await _record_batch_document_unable(db, run, task, detail["message"], detail["files"])
+
     run.result_summary = {
         "type": BATCH_DOCUMENT_SOURCE,
         "analysis_mode": run.analysis_mode,
@@ -1035,62 +1386,230 @@ async def process_document_batch_run(db: AsyncSession, run: DocumentAnalysisRun)
         "skipped_files": parameters.get("skipped_files") or [],
         "duplicate_files": parameters.get("duplicate_files") or [],
         "coverage": round((len(task_by_name) - len(missing)) / len(task_by_name), 2),
+        "verification_batch": verification_batch,
+        "replaced_files": replaced_files,
+        "verification_runs": [],
+        "verification_skipped": [],
     }
-    run.progress = {"stage": "analyzing", "percent": 85, "message": "归类完成，正在逐项执行合规分析"}
-    await db.commit()
+    run.progress = {
+        "stage": "analyzing",
+        "percent": 85,
+        "message": "归类完成，正在提交整改复测" if verification_batch else "归类完成，正在逐项执行合规分析",
+    }
+    await _touch_run(db, run)
 
     for task_id in sorted(affected_task_ids):
+        await _touch_run(db, run)
         task = await db.get(TaskInstance, task_id)
         if task:
-            await create_document_run(db, task, run.project_id, run.requested_by or 0, run.analysis_mode)
+            if verification_batch:
+                try:
+                    from app.services.verification_service import queue_document_task_verification
+                    verification, document_run, _, count = await queue_document_task_verification(
+                        db,
+                        project_id=run.project_id,
+                        task=task,
+                        actor_id=run.requested_by or 0,
+                        analysis_mode=run.analysis_mode,
+                        notes="批量提交整改材料后自动重新检查。",
+                    )
+                    run.result_summary["verification_runs"].append({
+                        "task_id": task.id,
+                        "document_name": task.name.removeprefix("文档检查："),
+                        "verification_run_id": verification.id,
+                        "document_run_id": document_run.id,
+                        "finding_count": count,
+                    })
+                except ValueError as exc:
+                    run.result_summary["verification_skipped"].append({
+                        "task_id": task.id,
+                        "document_name": task.name.removeprefix("文档检查："),
+                        "reason": str(exc),
+                    })
+            else:
+                await create_document_run(db, task, run.project_id, run.requested_by or 0, run.analysis_mode)
 
-    run.progress = {"stage": "completed", "percent": 100, "message": "文档已归类，合规分析任务已提交"}
+    if unable_tasks:
+        from app.services.flow_engine import get_flow_engine
+        await get_flow_engine(db).reconcile_phase_progress(task_phase_id)
+
+    queued_count = len(run.result_summary["verification_runs"])
+    skipped_count = len(run.result_summary["verification_skipped"])
+    if verification_batch:
+        message = f"整改材料已归类，{queued_count} 类文档已进入重新检查"
+        if skipped_count:
+            message += f"，{skipped_count} 类未提交"
+    else:
+        message = "文档已归类，合规分析任务已提交"
+    run.result_summary = {
+        **(run.result_summary or {}),
+        "verification_runs": list((run.result_summary or {}).get("verification_runs") or []),
+        "verification_skipped": list((run.result_summary or {}).get("verification_skipped") or []),
+    }
+    run.progress = {"stage": "completed", "percent": 100, "message": message}
     run.status = "completed"
     run.completed_at = datetime.utcnow()
+    run.lease_owner = None
+    run.lease_expires_at = None
     await db.commit()
 
 
 async def recover_incomplete_document_runs(db: AsyncSession) -> int:
-    recovered = list((await db.execute(
-        update(DocumentAnalysisRun)
-        .where(DocumentAnalysisRun.status == "running")
-        .values(
-            status="queued",
-            started_at=None,
-            progress={"stage": "queued", "percent": 0, "message": "Worker 重启，等待恢复文档分析"},
+    now = datetime.utcnow()
+    runs = (await db.execute(
+        select(DocumentAnalysisRun).where(
+            DocumentAnalysisRun.status == "running",
+            or_(DocumentAnalysisRun.lease_expires_at.is_(None), DocumentAnalysisRun.lease_expires_at < now),
         )
-        .returning(DocumentAnalysisRun.id)
-    )).scalars().all())
-    if recovered:
+    )).scalars().all()
+    for run in runs:
+        if run.cancel_requested_at:
+            await cancel_document_run(db, run)
+            continue
+        run.lease_owner = None
+        run.lease_expires_at = None
+        if run.attempt_count >= settings.DOCUMENT_MAX_RECOVERY_ATTEMPTS:
+            run.status = "failed"
+            run.completed_at = now
+            run.error_code = "document_recovery_exhausted"
+            run.error_message = "文档分析连续中断，已达到自动恢复次数上限"
+            run.progress = {"stage": "failed", "percent": 100, "message": run.error_message}
+        else:
+            percent = int((run.progress or {}).get("percent") or 0)
+            run.status = "queued"
+            run.progress = {
+                "stage": "queued",
+                "percent": percent,
+                "message": f"检测到 Worker 中断，将从已完成文件继续（第 {run.attempt_count + 1} 次尝试）",
+            }
+    if runs:
         await db.commit()
-    return len(recovered)
+    return len(runs)
+
+
+async def _monitor_document_run(run_id: int) -> str:
+    while True:
+        await asyncio.sleep(max(1, settings.TASK_HEARTBEAT_SECONDS))
+        async with AsyncSessionLocal() as monitor_db:
+            run = await monitor_db.get(DocumentAnalysisRun, run_id)
+            if not run:
+                return "missing"
+            if run.status == "cancelled" or run.cancel_requested_at:
+                return "cancelled"
+            if run.status != "running":
+                return "finished"
+            if run.lease_owner != DOCUMENT_WORKER_ID:
+                return "lease_lost"
+            now = datetime.utcnow()
+            run.heartbeat_at = now
+            run.lease_expires_at = now + timedelta(minutes=settings.DOCUMENT_LEASE_MINUTES)
+            await monitor_db.commit()
+
+
+async def _run_document_with_controls(db: AsyncSession, run: DocumentAnalysisRun) -> None:
+    process = asyncio.create_task(
+        process_document_batch_run(db, run) if run.run_kind == "batch" else process_document_run(db, run)
+    )
+    monitor = asyncio.create_task(_monitor_document_run(run.id))
+    done, _ = await asyncio.wait(
+        {process, monitor},
+        timeout=max(60, settings.DOCUMENT_RUN_TIMEOUT_MINUTES * 60),
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if process in done:
+        monitor.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await monitor
+        await process
+        return
+    if monitor in done and monitor.result() == "finished":
+        await process
+        return
+    process.cancel()
+    monitor.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await process
+    with contextlib.suppress(asyncio.CancelledError):
+        await monitor
+    if monitor in done and monitor.result() == "cancelled":
+        raise DocumentRunCancelled("用户已停止文档合规检查")
+    if not done:
+        raise DocumentRunTimedOut(f"文档分析超过 {settings.DOCUMENT_RUN_TIMEOUT_MINUTES} 分钟，已停止本次尝试")
+    raise DocumentRunTimedOut("文档分析执行权已失效，将由 Worker 恢复")
 
 
 async def process_pending_document_runs(db: AsyncSession, limit: int | None = None) -> int:
+    await recover_incomplete_document_runs(db)
     runs = (await db.execute(
         select(DocumentAnalysisRun)
-        .where(DocumentAnalysisRun.status == "queued")
+        .where(
+            DocumentAnalysisRun.status == "queued",
+            DocumentAnalysisRun.cancel_requested_at.is_(None),
+            DocumentAnalysisRun.attempt_count < settings.DOCUMENT_MAX_RECOVERY_ATTEMPTS,
+        )
         .order_by(DocumentAnalysisRun.created_at)
         .limit(limit or settings.DOCUMENT_WORKER_BATCH_SIZE)
     )).scalars().all()
     processed = 0
     for run in runs:
         run_id = run.id
+        now = datetime.utcnow()
         claimed = (await db.execute(
             update(DocumentAnalysisRun)
-            .where(DocumentAnalysisRun.id == run.id, DocumentAnalysisRun.status == "queued")
-            .values(status="running", started_at=datetime.utcnow())
+            .where(
+                DocumentAnalysisRun.id == run.id,
+                DocumentAnalysisRun.status == "queued",
+                DocumentAnalysisRun.cancel_requested_at.is_(None),
+            )
+            .values(
+                status="running",
+                started_at=run.started_at or now,
+                lease_owner=DOCUMENT_WORKER_ID,
+                lease_expires_at=now + timedelta(minutes=settings.DOCUMENT_LEASE_MINUTES),
+                heartbeat_at=now,
+                attempt_count=(run.attempt_count or 0) + 1,
+            )
             .returning(DocumentAnalysisRun.id)
         )).scalar_one_or_none()
         await db.commit()
         if not claimed:
             continue
+        await db.refresh(run)
         processed += 1
         try:
-            if run.run_kind == "batch":
-                await process_document_batch_run(db, run)
+            await _run_document_with_controls(db, run)
+        except DocumentRunCancelled:
+            await db.rollback()
+            run = await db.get(DocumentAnalysisRun, run_id)
+            if run and run.status != "cancelled":
+                await cancel_document_run(db, run)
+        except DocumentRunTimedOut as exc:
+            await db.rollback()
+            logger.warning("Document analysis run %s interrupted: %s", run_id, exc)
+            run = await db.get(DocumentAnalysisRun, run_id)
+            if not run or run.status == "cancelled":
+                continue
+            run.lease_owner = None
+            run.lease_expires_at = None
+            if run.attempt_count < settings.DOCUMENT_MAX_RECOVERY_ATTEMPTS:
+                run.status = "queued"
+                run.progress = {
+                    "stage": "queued",
+                    "percent": int((run.progress or {}).get("percent") or 0),
+                    "message": f"{exc}；将从已完成文件继续",
+                }
             else:
-                await process_document_run(db, run)
+                run.status = "failed"
+                run.completed_at = datetime.utcnow()
+                run.error_code = "document_recovery_exhausted"
+                run.error_message = str(exc)
+                run.progress = {"stage": "failed", "percent": 100, "message": str(exc)}
+                task = await db.get(TaskInstance, run.task_id) if run.task_id else None
+                if task and task.status == "in_progress" and not (run.parameters or {}).get("verification_run_id"):
+                    task.status = "failed"
+                    task.completed_at = datetime.utcnow()
+                    task.result = {"type": "doc_review", "status": "unable", "error": str(exc), "run_id": run.id}
+            await db.commit()
         except Exception as exc:
             await db.rollback()
             logger.exception("Document analysis run %s failed", run_id)
@@ -1098,10 +1617,12 @@ async def process_pending_document_runs(db: AsyncSession, limit: int | None = No
             if not run:
                 continue
             task = await db.get(TaskInstance, run.task_id) if run.task_id else None
-            if task:
+            if task and not (run.parameters or {}).get("verification_run_id"):
                 task.status = "failed"
                 task.result = {"type": "doc_review", "status": "unable", "error": str(exc), "run_id": run.id}
             run.status = "failed"
+            run.lease_owner = None
+            run.lease_expires_at = None
             run.error_code = "document_extraction_failed" if isinstance(exc, DocumentExtractionError) else "document_analysis_failed"
             run.error_message = str(exc)
             run.progress = {"stage": "failed", "percent": 100, "message": str(exc)}

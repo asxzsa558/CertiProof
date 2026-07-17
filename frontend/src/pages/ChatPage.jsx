@@ -45,6 +45,7 @@ function ChatPage() {
   const [projectModalVisible, setProjectModalVisible] = useState(false)
   const [projectForm] = Form.useForm()
   const [assets, setAssets] = useState([])
+  const [assetsLoading, setAssetsLoading] = useState(false)
   const [assetModalVisible, setAssetModalVisible] = useState(false)
   const [assetForm] = Form.useForm()
   const [managerAssets, setManagerAssets] = useState([])
@@ -60,6 +61,7 @@ function ChatPage() {
       fetchAssets(selectedProject.id)
     } else {
       setAssets([])
+      setAssetsLoading(false)
     }
   }, [selectedProject])
 
@@ -105,6 +107,7 @@ function ChatPage() {
   }
 
   const fetchAssets = async (projectId) => {
+    setAssetsLoading(true)
     try {
       const response = await api.get(`/projects/${projectId}/assets/`)
       setAssets(response.data)
@@ -112,6 +115,8 @@ function ChatPage() {
       console.error('Failed to fetch assets:', error)
       message.error('获取资产列表失败，请检查项目是否存在')
       setAssets([])
+    } finally {
+      setAssetsLoading(false)
     }
   }
 
@@ -405,10 +410,10 @@ function ChatPage() {
                     </span>
                     {selectedProject.compliance_score !== null && selectedProject.compliance_score !== undefined ? (
                       <span className="project-score" style={{ color: getScoreColor(selectedProject.compliance_score) }}>
-                        {selectedProject.compliance_score} 分
+                        合规 {selectedProject.compliance_score} 分
                       </span>
                     ) : (
-                      <span className="project-score-unchecked">未检测</span>
+                      <span className="project-score-unchecked">合规未判定</span>
                     )}
                   </div>
                 </div>
@@ -446,7 +451,9 @@ function ChatPage() {
                 </div>
                 {assetsExpanded && (
                   <>
-                    {assets.length === 0 ? (
+                    {assetsLoading ? (
+                      <div className="empty-assets-inline">资产加载中...</div>
+                    ) : assets.length === 0 ? (
                       <div className="empty-assets-inline">
                         <Button type="link" size="small" onClick={handleNewAsset}>
                           + 添加资产
@@ -625,6 +632,7 @@ function ChatPage() {
             <ProjectCommandCenter
               project={selectedProject}
               assets={assets}
+              assetsLoading={assetsLoading}
               modelId={selectedModel}
               onOpenResults={() => selectedProject && navigate(`/projects/${selectedProject.id}/results`)}
             />

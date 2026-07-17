@@ -276,12 +276,13 @@ class DocumentControlEngine:
     def classify_blocks(self, file_name: str, blocks: list[dict[str, Any]]) -> dict[str, Any]:
         """Classify a document using its name/title, with content only as supporting evidence."""
         file_value = self._normalize_document_name(Path(file_name or "document").stem)
-        title_blocks = [
-            str(block.get("text") or "")
+        title_values = [
+            self._normalize_document_name(re.split(r"[\r\n]+", str(block.get("text") or ""), maxsplit=1)[0][:160])
             for block in blocks[:12]
-            if block.get("type") in {"heading", "header"} or block.get("page") in {None, 1}
-        ][:6]
-        title_value = self._normalize_document_name(" ".join(title_blocks))
+            if block.get("type") in {"text", "heading", "header"}
+            and block.get("page") in {None, 1}
+            and str(block.get("text") or "").strip()
+        ][:3]
         full_text = "\n".join(str(block.get("text") or "") for block in blocks).lower()
         candidates = []
 
@@ -289,7 +290,11 @@ class DocumentControlEngine:
             aliases = list(dict.fromkeys([document.get("name", ""), *(document.get("aliases") or [])]))
             normalized_aliases = [self._normalize_document_name(alias) for alias in aliases if alias]
             name_score = max((self._name_similarity(file_value, alias) for alias in normalized_aliases), default=0)
-            title_score = max((self._title_similarity(title_value, alias) for alias in normalized_aliases), default=0)
+            title_score = max((
+                self._title_similarity(title_value, alias)
+                for title_value in title_values
+                for alias in normalized_aliases
+            ), default=0)
             keywords = {
                 str(keyword).lower()
                 for control in document.get("controls", [])
@@ -309,7 +314,10 @@ class DocumentControlEngine:
                 "score": round(identity_score * 0.85 + content_score * 0.15, 3),
             })
 
-        candidates.sort(key=lambda item: item["score"], reverse=True)
+        candidates.sort(
+            key=lambda item: (item["score"], item["name_score"], item["title_score"]),
+            reverse=True,
+        )
         best = candidates[0] if candidates else None
         second = candidates[1] if len(candidates) > 1 else None
         name_match = bool(best and best["name_score"] >= 0.72)

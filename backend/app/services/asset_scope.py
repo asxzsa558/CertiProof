@@ -45,18 +45,36 @@ async def require_scannable_target(db: AsyncSession, project_id: int, target: st
 
 
 async def scope_plan_to_project_assets(db: AsyncSession, project_id: int, plan: list[dict]) -> list[dict]:
-    """Reject direct targets outside the current project's confirmed asset scope."""
+    """Keep valid project targets without letting one stale target cancel the plan."""
+    scoped_plan = []
+    rejected_targets = []
     for step in plan:
         parameters = step.get("parameters") if isinstance(step, dict) else None
         if not isinstance(parameters, dict):
+            scoped_plan.append(step)
             continue
         targets = []
         if parameters.get("target"):
             targets.append(str(parameters["target"]))
+        if parameters.get("url"):
+            targets.append(str(parameters["url"]))
         if isinstance(parameters.get("targets"), list):
             targets.extend(str(target) for target in parameters["targets"])
+        allowed = True
         for target in targets:
             if target in {"项目资产", "全部项目资产", "所有项目资产", "项目中的资产"}:
                 continue
-            await require_scannable_target(db, project_id, target)
+            try:
+                await require_scannable_target(db, project_id, target)
+            except ValueError:
+                allowed = False
+                rejected_targets.append(target)
+                break
+        if allowed:
+            scoped_plan.append(step)
+
+    if scoped_plan:
+        return scoped_plan
+    if rejected_targets:
+        raise ValueError("目标不在当前项目的启用资产范围内，请先将该资产添加到当前项目")
     return plan

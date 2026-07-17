@@ -70,13 +70,10 @@ const TOOL_ICONS = {
   list_assets: <DatabaseOutlined />,
   verify_asset: <DatabaseOutlined />,
   
-  // 工单管理
-  create_remediation_ticket: <FileTextOutlined />,
-  list_remediation_tickets: <FileTextOutlined />,
-  update_ticket_status: <FileTextOutlined />,
+  // 问题整改与复测
   
   // 报告生成
-  generate_pdf_report: <FileTextOutlined />,
+  generate_html_report: <FileTextOutlined />,
   generate_json_report: <FileTextOutlined />,
   
   // 定时扫描
@@ -133,10 +130,6 @@ const TOOL_NAMES = {
   add_asset: '添加资产',
   list_assets: '列出资产',
   verify_asset: '验证资产',
-  create_remediation_ticket: '创建整改工单',
-  list_remediation_tickets: '列出整改工单',
-  update_ticket_status: '更新工单状态',
-  generate_pdf_report: '生成 HTML 报告',
   generate_html_report: '生成 HTML 报告',
   generate_json_report: '生成 JSON 报告',
   create_scheduled_scan: '创建定时扫描',
@@ -170,7 +163,7 @@ const ToolResultCard = ({ tool, status, summary, details, copyText, defaultExpan
   // 状态配置
   const statusConfig = {
     success: { color: 'success', text: '成功', icon: <CheckCircleFilled /> },
-    warning: { color: 'warning', text: '警告/未完成', icon: <ExclamationCircleFilled /> },
+    warning: { color: 'warning', text: '未完成/无法判定', icon: <ExclamationCircleFilled /> },
     failed: { color: 'error', text: '失败', icon: <CloseCircleFilled /> },
     skipped: { color: 'default', text: '已跳过', icon: <ExclamationCircleFilled /> },
   }

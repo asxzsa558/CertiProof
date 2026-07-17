@@ -594,6 +594,31 @@ body.command-center-active::before {
   text-align: center;
 }
 
+.active-retests {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.active-retests > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 4px 7px;
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  background: rgba(14, 116, 144, 0.1);
+  color: rgba(186, 230, 253, 0.86);
+  font-size: 10px;
+}
+
+.active-retests span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .remediation-summary strong {
   color: #f8fafc;
   font-family: var(--font-mono);
@@ -741,6 +766,60 @@ body.command-center-active::before {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
+}
+
+.remediation-waiting {
+  color: rgba(177, 210, 226, 0.72);
+  font-size: 11px;
+}
+
+.retest-outcome {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0;
+  padding: 6px;
+  border-left: 2px solid rgba(56, 189, 248, 0.72);
+  background: rgba(14, 116, 144, 0.1);
+}
+
+.retest-outcome.still_present,
+.retest-outcome.unable,
+.retest-outcome.cancelled {
+  border-left-color: rgba(245, 158, 11, 0.82);
+  background: rgba(120, 53, 15, 0.12);
+}
+
+.retest-outcome.fixed {
+  border-left-color: rgba(16, 185, 129, 0.82);
+  background: rgba(6, 78, 59, 0.14);
+}
+
+.retest-outcome strong,
+.retest-outcome span {
+  display: block;
+  color: rgba(226, 232, 240, 0.86);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.remediation-timeline {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(79, 137, 167, 0.2);
+}
+
+.remediation-timeline > div {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 8px;
+  color: rgba(205, 228, 239, 0.78);
+  font-size: 11px;
+}
+
+.remediation-timeline time {
+  color: rgba(125, 171, 194, 0.72);
 }
 
 .remediation-note {

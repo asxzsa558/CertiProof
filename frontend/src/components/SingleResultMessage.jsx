@@ -15,7 +15,7 @@ import {
 } from '@ant-design/icons'
 import ToolResultCard from './ToolResultCard'
 import { CAPABILITY_NAMES } from './toolCatalog'
-import { safeJson, inferResultState } from './resultRendererUtils'
+import { safeJson, inferResultState, readableFindingText, severityLabel } from './resultRendererUtils'
 import { createPortColumns } from './resultColumns'
 
 const portColumns = createPortColumns()
@@ -47,7 +47,20 @@ const renderResultMessage = (msg, options = {}) => {
   const tool = firstAsset?.capability || 'scan_ports'
   const status = inferResultState(firstAsset || scanResults).key
   const error = firstAsset?.error
+  const firstResult = firstAsset?.result || {}
+  const isVulnerabilityScan = ['nikto_scan', 'scan_vulnerabilities'].includes(tool)
+  const vulnerabilityScanIncomplete = firstResult.scan_completed === false
   const resultTarget = Object.keys(assetResults)[0] || firstAsset?.result?.target || scanResults.target || scanResults.asset || ''
+  const displayQuality = vulnerabilityScanIncomplete
+    ? {
+        ...quality,
+        verdict: 'conditional',
+        success: 0,
+        warning: Math.max(Number(quality.warning) || 0, 1),
+        incomplete_targets: Array.from(new Set([...(quality.incomplete_targets || []), resultTarget].filter(Boolean))),
+        note: error || firstResult.error || '漏洞扫描未完整执行，当前结果不可用于判断目标是否存在漏洞。',
+      }
+    : quality
   const copyText = [
     msg.content,
     resultTarget ? `资产/IP: ${resultTarget}` : '',
@@ -212,25 +225,25 @@ const renderResultMessage = (msg, options = {}) => {
         </div>
       )}
 
-      {quality.verdict && (
-        <div className={`result-details-section quality-section ${quality.verdict}`}>
-          <div className={`section-title ${quality.verdict === 'complete' ? 'success' : quality.verdict === 'partial' ? 'danger' : 'warning'}`}>
-            结果可信度：{quality.verdict === 'complete' ? '完整' : quality.verdict === 'partial' ? '部分失败' : '有条件可信'}
+      {displayQuality.verdict && (
+        <div className={`result-details-section quality-section ${displayQuality.verdict}`}>
+          <div className={`section-title ${displayQuality.verdict === 'complete' ? 'success' : displayQuality.verdict === 'partial' ? 'danger' : 'warning'}`}>
+            结果可信度：{displayQuality.verdict === 'complete' ? '完整' : displayQuality.verdict === 'partial' ? '部分失败' : '有条件可信'}
           </div>
           <div className="baseline-target-item">
             <span>资产状态</span>
             <span className="text-muted">
-              成功 {quality.success || 0}，警告/不可判定 {quality.warning || 0}，失败 {quality.failed || 0}
+              成功 {displayQuality.success || 0}，未完成/不可判定 {displayQuality.warning || 0}，失败 {displayQuality.failed || 0}
             </span>
           </div>
           <div className="baseline-target-item">
             <span>说明</span>
-            <span className="text-muted">{quality.note}</span>
+            <span className="text-muted">{displayQuality.note}</span>
           </div>
-          {(quality.incomplete_targets || []).length > 0 && (
+          {(displayQuality.incomplete_targets || []).length > 0 && (
             <div className="baseline-target-item">
               <span>需复核资产</span>
-              <span className="text-muted">{quality.incomplete_targets.join('、')}</span>
+              <span className="text-muted">{displayQuality.incomplete_targets.join('、')}</span>
             </div>
           )}
         </div>
@@ -310,14 +323,22 @@ const renderResultMessage = (msg, options = {}) => {
       )}
 
       {/* Web 漏洞详情 */}
+      {isVulnerabilityScan && webVulnerabilities.length === 0 && vulnerabilities.length === 0 && (
+        <div className={`result-details-section ${vulnerabilityScanIncomplete ? 'warning-section' : 'success-section'}`}>
+          <div className={`section-title ${vulnerabilityScanIncomplete ? 'warning' : 'success'}`}>
+            {vulnerabilityScanIncomplete ? '漏洞扫描未完成，无法判断是否存在漏洞' : '漏洞扫描完成，本次未发现漏洞'}
+          </div>
+          {vulnerabilityScanIncomplete && <div className="error-message">{firstResult.tool_error || error || '工具未返回完整结果'}</div>}
+        </div>
+      )}
       {webVulnerabilities.length > 0 && (
         <div className="result-details-section">
           <div className="section-title">Web 漏洞列表</div>
           {webVulnerabilities.map((vuln, idx) => (
             <div key={idx} className="vulnerability-item">
-              <Tag color="red">{vuln.severity || '未知'}</Tag>
+              <Tag color="red">{severityLabel(vuln.severity, '未知')}</Tag>
               <span className="vuln-target">[{vuln.target}]</span>
-              <span>{vuln.name || vuln.id || 'Web 漏洞'}</span>
+              <span>{readableFindingText(vuln, 'Web 漏洞')}</span>
               {vuln.tool && <Tag color="purple" style={{ marginLeft: 4 }}>{vuln.tool}</Tag>}
             </div>
           ))}
@@ -479,8 +500,8 @@ const renderResultMessage = (msg, options = {}) => {
           <div className="section-title">漏洞列表</div>
           {vulnerabilities.map((vuln, idx) => (
             <div key={idx} className="vulnerability-item">
-              <Tag color="red">{vuln.severity || '未知'}</Tag>
-              <span>{vuln.name || vuln.id}</span>
+              <Tag color="red">{severityLabel(vuln.severity, '未知')}</Tag>
+              <span>{readableFindingText(vuln, '漏洞发现项')}</span>
             </div>
           ))}
         </div>

@@ -19,29 +19,14 @@ class FlowTemplate(Base):
     __tablename__ = "flow_templates"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(200), nullable=False)  # "等保三级测评流程"
+    name = Column(String(200), nullable=False)  # "等保三级自查流程"
     description = Column(Text)
     compliance_level = Column(Integer)  # 2=二级, 3=三级
     version = Column(String(20), default="1.0")
     
     # 流程配置（JSON 存储阶段定义）
     phases_config = Column(JSON, nullable=False)
-    # 示例:
-    # [
-    #   {
-    #     "id": "phase_1",
-    #     "name": "系统定级",
-    #     "order": 1,
-    #     "required": true,
-    #     "description": "确定信息系统安全保护等级",
-    #     "depends_on": [],
-    #     "default_tasks": [
-    #       {"type": "doc_review", "name": "审查定级报告"},
-    #       {"type": "doc_review", "name": "审查专家评审意见"}
-    #     ]
-    #   },
-    #   ...
-    # ]
+    # 当前只使用差距分析、现场测评、整改与复测、生成报告四阶段。
     
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -109,13 +94,13 @@ class PhaseInstance(Base):
     
     # 阶段信息
     phase_id = Column(String(50), nullable=False)  # 模板中的阶段ID
-    name = Column(String(200), nullable=False)  # "系统定级"
+    name = Column(String(200), nullable=False)  # "差距分析"
     description = Column(Text)
     order = Column(Integer, nullable=False)  # 阶段顺序
     
     # 状态
     status = Column(String(20), default="pending", nullable=False)
-    # pending / active / completed / skipped / failed
+    # pending / active / completed / failed
     
     # 进度
     total_tasks = Column(Integer, default=0)
@@ -172,6 +157,8 @@ class TaskInstance(Base):
     evidence_ids = Column(JSON)  # 关联的证据ID列表
     lease_owner = Column(String(128), nullable=True, index=True)
     lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    cancel_requested_at = Column(DateTime(timezone=True), nullable=True)
     
     # 时间
     estimated_hours = Column(Float)  # 预估工时

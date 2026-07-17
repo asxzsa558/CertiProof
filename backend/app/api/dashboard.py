@@ -9,13 +9,13 @@ from app.core.rbac import resolve_member_permissions
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.project import Project
+from app.models.report import ReportArtifact
 from app.models.asset import Asset
 from app.models.assessment_type import ProjectAssessment, AssessmentType
 from app.models.organization import OrganizationMember, OrganizationRole, OrganizationRoleAudit
 from app.models.scan_task import ScanTask
 from app.models.evidence import Evidence
 from app.models.finding import Finding, FindingStatus
-from app.models.remediation import RemediationTicket
 from app.schemas.dashboard import (
     DashboardResponse,
     DashboardProject,
@@ -435,7 +435,7 @@ async def get_organization_command_dashboard(
     )
     projects = projects_result.scalars().all()
     project_ids = [p.id for p in projects]
-    current_risk_statuses = [FindingStatus.OPEN, FindingStatus.IN_PROGRESS]
+    current_risk_statuses = [FindingStatus.OPEN]
     incomplete_technical_finding = and_(
         Finding.clause_name == "自动化技术检测",
         Finding.description.like("%检测未完成（不代表通过）%"),
@@ -494,6 +494,14 @@ async def get_organization_command_dashboard(
 
     progress_values = []
     project_matrix = []
+    report_artifacts = (await db.execute(
+        select(ReportArtifact)
+        .where(ReportArtifact.project_id.in_(project_ids))
+        .order_by(ReportArtifact.project_id, ReportArtifact.version.desc())
+    )).scalars().all()
+    latest_reports = {}
+    for artifact in report_artifacts:
+        latest_reports.setdefault(artifact.project_id, artifact)
     for project in projects:
         assessment_result = await db.execute(
             select(Assessment)
@@ -556,6 +564,17 @@ async def get_organization_command_dashboard(
             "task_completion_rate": task_completion_rate,
             "owner": owner_name,
             "next_action": "查看整改" if risk_count else "推进测评",
+            "report": (
+                {
+                    "available": True,
+                    "version": latest_reports[project.id].version,
+                    "status": latest_reports[project.id].status,
+                    "stale": latest_reports[project.id].status == "stale",
+                    "stale_reason": latest_reports[project.id].stale_reason,
+                    "generated_at": latest_reports[project.id].created_at.isoformat() if latest_reports[project.id].created_at else None,
+                }
+                if project.id in latest_reports else {"available": False}
+            ),
         })
 
     average_progress = round(sum(progress_values) / len(progress_values)) if progress_values else 0
@@ -712,9 +731,8 @@ async def get_organization_command_dashboard(
     tool_health = _tool_health(scans)
 
     risk_result = await db.execute(
-        select(Finding, Project, RemediationTicket)
+        select(Finding, Project)
         .join(Project, Project.id == Finding.project_id)
-        .outerjoin(RemediationTicket, RemediationTicket.finding_id == Finding.id)
         .where(Finding.project_id.in_(project_ids), ~incomplete_technical_finding)
         .order_by(Finding.updated_at.desc())
         .limit(80)
@@ -729,11 +747,11 @@ async def get_organization_command_dashboard(
             "description": finding.description,
             "remediation_plan": finding.remediation_suggestion,
             "severity": _enum_value(finding.severity),
-            "status": _enum_value(ticket.status) if ticket else _enum_value(finding.status),
-            "owner": "待分配",
-            "action": "查看" if ticket or _enum_value(finding.status) in ("resolved", "false_positive") else "创建整改",
+            "status": _enum_value(finding.status),
+            "owner": "系统跟踪",
+            "action": "查看" if _enum_value(finding.status) in ("fixed", "false_positive") else "整改与复测",
         }
-        for finding, project, ticket in risk_result.all()
+        for finding, project in risk_result.all()
     ]
 
     role_result = await db.execute(

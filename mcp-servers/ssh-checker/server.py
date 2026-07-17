@@ -4,8 +4,10 @@ SSH Checker MCP Server - Linux 白盒配置核查
 """
 
 import asyncio
+import contextlib
 import time
 import json
+import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException
@@ -94,7 +96,7 @@ SSH_CONFIG_CHECKS = {
     "max_auth_tries": {
         "cmd": "grep '^MaxAuthTries' /etc/ssh/sshd_config 2>/dev/null || echo 'NOT_FOUND'",
         "description": "最大认证尝试次数",
-        "compliant": lambda v: v and v.replace("maxauthtries", "").strip().isdigit() and int(v.replace("maxauthtries", "").strip()) <= 5,
+        "compliant": lambda v: v and v.lower().replace("maxauthtries", "").strip().isdigit() and int(v.lower().replace("maxauthtries", "").strip()) <= 5,
         "requirement": "MaxAuthTries <= 5",
     },
     "protocol_version": {
@@ -106,7 +108,7 @@ SSH_CONFIG_CHECKS = {
     "login_grace_time": {
         "cmd": "grep '^LoginGraceTime' /etc/ssh/sshd_config 2>/dev/null || echo 'NOT_FOUND'",
         "description": "登录宽限时间",
-        "compliant": lambda v: v and v.replace("logingracetime", "").strip().isdigit() and int(v.replace("logingracetime", "").strip()) <= 60,
+        "compliant": lambda v: v and v.lower().replace("logingracetime", "").strip().isdigit() and int(v.lower().replace("logingracetime", "").strip()) <= 60,
         "requirement": "LoginGraceTime <= 60",
     },
 }
@@ -468,6 +470,30 @@ async def mac_check(params: Dict[str, Any]) -> Dict[str, Any]:
 
 # ============== API 端点 ==============
 
+TOOL_MAP = {
+    "linux_baseline": linux_baseline,
+    "password_policy_check": password_policy_check,
+    "ssh_config_check": ssh_config_check,
+    "audit_config_check": audit_config_check,
+    "service_port_check": service_port_check,
+    "file_permission_check": file_permission_check,
+    "mac_check": mac_check,
+}
+SSH_TASKS: Dict[str, Dict[str, Any]] = {}
+
+
+async def _run_async_tool(task_id: str, tool_name: str, params: Dict[str, Any]) -> None:
+    task = SSH_TASKS[task_id]
+    task.update(status="running", progress=10)
+    try:
+        result = await TOOL_MAP[tool_name](params)
+        task.update(status="completed", progress=100, result=result)
+    except asyncio.CancelledError:
+        task.update(status="cancelled", error="用户已停止检测")
+        raise
+    except Exception as exc:
+        task.update(status="failed", error=str(exc))
+
 @app.get("/")
 async def root():
     return {
@@ -514,25 +540,59 @@ async def execute(request: ExecuteRequest):
     tool_name = request.tool
     params = request.params
     
-    tool_map = {
-        "linux_baseline": linux_baseline,
-        "password_policy_check": password_policy_check,
-        "ssh_config_check": ssh_config_check,
-        "audit_config_check": audit_config_check,
-        "service_port_check": service_port_check,
-        "file_permission_check": file_permission_check,
-        "mac_check": mac_check,
-    }
-    
-    if tool_name not in tool_map:
+    if tool_name not in TOOL_MAP:
         raise HTTPException(status_code=404, detail=f"Unknown tool: {tool_name}")
     
     try:
-        return await tool_map[tool_name](params)
+        return await TOOL_MAP[tool_name](params)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/scan/start")
+async def start_scan(request: ExecuteRequest):
+    if request.tool not in TOOL_MAP:
+        raise HTTPException(status_code=404, detail=f"Unknown tool: {request.tool}")
+    task_id = str(uuid.uuid4())
+    SSH_TASKS[task_id] = {"status": "pending", "progress": 0, "result": None, "error": None}
+    SSH_TASKS[task_id]["handle"] = asyncio.create_task(_run_async_tool(task_id, request.tool, request.params))
+    return {"task_id": task_id, "status": "started", "message": "Check started"}
+
+
+@app.get("/scan/{task_id}/progress")
+async def get_scan_progress(task_id: str):
+    task = SSH_TASKS.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"task_id": task_id, "status": task["status"], "progress": task["progress"], "error": task["error"]}
+
+
+@app.get("/scan/{task_id}/result")
+async def get_scan_result(task_id: str):
+    task = SSH_TASKS.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Task not completed yet")
+    return task["result"]
+
+
+@app.post("/scan/{task_id}/cancel")
+async def cancel_scan(task_id: str):
+    task = SSH_TASKS.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] in {"completed", "failed", "cancelled"}:
+        return {"task_id": task_id, "status": task["status"]}
+    task.update(status="cancelled", error="用户已停止检测")
+    handle = task.get("handle")
+    if handle:
+        handle.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await handle
+    return {"task_id": task_id, "status": "cancelled"}
 
 
 if __name__ == "__main__":

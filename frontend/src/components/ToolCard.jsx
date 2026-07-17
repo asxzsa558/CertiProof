@@ -7,7 +7,6 @@ import {
   SafetyCertificateOutlined,
   CloudServerOutlined,
   FileTextOutlined,
-  ToolOutlined,
   RadarChartOutlined,
   ProjectOutlined,
   DownloadOutlined,
@@ -236,11 +235,6 @@ function ScanResultCard({ data, onAction }) {
                 下载报告
               </Button>
             )}
-            {data.actions.includes('view_remediation') && (
-              <Button size="small" icon={<ToolOutlined />} onClick={() => onAction?.('view_remediation')}>
-                查看整改
-              </Button>
-            )}
           </Space>
         </>
       )}
@@ -318,45 +312,6 @@ function ScoreCard({ data }) {
   )
 }
 
-function RemediationCard({ data }) {
-  const tickets = data?.tickets || []
-  return (
-    <div className="tool-card-content">
-      <div className="remediation-summary">
-        <div className="rem-stat">
-          <span className="rem-stat-num" style={{ color: '#ef4444' }}>{data?.open}</span>
-          <span className="rem-stat-label">待处理</span>
-        </div>
-        <div className="rem-stat">
-          <span className="rem-stat-num" style={{ color: '#f59e0b' }}>{data?.in_progress}</span>
-          <span className="rem-stat-label">处理中</span>
-        </div>
-        <div className="rem-stat">
-          <span className="rem-stat-num" style={{ color: '#10b981' }}>{data?.resolved}</span>
-          <span className="rem-stat-label">已完成</span>
-        </div>
-      </div>
-      <List
-        size="small"
-        dataSource={tickets}
-        renderItem={(t) => (
-          <List.Item className="ticket-list-item">
-            <div className="ticket-list-info">
-              <Tag color={t.priority === 'critical' ? 'red' : t.priority === 'high' ? 'orange' : 'gold'} style={{ borderRadius: 4 }}>
-                {t.priority}
-              </Tag>
-              <span className="ticket-title">{t.title}</span>
-            </div>
-            <Tag style={{ borderRadius: 4 }}>
-              {t.status === 'open' ? '待处理' : t.status === 'in_progress' ? '处理中' : '已完成'}
-            </Tag>
-          </List.Item>
-        )}
-      />
-    </div>
-  )
-}
-
 function ReportCard({ data }) {
   return (
     <div className="tool-card-content">
@@ -422,7 +377,6 @@ const CARD_CONFIG = {
   scan_result: { icon: <SafetyCertificateOutlined />, label: '扫描结果', color: '#6366f1', renderer: ScanResultCard },
   findings_list: { icon: <WarningOutlined />, label: '问题清单', color: '#ef4444', renderer: FindingsListCard },
   score_card: { icon: <SafetyCertificateOutlined />, label: '合规评分', color: '#6366f1', renderer: ScoreCard },
-  remediation: { icon: <ToolOutlined />, label: '整改工单', color: '#f59e0b', renderer: RemediationCard },
   report: { icon: <FileTextOutlined />, label: '合规报告', color: '#6366f1', renderer: ReportCard },
   help: { icon: <FileTextOutlined />, label: '功能帮助', color: '#64748b', renderer: HelpCard },
 }

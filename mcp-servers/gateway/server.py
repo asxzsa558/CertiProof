@@ -131,7 +131,11 @@ SERVER_ROUTES = {
 }
 
 # 支持异步扫描的工具
-ASYNC_TOOLS = ["nmap_scan", "port_scan", "scan_ports", "masscan_scan", "nuclei_scan", "hydra_bruteforce", "testssl_scan"]
+ASYNC_TOOLS = [
+    "nmap_scan", "masscan_scan", "nuclei_scan", "hydra_bruteforce", "testssl_scan",
+    "linux_baseline", "password_policy_check", "ssh_config_check", "audit_config_check",
+    "service_port_check", "file_permission_check", "mac_check",
+]
 
 
 class ToolCallRequest(BaseModel):
@@ -411,6 +415,23 @@ async def get_result(tool_name: str, task_id: str):
             status_code=503,
             detail=f"Tool server unavailable: {e}"
         )
+
+
+@app.post("/cancel/{tool_name}/{task_id}")
+async def cancel_tool_task(tool_name: str, task_id: str):
+    tool_name = canonical_tool_name(tool_name)
+    server_url = TOOL_ROUTES.get(tool_name)
+    if not server_url or tool_name not in ASYNC_TOOLS:
+        raise HTTPException(status_code=404, detail=f"Async tool not found: {tool_name}")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(f"{server_url}/scan/{task_id}/cancel")
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text) from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail=f"Tool server unavailable: {exc}") from exc
 
 
 @app.post("/call/{tool_name}")

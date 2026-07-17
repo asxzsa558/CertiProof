@@ -7,7 +7,7 @@ import yaml
 
 from app.api.assessments import _sync_document_gap_findings
 from app.services.document_control_engine import DocumentControlEngine
-from app.services.document_pipeline import build_retest_comparison
+from app.services.document_pipeline import _visual_coverage_state, build_retest_comparison
 from app.services.llm_service import llm_service
 
 
@@ -139,22 +139,53 @@ def test_unreliable_retest_never_claims_fixed_or_new_gaps():
     assert comparison["remaining_gaps"] == ["缺少责任人"]
 
 
-def test_unable_analysis_does_not_mutate_findings_or_tickets():
+def test_visual_failure_is_only_fatal_when_native_and_ocr_coverage_are_insufficient():
+    native = [{"text": "信息安全管理制度规定责任、审批、审计、留痕、复核和持续改进。" * 3}]
+
+    native_fallback = _visual_coverage_state(native, 3, 0, ["PaddleOCR-VL unavailable"])
+    ocr_fallback = _visual_coverage_state([], 3, 3, ["PaddleOCR-VL unavailable"])
+    missing_scan_page = _visual_coverage_state([], 3, 2, ["page-2 OCR timeout"])
+
+    assert native_fallback == {"visual_required": False, "visual_incomplete": False, "visual_degraded": True}
+    assert ocr_fallback == {"visual_required": True, "visual_incomplete": False, "visual_degraded": True}
+    assert missing_scan_page == {"visual_required": True, "visual_incomplete": True, "visual_degraded": True}
+
+
+def test_unable_analysis_creates_retriable_blocker_without_claiming_noncompliance():
+    added = []
+
+    class Result:
+        def scalar_one_or_none(self):
+            return None
+
     class DB:
         async def get(self, _model, run_id):
             return SimpleNamespace(id=run_id)
 
         async def execute(self, *_args, **_kwargs):
-            raise AssertionError("unable analysis must not query or mutate findings")
+            return Result()
+
+        def add(self, item):
+            added.append(item)
+
+        async def flush(self):
+            added[0].id = 9
+
+        async def commit(self):
+            return None
 
     result = asyncio.run(_sync_document_gap_findings(
         DB(),
         project_id=1,
-        task=SimpleNamespace(id=2),
+        task=SimpleNamespace(id=2, name="文档检查：信息安全事件应急预案"),
         analysis={"type": "document_control_analysis", "status": "unable", "run_id": 3},
         user_id=4,
     ))
 
-    assert result["skipped"] is True
-    assert result["created_or_updated"] == 0
+    assert result["analysis_blocker"] is True
+    assert result["created_or_updated"] == 1
     assert result["fixed"] == 0
+    finding = added[0]
+    assert finding.judgment.value == "not_tested"
+    assert finding.status.value == "open"
+    assert finding.clause_id == "DOC-TASK-2-ANALYSIS-UNABLE"

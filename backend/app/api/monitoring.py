@@ -338,11 +338,14 @@ async def execute_scheduled_scan(db: AsyncSession, scheduled_scan: ScheduledScan
         asset_id=scheduled_scan.asset_id,
         task_type=ScanTaskType.SCHEDULED,
         status=ScanTaskStatus.RUNNING,
+        control_state="running",
         triggered_by=TriggeredBy.SCHEDULED,
         started_at=datetime.utcnow(),
     )
     db.add(scan_task)
     await db.flush()
+    from app.services.report_service import invalidate_report_artifacts
+    await invalidate_report_artifacts(db, scheduled_scan.project_id, "定时安全检测已产生新数据")
     
     try:
         scan_parameters = scheduled_scan.scan_parameters or {}
@@ -403,6 +406,7 @@ async def execute_scheduled_scan(db: AsyncSession, scheduled_scan: ScheduledScan
         
         # Update scan task
         scan_task.status = ScanTaskStatus.COMPLETED
+        scan_task.control_state = "completed"
         scan_task.completed_at = datetime.utcnow()
         scan_task.findings_count = len(created_findings)
         scan_task.result_summary = {
@@ -457,6 +461,8 @@ async def execute_scheduled_scan(db: AsyncSession, scheduled_scan: ScheduledScan
         
     except Exception as e:
         scan_task.status = ScanTaskStatus.FAILED
+        scan_task.control_state = "failed"
+        scan_task.completed_at = datetime.utcnow()
         scan_task.error_message = str(e)
         await db.commit()
         raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")

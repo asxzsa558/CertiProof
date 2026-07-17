@@ -1,8 +1,4 @@
-"""
-等保自查 5 阶段流程模板。
-
-定位：被测企业自查合规性，回答“是否合规、哪里不合规、如何整改、整改后是否改善”。
-"""
+"""等保企业自查四阶段流程模板。"""
 
 CORE_DOCUMENTS = [
     "信息安全管理制度",
@@ -18,7 +14,7 @@ CORE_DOCUMENTS = [
 ]
 
 
-def _five_stage_template(level: int) -> dict:
+def _four_stage_template(level: int) -> dict:
     extra_field_checks = [] if level == 2 else [
         {"type": "network_device_assessment", "name": "网络设备检测", "description": "SNMP 团体字、设备暴露和配置读取风险检测"},
         {"type": "windows_ad_smb_assessment", "name": "Windows/AD/SMB 检测", "description": "Windows、AD、SMB 账户、共享和域环境风险检测"},
@@ -66,34 +62,21 @@ def _five_stage_template(level: int) -> dict:
                 ],
             },
             {
-                "id": "remediation",
-                "name": "整改加固",
+                "id": "remediation_verification",
+                "name": "整改与复测",
                 "order": 3,
                 "required": True,
-                "description": "基于 Finding 创建整改工单，支持 open 到 closed 以及 skipped",
+                "description": "按问题直接提交改进文档或重新执行技术检测，并展示整改前后变化",
                 "depends_on": ["field_assessment"],
-                "default_tasks": [
-                    {"type": "remediation", "name": "整改工单跟踪", "description": "看板/列表跟踪责任人、优先级、状态和跳过原因"},
-                ],
-            },
-            {
-                "id": "retest",
-                "name": "复测验证",
-                "order": 4,
-                "required": True,
-                "description": "重新执行技术检测和文档检查，对比整改前后结果",
-                "depends_on": ["remediation"],
-                "default_tasks": [
-                    {"type": "retest", "name": "整改复测对比", "description": "标记已修复、仍存在、新增问题、已跳过"},
-                ],
+                "default_tasks": [],
             },
             {
                 "id": "report",
                 "name": "生成报告",
-                "order": 5,
+                "order": 4,
                 "required": True,
                 "description": "生成 HTML 报告，汇总问题、整改状态、解决时长和时间线",
-                "depends_on": ["retest"],
+                "depends_on": ["remediation_verification"],
                 "default_tasks": [
                     {"type": "html_report", "name": "HTML 报告生成", "description": "输出企业自查 HTML 报告"},
                 ],
@@ -102,11 +85,11 @@ def _five_stage_template(level: int) -> dict:
     }
 
 
-LEVEL_2_TEMPLATE = _five_stage_template(2)
-LEVEL_3_TEMPLATE = _five_stage_template(3)
+LEVEL_2_TEMPLATE = _four_stage_template(2)
+LEVEL_3_TEMPLATE = _four_stage_template(3)
 
-FIVE_STAGE_PHASE_IDS = [phase["id"] for phase in LEVEL_3_TEMPLATE["phases_config"]]
-FIVE_STAGE_PHASE_NAMES = [phase["name"] for phase in LEVEL_3_TEMPLATE["phases_config"]]
+FOUR_STAGE_PHASE_IDS = [phase["id"] for phase in LEVEL_3_TEMPLATE["phases_config"]]
+FOUR_STAGE_PHASE_NAMES = [phase["name"] for phase in LEVEL_3_TEMPLATE["phases_config"]]
 
 
 TASK_TYPES = {
@@ -135,7 +118,5 @@ TASK_TYPES = {
     "windows_check": {"name": "Windows/AD/SMB 检测", "description": "Windows/AD/SMB 安全检测", "icon": "windows"},
     "full_compliance_scan": {"name": "全量合规扫描", "description": "多工具组合扫描", "icon": "safety-certificate"},
     "doc_review": {"name": "文档检查", "description": "核心文档条款检查", "icon": "file-text"},
-    "remediation": {"name": "整改跟踪", "description": "整改工单跟踪", "icon": "tool"},
-    "retest": {"name": "复测验证", "description": "整改前后对比", "icon": "check-circle"},
     "html_report": {"name": "HTML 报告", "description": "生成 HTML 自查报告", "icon": "file-text"},
 }

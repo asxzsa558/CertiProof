@@ -72,7 +72,7 @@ docker compose up -d --build
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 migrate backend worker
+docker compose logs --tail=100 migrate backend interactive-worker document-worker assessment-worker verification-worker maintenance-worker
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:3000/health
 ```
@@ -97,10 +97,10 @@ curl http://127.0.0.1:3000/health
 docker compose ps
 
 # 查看后台分析与扫描日志
-docker compose logs -f worker ocr-server embedding-server
+docker compose logs -f interactive-worker document-worker assessment-worker verification-worker maintenance-worker ocr-server embedding-server
 
 # 重启应用服务
-docker compose restart backend worker frontend
+docker compose restart backend interactive-worker document-worker assessment-worker verification-worker maintenance-worker frontend
 
 # 停止服务但保留数据
 docker compose down
@@ -121,6 +121,14 @@ docker run --rm -v "$PWD":/workspace -w /workspace \
 
 # 前端构建
 cd frontend && npm ci && npm run build
+```
+
+真实全流程验收会启动隔离的 SSH/Web 靶标，并通过公开 API 执行文档初检、错误凭据、正确凭据、技术检测、整改复测和 HTML 报告：
+
+```bash
+docker compose --profile acceptance up -d --build
+CP_E2E_EMAIL='测试账号' CP_E2E_PASSWORD='测试密码' \
+  PYTHONPATH=backend backend/venv/bin/python backend/scripts/check_full_mvp_flow.py
 ```
 
 ## 目录结构

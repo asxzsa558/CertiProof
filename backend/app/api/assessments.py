@@ -25,8 +25,9 @@ MAX_TASK_UPLOAD_SIZE = 100 * 1024 * 1024
 from app.models.user import User
 from app.models.assessment import FlowTemplate, Assessment, PhaseInstance, TaskInstance, FlowEvent
 from app.models.project import Project
+from app.models.asset import AssetType
 from app.models.finding import Finding, Severity, Judgment, JudgmentEngine, FindingStatus
-from app.models.remediation import RemediationTicket, RemediationStatus
+from app.models.verification import VerificationItem, VerificationOutcome, VerificationRun
 from app.models.document_knowledge import DocumentAnalysisRun, DocumentFile, DocumentRunFile
 from app.services.flow_engine import FlowEngine, get_flow_engine
 from app.services.config_service import get_config_service
@@ -36,6 +37,7 @@ from app.services.document_pipeline import (
     SUPPORTED_SUFFIXES,
     MAX_BATCH_FILES,
     MAX_BATCH_UNCOMPRESSED,
+    cancel_document_run,
     create_document_batch_run,
     create_document_run,
     expand_document_upload,
@@ -43,6 +45,7 @@ from app.services.document_pipeline import (
     safe_document_name,
 )
 from app.services.file_storage import file_storage
+from app.services.audit import record_audit_event
 from app.services.upload_validation import read_limited_upload
 
 router = APIRouter(prefix="/assessments", tags=["Assessments"])
@@ -191,6 +194,20 @@ BASIC_TECHNICAL_TASK_TYPES = {
     "basic_weak_password_scan",
     "basic_ssl_tls_scan",
 }
+
+
+def _field_applicable_assets(task_type: str, assets: list) -> tuple[list, str | None]:
+    """Conservative applicability matrix; N/A is explicit and never treated as a pass."""
+    if task_type == "sql_injection_assessment":
+        matched = [asset for asset in assets if asset.value.startswith(("http://", "https://")) and "?" in asset.value]
+        return matched, None if matched else "不适用：项目中没有包含查询参数的 URL 资产"
+    if task_type in {
+        "database_security_assessment", "network_device_assessment",
+        "windows_ad_smb_assessment", "ssh_baseline_assessment",
+    }:
+        matched = [asset for asset in assets if asset.asset_type == AssetType.IP]
+        return matched, None if matched else "不适用：当前项目没有 IP 主机资产"
+    return assets, None
 
 
 def _public_task_result(result: dict | None) -> dict | None:
@@ -600,13 +617,14 @@ async def execute_gap_technical_tasks(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Queue all five basic technical checks for the selected project assets."""
+    """Queue all automated checks for gap analysis or field assessment."""
     from app.services.asset_scope import list_scannable_assets
     from app.services.assessment_task_queue import queue_assessment_task
+    from app.services.task_executor import get_task_executor
 
     phase, assessment = await require_phase_permission(db, phase_id, current_user, "scan:execute")
-    if phase.phase_id != "gap_analysis":
-        raise HTTPException(status_code=400, detail="自动基础技术检测仅适用于差距分析阶段")
+    if phase.phase_id not in {"gap_analysis", "field_assessment"}:
+        raise HTTPException(status_code=400, detail="当前阶段不支持自动技术检测")
     assets = await list_scannable_assets(db, assessment.project_id)
     requested_ids = set(req.asset_ids or [])
     if requested_ids:
@@ -617,9 +635,11 @@ async def execute_gap_technical_tasks(
         raise HTTPException(status_code=400, detail="当前项目没有可执行检测的启用资产")
 
     engine = get_flow_engine(db)
+    phase_tasks = await engine.get_tasks(phase_id, official_only=True)
     tasks = [
-        task for task in await engine.get_tasks(phase_id, official_only=True)
+        task for task in phase_tasks
         if task.task_type in BASIC_TECHNICAL_TASK_TYPES
+        or (phase.phase_id == "field_assessment" and get_task_executor(db).is_automated_task(task.task_type))
     ]
     queued, running = [], []
     credentials = {
@@ -636,13 +656,19 @@ async def execute_gap_technical_tasks(
             continue
         if task.status != "todo":
             await engine.reset_task(task.id)
+        task_assets = assets
+        if phase.phase_id == "field_assessment":
+            task_assets, not_applicable = _field_applicable_assets(task.task_type, assets)
+            if not task_assets:
+                await engine.skip_task(task.id, not_applicable or "不适用：没有符合条件的资产")
+                continue
         task = await engine.start_task(task.id)
         await queue_assessment_task(
             task,
-            [asset.id for asset in assets],
+            [asset.id for asset in task_assets],
             current_user.id,
             db,
-            credentials if task.task_type == "basic_baseline_check" else None,
+            credentials,
         )
         queued.append(task.id)
     return {
@@ -651,7 +677,7 @@ async def execute_gap_technical_tasks(
         "already_running_task_ids": running,
         "asset_count": len(assets),
         "credential_asset_count": len(credentials),
-        "message": f"已为 {len(assets)} 个资产提交 {len(queued)} 项基础技术检测",
+        "message": f"已为 {len(assets)} 个资产提交 {len(queued)} 项自动技术检测",
     }
 
 
@@ -753,6 +779,53 @@ async def start_task(
         if not assets:
             raise HTTPException(status_code=400, detail="当前项目没有启用资产，无法执行技术检测")
 
+    if task.task_type == "html_report":
+        from app.services.file_storage import file_storage
+        from app.services.report_service import create_report_artifact, ensure_report_generation_ready, report_artifact_payload
+        try:
+            await ensure_report_generation_ready(db, assessment.project_id, assessment.id)
+            task = await engine.start_task(task_id)
+            artifact = await create_report_artifact(
+                db,
+                project_id=assessment.project_id,
+                assessment_id=assessment.id,
+                task_id=task.id,
+                generated_by=current_user.id,
+            )
+            artifact_path = artifact.html_path
+            await engine.complete_task(task.id, {
+                "status": "completed",
+                "format": "html",
+                "artifact": report_artifact_payload(artifact),
+                "summary": artifact.snapshot["summary"],
+            })
+        except ValueError as e:
+            await db.rollback()
+            if "artifact_path" in locals():
+                await file_storage.delete_file(artifact_path)
+            failed_task = await engine.get_task(task_id)
+            if failed_task and failed_task.status == "in_progress":
+                failed_task.status = "todo"
+                failed_task.started_at = None
+                await db.commit()
+            raise HTTPException(status_code=409, detail=str(e))
+        except Exception:
+            await db.rollback()
+            if "artifact_path" in locals():
+                await file_storage.delete_file(artifact_path)
+            failed_task = await engine.get_task(task_id)
+            if failed_task and failed_task.status == "in_progress":
+                failed_task.status = "todo"
+                failed_task.started_at = None
+                await db.commit()
+            raise
+        return {
+            "message": f"HTML 报告 V{artifact.version} 已生成",
+            "task_id": task_id,
+            "status": "completed",
+            "artifact": report_artifact_payload(artifact),
+        }
+
     try:
         task = await engine.start_task(task_id)
     except ValueError as e:
@@ -771,16 +844,13 @@ async def complete_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """完成任务"""
+    """拒绝人工伪造正式检查结果；结果只能由执行器写入。"""
     await require_task_permission(db, task_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
-    
-    try:
-        await engine.complete_task(task_id, req.result)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    
-    return {"message": "Task completed"}
+    task = await engine.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    raise HTTPException(status_code=400, detail="正式检查不能人工标记完成，请等待执行结果或停止后重试")
 
 
 @router.post("/tasks/{task_id}/execute")
@@ -828,7 +898,7 @@ async def execute_task(
     
     try:
         if task.status != "todo":
-            await engine.reset_task(task_id)
+            await engine.reset_task(task_id, reset_downstream=False)
         # 开始任务
         await engine.start_task(task_id)
         
@@ -906,23 +976,25 @@ async def execute_task(
             }
         
         # 更新任务状态
-        if result["status"] in ["completed", "partial"]:
+        if result["status"] == "completed":
             await engine.complete_task(task_id, result)
             return {
-                "message": "任务部分完成，存在无法检测项" if result["status"] == "partial" else "任务执行完成",
+                "message": "任务执行完成",
                 "status": result["status"],
                 "result": result
             }
-        elif result["status"] == "failed":
+        elif result["status"] in {"partial", "failed"}:
             task = await engine.get_task(task_id)
             task.status = "failed"
+            task.completed_at = datetime.utcnow()
             task.result = result
             await db.commit()
             
-            error_msg = result.get("failed", [{}])[0].get("error", "任务执行失败")
+            details = result.get("warnings") or result.get("failed") or [{}]
+            error_msg = details[0].get("error") or details[0].get("message") or "存在无法完成的检测项"
             return {
-                "message": f"任务执行失败: {error_msg}",
-                "status": "failed",
+                "message": f"任务未完整完成: {error_msg}",
+                "status": result["status"],
                 "result": result
             }
         else:
@@ -984,6 +1056,30 @@ async def _resolve_document_analysis_mode(db: AsyncSession, mode: str | None) ->
     return normalize_analysis_mode(mode)
 
 
+class StopDocumentRunRequest(BaseModel):
+    reason: str = ""
+
+
+def _document_run_payload(run: DocumentAnalysisRun) -> dict:
+    stale = False
+    if run.status == "running" and run.lease_expires_at:
+        now = datetime.now(run.lease_expires_at.tzinfo) if run.lease_expires_at.tzinfo else datetime.utcnow()
+        stale = run.lease_expires_at < now
+    return {
+        "id": run.id,
+        "status": run.status,
+        "progress": run.progress,
+        "error": run.error_message,
+        "result": run.result_summary,
+        "attempt_count": run.attempt_count,
+        "heartbeat_at": run.heartbeat_at,
+        "lease_expires_at": run.lease_expires_at,
+        "stale": stale,
+        "created_at": run.created_at,
+        "completed_at": run.completed_at,
+    }
+
+
 @router.post("/phases/{phase_id}/documents/batch", status_code=status.HTTP_202_ACCEPTED)
 async def upload_phase_documents(
     phase_id: int,
@@ -994,12 +1090,35 @@ async def upload_phase_documents(
 ):
     """Upload documents or a supported archive, classify them, then run matching checks."""
     phase, assessment = await require_phase_permission(db, phase_id, current_user, "evidence:manage")
-    if phase.phase_id != "gap_analysis":
-        raise HTTPException(status_code=400, detail="批量文档归类仅适用于差距分析阶段")
+    if phase.phase_id not in {"gap_analysis", "remediation_verification"}:
+        raise HTTPException(status_code=400, detail="批量文档归类仅适用于差距分析或整改与复测阶段")
     if not files:
         raise HTTPException(status_code=400, detail="请至少上传一个文件或压缩包")
+    active_batch = (await db.execute(select(DocumentAnalysisRun.id).where(
+        DocumentAnalysisRun.assessment_id == assessment.id,
+        DocumentAnalysisRun.run_kind == "batch",
+        DocumentAnalysisRun.status.in_(["queued", "running"]),
+    ).limit(1))).scalar_one_or_none()
+    if active_batch:
+        raise HTTPException(status_code=409, detail="已有批量文档任务正在执行，请先等待或停止该任务")
+    verification_batch = phase.phase_id == "remediation_verification"
+    document_phase = phase
+    if verification_batch:
+        active_verification = (await db.execute(select(VerificationRun.id).where(
+            VerificationRun.project_id == assessment.project_id,
+            VerificationRun.source_type == "document",
+            VerificationRun.status.in_(["queued", "running"]),
+        ).limit(1))).scalar_one_or_none()
+        if active_verification:
+            raise HTTPException(status_code=409, detail="已有文档重新检查正在执行，请先等待或停止该任务")
+        document_phase = (await db.execute(select(PhaseInstance).where(
+            PhaseInstance.assessment_id == assessment.id,
+            PhaseInstance.phase_id == "gap_analysis",
+        ))).scalar_one_or_none()
+        if not document_phase:
+            raise HTTPException(status_code=400, detail="当前测评缺少差距分析文档任务")
     document_tasks = [
-        task for task in await get_flow_engine(db).get_tasks(phase_id, official_only=True)
+        task for task in await get_flow_engine(db).get_tasks(document_phase.id, official_only=True)
         if task.task_type == "doc_review"
     ]
     if not document_tasks:
@@ -1063,6 +1182,8 @@ async def upload_phase_documents(
         await db.flush()
         document_file_ids.append(document_file.id)
         saved_files.append({"id": document_file.id, "file_name": file_name})
+    from app.services.report_service import invalidate_report_artifacts
+    await invalidate_report_artifacts(db, assessment.project_id, "已上传新的批量文档")
     await db.commit()
     run = await create_document_batch_run(
         db,
@@ -1073,6 +1194,10 @@ async def upload_phase_documents(
         configured_mode,
         skipped_files,
         duplicate_files,
+        {
+            "verification_batch": verification_batch,
+            "document_task_phase_id": document_phase.id,
+        },
     )
     return {
         "status": "queued",
@@ -1103,15 +1228,7 @@ async def get_latest_phase_document_batch(
     )).scalar_one_or_none()
     if not run:
         return None
-    return {
-        "id": run.id,
-        "status": run.status,
-        "progress": run.progress,
-        "error": run.error_message,
-        "result": run.result_summary,
-        "created_at": run.created_at,
-        "completed_at": run.completed_at,
-    }
+    return _document_run_payload(run)
 
 
 @router.post("/tasks/{task_id}/documents", status_code=status.HTTP_202_ACCEPTED)
@@ -1172,6 +1289,8 @@ async def upload_task_documents(
         await db.flush()
         saved.append({"id": document_file.id, "file_name": file_name, "duplicate": False})
 
+    from app.services.report_service import invalidate_report_artifacts
+    await invalidate_report_artifacts(db, assessment.project_id, "已上传新的文档材料")
     await db.commit()
     run = await create_document_run(db, task, assessment.project_id, current_user.id, configured_mode)
     return {"status": "queued", "task_id": task.id, "run_id": run.id, "analysis_mode": configured_mode, "files": saved}
@@ -1256,7 +1375,8 @@ async def delete_task_document(
     )).scalar_one_or_none()
     if active_run:
         raise HTTPException(status_code=409, detail="文档仍在分析中，请等待任务结束后删除")
-    await file_storage.delete_file(document.storage_path)
+    if not await file_storage.delete_file(document.storage_path):
+        raise HTTPException(status_code=500, detail="原始文档删除失败，数据库记录已保留，请稍后重试")
     from app.services.knowledge_graph import knowledge_graph
     await knowledge_graph.purge_file(db, document.id)
     await db.delete(document)
@@ -1311,15 +1431,25 @@ async def get_document_run(
     if not run:
         raise HTTPException(status_code=404, detail="文档分析任务不存在")
     await require_project_permission(db, run.project_id, current_user, "assessment:read")
-    return {
-        "id": run.id,
-        "status": run.status,
-        "progress": run.progress,
-        "error": run.error_message,
-        "result": run.result_summary,
-        "created_at": run.created_at,
-        "completed_at": run.completed_at,
-    }
+    return _document_run_payload(run)
+
+
+@router.post("/document-runs/{run_id}/stop")
+async def stop_document_run(
+    run_id: int,
+    req: StopDocumentRunRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    run = await db.get(DocumentAnalysisRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="文档分析任务不存在")
+    await require_project_permission(db, run.project_id, current_user, "assessment:manage")
+    try:
+        await cancel_document_run(db, run, req.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "cancelled", "run_id": run.id, "message": "文档合规检查已停止"}
 
 
 async def _sync_document_gap_findings(
@@ -1336,36 +1466,96 @@ async def _sync_document_gap_findings(
         return {"created_or_updated": 0, "scan_task_id": None}
 
     from app.models.document_knowledge import DocumentAnalysisRun
+    from app.services.verification_service import add_finding_event, make_finding_fingerprint
 
     document_run = await db.get(DocumentAnalysisRun, analysis.get("run_id")) if analysis.get("run_id") else None
     if not document_run:
         raise ValueError("文档差距结果缺少有效的分析运行记录")
+    unable_clause_id = f"DOC-TASK-{task.id}-ANALYSIS-UNABLE"
+    unable_fingerprint = make_finding_fingerprint("document", f"task:{task.id}", "analysis", "unable")
+    unable_finding = (await db.execute(select(Finding).where(
+        Finding.project_id == project_id,
+        Finding.fingerprint == unable_fingerprint,
+    ))).scalar_one_or_none()
     if analysis.get("status") == "unable":
+        created = unable_finding is None
+        detail = analysis.get("message") or "文档内容提取、检索或模型判证未可靠完成。"
+        if unable_finding:
+            unable_finding.document_run_id = document_run.id
+            unable_finding.description = f"{task.name.removeprefix('文档检查：')}：{detail}"
+            unable_finding.status = FindingStatus.OPEN
+            unable_finding.resolved_at = None
+        else:
+            unable_finding = Finding(
+                project_id=project_id,
+                scan_task_id=None,
+                document_run_id=document_run.id,
+                fingerprint=unable_fingerprint,
+                source_type="document",
+                source_key="analysis",
+                scope_key=f"task:{task.id}",
+                clause_id=unable_clause_id,
+                clause_name="文档分析未完成",
+                severity=Severity.MEDIUM,
+                judgment=Judgment.NOT_TESTED,
+                judgment_engine=JudgmentEngine.RULE,
+                confidence=0,
+                description=f"{task.name.removeprefix('文档检查：')}：{detail}",
+                remediation_suggestion="重新上传可解析的 DOCX/PDF，或在完整文档视觉模型可用后重新分析；未得到可靠结论前不能视为合规。",
+                status=FindingStatus.OPEN,
+                evidence_ids=[],
+            )
+            db.add(unable_finding)
+            await db.flush()
+        await add_finding_event(
+            db,
+            unable_finding,
+            "analysis_unable" if created else "analysis_still_unable",
+            actor_id=user_id,
+            data={"document_run_id": document_run.id, "reason": detail},
+        )
+        await db.commit()
         return {
-            "created_or_updated": 0,
+            "created_or_updated": 1,
             "fixed": 0,
             "document_run_id": document_run.id,
-            "skipped": True,
-            "reason": "分析结果为无法判断，未变更问题和整改状态",
+            "analysis_blocker": True,
+            "reason": detail,
         }
 
+    fixed = 0
+    if unable_finding and unable_finding.status == FindingStatus.OPEN:
+        unable_finding.status = FindingStatus.FIXED
+        unable_finding.resolved_at = datetime.utcnow()
+        unable_finding.document_run_id = document_run.id
+        await add_finding_event(
+            db,
+            unable_finding,
+            "analysis_recovered",
+            actor_id=user_id,
+            data={"document_run_id": document_run.id},
+        )
+        fixed = 1
+
     failed_clause_ids = set()
-    passed_clause_ids = set()
     changed = 0
+    verification_run_id = (document_run.parameters or {}).get("verification_run_id")
     for control in analysis.get("controls", []):
         for point in control.get("points", []):
             clause_id = f"DOC-TASK-{task.id}-{control.get('id')}-{point.get('id')}"
             if point.get("status") == "pass":
-                passed_clause_ids.add(clause_id)
                 continue
             if point.get("status") not in {"fail", "partial"}:
                 continue
 
             failed_clause_ids.add(clause_id)
-            result = await db.execute(
-                select(Finding).where(Finding.project_id == project_id, Finding.clause_id == clause_id)
-            )
+            fingerprint = make_finding_fingerprint("document", f"task:{task.id}", control.get("id") or task.name, point.get("id") or clause_id)
+            result = await db.execute(select(Finding).where(
+                Finding.project_id == project_id,
+                Finding.fingerprint == fingerprint,
+            ))
             finding = result.scalar_one_or_none()
+            created = finding is None
             is_partial = point.get("status") == "partial"
             reason = point.get("llm_reason") or point.get("missing_judgement") or point.get("text") or "证据不足"
             description = (
@@ -1380,6 +1570,10 @@ async def _sync_document_gap_findings(
             if finding:
                 finding.scan_task_id = None
                 finding.document_run_id = document_run.id
+                finding.fingerprint = fingerprint
+                finding.source_type = "document"
+                finding.source_key = str(control.get("id") or task.id)
+                finding.scope_key = f"task:{task.id}"
                 finding.description = description
                 finding.remediation_suggestion = suggestion
                 finding.confidence = analysis.get("confidence")
@@ -1387,7 +1581,7 @@ async def _sync_document_gap_findings(
                 finding.judgment_engine = JudgmentEngine.HYBRID if analysis.get("evidence_engine") == "hybrid" else JudgmentEngine.RULE
                 finding.severity = Severity(point.get("severity", "medium"))
                 finding.evidence_ids = evidence_ids
-                if finding.status == FindingStatus.RESOLVED:
+                if finding.status == FindingStatus.FIXED:
                     finding.status = FindingStatus.OPEN
                     finding.resolved_at = None
             else:
@@ -1395,6 +1589,10 @@ async def _sync_document_gap_findings(
                     project_id=project_id,
                     scan_task_id=None,
                     document_run_id=document_run.id,
+                    fingerprint=fingerprint,
+                    source_type="document",
+                    source_key=str(control.get("id") or task.id),
+                    scope_key=f"task:{task.id}",
                     clause_id=clause_id,
                     clause_name=control.get("title") or analysis.get("document_name"),
                     severity=Severity(point.get("severity", "medium")),
@@ -1409,59 +1607,34 @@ async def _sync_document_gap_findings(
                 db.add(finding)
                 await db.flush()
 
-            result = await db.execute(
-                select(RemediationTicket).where(RemediationTicket.finding_id == finding.id)
+            await add_finding_event(
+                db,
+                finding,
+                "finding_created" if created else "finding_detected",
+                actor_id=user_id,
+                data={"document_run_id": document_run.id},
             )
-            ticket = result.scalar_one_or_none()
-            if ticket:
-                ticket.title = description[:500]
-                ticket.description = description
-                ticket.remediation_plan = suggestion
-                if ticket.status in (
-                    RemediationStatus.RESOLVED,
-                    RemediationStatus.VERIFIED,
-                    RemediationStatus.CLOSED,
-                ):
-                    ticket.status = RemediationStatus.OPEN
-                    ticket.resolved_at = None
-                    ticket.verified_at = None
-                    ticket.resolution_notes = "复测再次发现该缺失项，已重新打开。"
-            else:
-                db.add(RemediationTicket(
-                    finding_id=finding.id,
-                    project_id=project_id,
-                    title=description[:500],
-                    description=description,
-                    remediation_plan=suggestion,
-                    priority="medium",
-                    assigned_by=user_id,
-                    status=RemediationStatus.OPEN,
-                ))
+            if verification_run_id and created:
+                exists = (await db.execute(select(VerificationItem).where(
+                    VerificationItem.run_id == verification_run_id,
+                    VerificationItem.finding_id == finding.id,
+                ))).scalar_one_or_none()
+                if not exists:
+                    db.add(VerificationItem(
+                        run_id=verification_run_id,
+                        project_id=project_id,
+                        finding_id=finding.id,
+                        source_type="document",
+                        target=f"task:{task.id}",
+                        capability=str(control.get("id") or task.id),
+                        fingerprint=fingerprint,
+                        outcome=VerificationOutcome.NEW,
+                        current_document_run_id=document_run.id,
+                        current_observation={"clause_id": clause_id, "present": True, "description": description},
+                        comparison={"before": "absent", "after": point.get("status")},
+                        completed_at=datetime.utcnow(),
+                    ))
             changed += 1
-
-    fixed = 0
-    existing_result = await db.execute(
-        select(Finding).where(
-            Finding.project_id == project_id,
-            Finding.clause_id.like(f"DOC-TASK-{task.id}-%"),
-        )
-    )
-    for finding in existing_result.scalars().all():
-        if finding.clause_id not in passed_clause_ids:
-            continue
-        if finding.status != FindingStatus.RESOLVED:
-            finding.status = FindingStatus.RESOLVED
-            finding.resolved_at = datetime.utcnow()
-
-        ticket_result = await db.execute(
-            select(RemediationTicket).where(RemediationTicket.finding_id == finding.id)
-        )
-        ticket = ticket_result.scalar_one_or_none()
-        if ticket and ticket.status not in (RemediationStatus.CLOSED, RemediationStatus.SKIPPED):
-            ticket.status = RemediationStatus.RESOLVED
-            ticket.resolved_at = ticket.resolved_at or datetime.utcnow()
-            ticket.resolution_notes = ticket.resolution_notes or "文档复测未再发现该缺失项。"
-        fixed += 1
 
     summary = dict(document_run.result_summary or {})
     summary["findings_count"] = len(failed_clause_ids)
@@ -1492,8 +1665,7 @@ async def skip_task(
     """
     跳过任务
 
-    - 原因字段选填
-    - 任务标记为 cancelled
+    仅供自动编排器记录明确的不适用检查。
     """
     await require_task_permission(db, task_id, current_user, "assessment:manage")
     engine = get_flow_engine(db)
@@ -1508,7 +1680,7 @@ async def skip_task(
         )
 
     try:
-        skipped_task = await engine.skip_task(task_id, req.reason)
+        await engine.skip_task(task_id, req.reason)
         return {
             "status": "skipped",
             "task_id": task_id,
@@ -1549,6 +1721,21 @@ async def stop_task(
         )
 
     try:
+        document_runs = (await db.execute(
+            select(DocumentAnalysisRun).where(
+                DocumentAnalysisRun.task_id == task_id,
+                DocumentAnalysisRun.status.in_(["queued", "running"]),
+            )
+        )).scalars().all()
+        if document_runs:
+            for run in document_runs:
+                await cancel_document_run(db, run, req.reason)
+            return {
+                "status": "stopped",
+                "task_id": task_id,
+                "message": "文档合规检查已停止",
+                "reason": req.reason,
+            }
         stopped_task = await engine.stop_task(task_id, req.reason)
         return {
             "status": "stopped",
@@ -1602,17 +1789,35 @@ async def restart_assessment(
     """
     继续或重置测评。mode=continue 保留流程结果，mode=reset 重置阶段、任务和测评产物。
     """
-    await require_assessment_permission(db, assessment_id, current_user, "assessment:manage")
+    authorized_assessment = await require_assessment_permission(db, assessment_id, current_user, "assessment:manage")
+    project = await db.get(Project, authorized_assessment.project_id)
     engine = get_flow_engine(db)
     
     try:
         mode = (req.mode if req else "reset")
-        assessment = await engine.restart_assessment(assessment_id, mode=mode)
+        assessment, cleanup = await engine.restart_assessment(assessment_id, mode=mode)
         reset = mode != "continue"
+        if reset:
+            await record_audit_event(
+                db,
+                event_type="assessment.full_reset",
+                resource_type="assessment",
+                resource_id=assessment_id,
+                actor_user_id=current_user.id,
+                organization_id=project.organization_id if project else None,
+                project_id=authorized_assessment.project_id,
+                details={
+                    key: value
+                    for key, value in cleanup.items()
+                    if key != "failed_file_paths"
+                },
+            )
+            await db.commit()
         return {
             "status": "reset" if reset else "reopened",
             "assessment_id": assessment_id,
-            "message": "测评进度、问题、证据和整改队列已完全重置" if reset else "测评已重新打开，历史结果和证据已保留",
+            "message": "测评数据已彻底清除，项目与资产保持不变" if reset else "测评已重新打开，历史结果和证据已保留",
+            "cleanup": cleanup if reset else None,
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1712,10 +1917,12 @@ async def get_assessment_summary(
     completed_tasks = 0
     failed_tasks = 0
     todo_tasks = 0
-    task_details = []
+    cancelled_tasks = 0
+    phase_tasks = {}
     
     for phase in phases:
         tasks = await engine.get_tasks(phase.id, official_only=True)
+        phase_tasks[phase.id] = tasks
         for task in tasks:
             total_tasks += 1
             if task.status == "completed":
@@ -1724,18 +1931,16 @@ async def get_assessment_summary(
                 failed_tasks += 1
             elif task.status == "todo":
                 todo_tasks += 1
-            task_details.append({
-                "phase": phase.name,
-                "name": task.name,
-                "type": task.task_type,
-                "status": task.status,
-            })
+            elif task.status == "cancelled":
+                cancelled_tasks += 1
     
-    # 计算分数
-    score = await engine._calculate_compliance_score(assessment) if hasattr(engine, '_calculate_compliance_score') else 0
+    score_metrics = await engine._calculate_compliance_metrics(assessment)
+    score = score_metrics["score"]
     
     # 确定合规等级
-    if score >= 90:
+    if score is None:
+        grade = "无法判定"
+    elif score >= 90:
         grade = "优秀"
     elif score >= 75:
         grade = "良好"
@@ -1744,6 +1949,61 @@ async def get_assessment_summary(
     else:
         grade = "危险"
     
+    phase_summaries = []
+    findings = (await db.execute(select(Finding).where(
+        Finding.project_id == assessment.project_id,
+        Finding.status != FindingStatus.FALSE_POSITIVE,
+    ))).scalars().all()
+    disposition = {
+        "open": sum(finding.status == FindingStatus.OPEN for finding in findings),
+        "fixed": sum(finding.status == FindingStatus.FIXED for finding in findings),
+        "unable": sum(finding.judgment == Judgment.NOT_TESTED for finding in findings),
+    }
+    verification_runs = list((await db.execute(select(VerificationRun).where(
+        VerificationRun.project_id == assessment.project_id,
+    ).order_by(VerificationRun.created_at.desc()).limit(8))).scalars().all())
+    if disposition["open"]:
+        completion_state = "needs_remediation"
+    elif disposition["unable"]:
+        completion_state = "coverage_limited"
+    else:
+        completion_state = "all_fixed"
+    for phase in phases:
+        tasks = phase_tasks[phase.id]
+        remediation = phase.phase_id == "remediation_verification"
+        processed = sum(task.status in {"completed", "failed", "cancelled"} for task in tasks)
+        phase_summaries.append({
+            "id": phase.id,
+            "name": phase.name,
+            "status": phase.status,
+            "order": phase.order,
+            "total_tasks": phase.total_tasks if remediation else len(tasks),
+            "completed_tasks": phase.completed_tasks if remediation else processed,
+            "metric_label": "问题" if remediation else "任务",
+            "metric_suffix": "已复核" if remediation else "已处理",
+            "skipped_tasks": sum(task.status == "cancelled" for task in tasks),
+            "completed_at": phase.completed_at.isoformat() if phase.completed_at else None,
+            "execution_coverage": None if remediation else await _calculate_phase_coverage(engine, phase),
+            "disposition": disposition if remediation else None,
+            "verification_runs": [{
+                "id": run.id,
+                "source_type": run.source_type,
+                "status": getattr(run.status, "value", run.status),
+                "summary": run.summary or {},
+                "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+            } for run in verification_runs] if remediation else [],
+            "tasks": [
+                {
+                    "name": task.name,
+                    "type": task.task_type,
+                    "status": task.status,
+                    "result": task.result,
+                }
+                for task in tasks
+            ],
+        })
+
+    processed_tasks = completed_tasks + failed_tasks + cancelled_tasks
     return {
         "assessment_id": assessment_id,
         "project": {
@@ -1754,43 +2014,25 @@ async def get_assessment_summary(
             "grade": grade,
         },
         "status": assessment.status,
+        "completion_state": completion_state,
+        "score_metrics": score_metrics,
         "progress": assessment.progress,
         "started_at": assessment.started_at.isoformat() if assessment.started_at else None,
         "completed_at": assessment.completed_at.isoformat() if assessment.completed_at else None,
-        "phases": [
-            {
-                "id": p.id,
-                "name": p.name,
-                "status": p.status,
-                "order": p.order,
-                "total_tasks": p.total_tasks,
-                "completed_tasks": p.completed_tasks,
-                "completed_at": p.completed_at.isoformat() if p.completed_at else None,
-                "score": await _calculate_phase_score(engine, p),
-                "tasks": [
-                    {
-                        "name": t.name,
-                        "type": t.task_type,
-                        "status": t.status,
-                        "result": t.result,
-                    }
-                    for t in await engine.get_tasks(p.id, official_only=True)
-                ],
-            }
-            for p in phases
-        ],
+        "phases": phase_summaries,
         "stats": {
             "total_tasks": total_tasks,
             "completed_tasks": completed_tasks,
             "failed_tasks": failed_tasks,
+            "cancelled_tasks": cancelled_tasks,
             "todo_tasks": todo_tasks,
-            "completion_rate": round(completed_tasks / total_tasks * 100, 1) if total_tasks > 0 else 0,
+            "completion_rate": round(processed_tasks / total_tasks * 100, 1) if total_tasks > 0 else 0,
         },
     }
 
 
-async def _calculate_phase_score(engine, phase) -> float:
-    """计算阶段分数"""
+async def _calculate_phase_coverage(engine, phase) -> float:
+    """Calculate execution coverage; this is deliberately not a compliance score."""
     tasks = await engine.get_tasks(phase.id, official_only=True)
     total = len(tasks)
     completed = sum(1 for t in tasks if t.status == "completed")
@@ -1811,13 +2053,19 @@ async def get_assessment_report(
     if not assessment:
         raise HTTPException(status_code=404, detail="测评不存在")
     
+    from app.services.report_service import get_latest_report_artifact, read_report_artifact_html
+    artifact = await get_latest_report_artifact(db, assessment.project_id, assessment_id=assessment.id)
+    if not artifact:
+        raise HTTPException(status_code=409, detail="尚未完成生成报告任务，请先在最后阶段生成正式报告")
     if format == "json":
-        from app.services.report_service import generate_json_report
-        return await generate_json_report(db=db, project_id=assessment.project_id)
+        return artifact.snapshot
 
-    from app.services.report_service import generate_html_report
     return Response(
-        content=await generate_html_report(db=db, project_id=assessment.project_id),
+        content=await read_report_artifact_html(artifact),
         media_type="text/html; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=assessment_report.html"},
+        headers={
+            "Content-Disposition": f"attachment; filename=assessment-report-v{artifact.version}.html",
+            "X-Report-Version": str(artifact.version),
+            "X-Report-Status": artifact.status,
+        },
     )

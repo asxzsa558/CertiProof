@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Iterable
 from typing import Any
@@ -31,10 +32,12 @@ from app.models.monitoring import ScanHistory, ScheduledScan
 from app.models.organization import Organization, OrganizationMember, OrganizationRole, OrganizationRoleAudit
 from app.models.project import Project
 from app.models.questionnaire import QuestionnaireRecord
-from app.models.remediation import RemediationTicket
+from app.models.report import ReportArtifact
 from app.models.scan_task import ScanTask, ScanTaskStatus
 from app.services.file_storage import file_storage
 from app.services.knowledge_graph import knowledge_graph
+from app.services.flow_engine import workflow_progress
+from app.services.verification_service import delete_verification_data
 
 
 def _json_bytes(value: Any) -> int:
@@ -63,6 +66,10 @@ async def storage_usage(db: AsyncSession, project_ids: Iterable[int]) -> dict[st
     scan_count = int((await db.execute(select(func.count(ScanTask.id)).where(
         ScanTask.project_id.in_(project_ids)
     ))).scalar_one())
+    report_count, report_bytes = (await db.execute(select(
+        func.count(ReportArtifact.id),
+        func.coalesce(func.sum(ReportArtifact.html_size), 0),
+    ).where(ReportArtifact.project_id.in_(project_ids)))).one()
 
     dialect = db.bind.dialect.name if db.bind is not None else ""
     if dialect == "postgresql":
@@ -107,6 +114,7 @@ async def storage_usage(db: AsyncSession, project_ids: Iterable[int]) -> dict[st
         "parsed_content": {"bytes": parsed_bytes, "count": block_count},
         "vectors": {"bytes": vector_bytes, "count": vector_count},
         "scan_results": {"bytes": scan_bytes, "count": scan_count},
+        "reports": {"bytes": int(report_bytes or 0), "count": int(report_count or 0)},
     })
 
 
@@ -117,7 +125,7 @@ def _storage_payload(values: dict[str, dict[str, int]]) -> dict[str, Any]:
         "vectors": {"bytes": 0, "count": 0, "label": "语义向量"},
         "ocr_cache": {"bytes": 0, "count": 0, "label": "OCR 临时缓存", "transient": True},
         "scan_results": {"bytes": 0, "count": 0, "label": "检测结果"},
-        "reports": {"bytes": 0, "count": 0, "label": "HTML 报告", "on_demand": True},
+        "reports": {"bytes": 0, "count": 0, "label": "HTML 报告"},
     }
     for key, value in values.items():
         categories[key].update(value)
@@ -126,7 +134,7 @@ def _storage_payload(values: dict[str, dict[str, int]]) -> dict[str, Any]:
         "total_bytes": sum(int(item["bytes"]) for item in categories.values()),
         "notes": {
             "ocr_cache": "OCR 临时文件随请求自动释放，不形成长期存储。",
-            "reports": "HTML 报告按需生成，当前不持久化报告副本。",
+            "reports": "HTML 报告按版本保存；新检测或整改材料会将当前版本标记为过期。",
             "vectors": "向量容量为数据库逻辑占用，不含共享索引页。",
         },
     }
@@ -137,8 +145,12 @@ async def delete_storage_files(paths: Iterable[str]) -> dict[str, Any]:
     failed = []
     deleted = 0
     for path in unique_paths:
-        if await file_storage.delete_file(path):
-            deleted += 1
+        for attempt in range(3):
+            if await file_storage.delete_file(path):
+                deleted += 1
+                break
+            if attempt < 2:
+                await asyncio.sleep(0.2 * (attempt + 1))
         else:
             failed.append(path)
     return {"deleted_file_count": deleted, "failed_file_paths": failed}
@@ -179,7 +191,7 @@ async def clear_project_documents(db: AsyncSession, project_id: int) -> dict[str
         evidence_paths = list((await db.execute(select(Evidence.file_path).where(
             Evidence.finding_id.in_(finding_ids), Evidence.file_path.is_not(None)
         ))).scalars().all())
-        await db.execute(delete(RemediationTicket).where(RemediationTicket.finding_id.in_(finding_ids)))
+        await delete_verification_data(db, project_id, finding_ids)
         await db.execute(delete(Evidence).where(Evidence.finding_id.in_(finding_ids)))
         await db.execute(delete(Finding).where(Finding.id.in_(finding_ids)))
 
@@ -199,14 +211,14 @@ async def clear_project_documents(db: AsyncSession, project_id: int) -> dict[str
         tasks = (await db.execute(select(TaskInstance).where(TaskInstance.phase_id == phase.id))).scalars().all()
         phase.completed_tasks = sum(task.status in {"completed", "cancelled"} for task in tasks)
         phase.progress = phase.completed_tasks / phase.total_tasks * 100 if phase.total_tasks else 0
-        if phase.status in {"completed", "skipped", "failed"}:
+        if phase.status in {"completed", "failed"}:
             phase.status = "pending"
             phase.completed_at = None
-        assessment.completed_phases = len((await db.execute(select(PhaseInstance.id).where(
+        assessment_phases = list((await db.execute(select(PhaseInstance).where(
             PhaseInstance.assessment_id == assessment.id,
-            PhaseInstance.status.in_(["completed", "skipped"]),
         ))).scalars().all())
-        assessment.progress = assessment.completed_phases / assessment.total_phases * 100 if assessment.total_phases else 0
+        assessment.completed_phases = sum(item.status == "completed" for item in assessment_phases)
+        assessment.progress = workflow_progress(assessment_phases)
         if assessment.status == "completed":
             assessment.status = "in_progress"
             assessment.completed_at = None
@@ -242,6 +254,9 @@ async def delete_project_records(db: AsyncSession, project: Project) -> dict[str
     evidence_files = (await db.execute(select(Evidence.file_path, Evidence.file_size).where(
         Evidence.project_id == project_id, Evidence.file_path.is_not(None)
     ))).all()
+    report_files = (await db.execute(select(ReportArtifact.html_path, ReportArtifact.html_size).where(
+        ReportArtifact.project_id == project_id
+    ))).all()
     await knowledge_graph.purge_project(db, project_id)
 
     assessment_ids = list((await db.execute(select(Assessment.id).where(Assessment.project_id == project_id))).scalars().all())
@@ -254,13 +269,14 @@ async def delete_project_records(db: AsyncSession, project: Project) -> dict[str
     finding_ids = select(Finding.id).where(Finding.project_id == project_id)
     questionnaire_ids = select(QuestionnaireRecord.id).where(QuestionnaireRecord.project_id == project_id)
 
-    await db.execute(delete(RemediationTicket).where(RemediationTicket.project_id == project_id))
+    await delete_verification_data(db, project_id)
     await db.execute(delete(Evidence).where(Evidence.project_id == project_id))
     await db.execute(delete(Evidence).where(Evidence.finding_id.in_(finding_ids)))
     await db.execute(delete(Evidence).where(Evidence.questionnaire_record_id.in_(questionnaire_ids)))
     await db.execute(delete(QuestionnaireRecord).where(QuestionnaireRecord.project_id == project_id))
     await db.execute(delete(Finding).where(Finding.project_id == project_id))
     await db.execute(delete(ProjectAssessment).where(ProjectAssessment.project_id == project_id))
+    await db.execute(delete(ReportArtifact).where(ReportArtifact.project_id == project_id))
     await db.execute(delete(DocumentAnalysisRun).where(DocumentAnalysisRun.project_id == project_id))
     await db.execute(delete(DocumentFile).where(DocumentFile.project_id == project_id))
     if assessment_ids:
@@ -289,8 +305,12 @@ async def delete_project_records(db: AsyncSession, project: Project) -> dict[str
     await db.delete(project)
     return {
         "project_id": project_id,
-        "file_paths": [row.storage_path for row in documents] + [row.file_path for row in evidence_files],
-        "released_file_bytes": sum(int(row.size_bytes or 0) for row in documents) + sum(int(row.file_size or 0) for row in evidence_files),
+        "file_paths": [row.storage_path for row in documents] + [row.file_path for row in evidence_files] + [row.html_path for row in report_files],
+        "released_file_bytes": (
+            sum(int(row.size_bytes or 0) for row in documents)
+            + sum(int(row.file_size or 0) for row in evidence_files)
+            + sum(int(row.html_size or 0) for row in report_files)
+        ),
     }
 
 

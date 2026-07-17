@@ -45,8 +45,12 @@ def assert_source_guards() -> None:
     assert "async def _project_for_user_id" in execution_engine
     assert "Project.id == project_id, Project.user_id == user_id" not in execution_engine
     assert "Project.id == pid, Project.user_id == user_id" not in execution_engine
-    assert "Finding.id == finding_id, Finding.project_id == project_id" in execution_engine
     assert "finding.check_item" not in execution_engine
+
+    verification_api = (ROOT / "backend/app/api/verification.py").read_text(encoding="utf-8")
+    assert "Finding.id == finding_id, Finding.project_id == project_id" in verification_api
+    assert 'await _require_project(db, project_id, current_user, "assessment:manage")' in verification_api
+    assert 'await _require_project(db, project_id, current_user, "evidence:manage")' in verification_api
 
     config = (ROOT / "backend/app/core/config.py").read_text(encoding="utf-8")
     assert "def validate_runtime_security" in config
@@ -96,9 +100,12 @@ def assert_source_guards() -> None:
     assert "await orchestrator.recover_incomplete_scan_tasks(db)" in main
     worker = (ROOT / "backend/app/worker.py").read_text(encoding="utf-8")
     assert "async def run_worker" in worker
-    assert "await orchestrator.recover_incomplete_scan_tasks(db)" in worker
+    assert 'if role == "interactive"' in worker
+    assert "orchestrator.recover_incomplete_scan_tasks(db, limit=available)" in worker
     assert "run_due_scheduled_scans" in worker
     assert "process_pending_assessment_tasks" in worker
+    assert "process_pending_document_runs" in worker
+    assert "process_pending_verification_runs" in worker
 
     security_tools = (ROOT / "mcp-servers/security-tools/server.py").read_text(encoding="utf-8")
     assert "MAX_NMAP_HOST_TIMEOUT = 180" in security_tools

@@ -49,3 +49,18 @@ def test_model_failure_keeps_rule_result_and_reports_degradation(monkeypatch):
     assert result["status"] == "unclassified"
     assert result["classifier"] == "rule_fallback"
     assert "classification model unavailable" in result["classification_warning"]
+
+
+def test_exact_strategy_title_wins_over_incidental_organization_alias():
+    engine = _engine()
+    blocks = [
+        {"type": "text", "page": None, "text": "信息安全策略文件"},
+        {"type": "text", "page": None, "text": "企业等保三级自查制度文件"},
+        {"type": "heading", "page": None, "text": "1. 目的与适用范围"},
+        {"type": "text", "page": None, "text": "本文件由信息安全委员会归口管理。"},
+    ]
+
+    result = engine.classify_blocks("网络与信息安全总体策略V2.docx", blocks)
+
+    assert result["status"] == "classified"
+    assert result["document_key"] == "security_strategy"

@@ -137,8 +137,8 @@ class FileStorageService:
         full_path = self.base_path / file_path
         
         if not full_path.exists():
-            logger.warning(f"File not found for deletion: {file_path}")
-            return False
+            logger.info(f"File already absent: {file_path}")
+            return True
         
         try:
             full_path.unlink()

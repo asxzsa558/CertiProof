@@ -11,7 +11,7 @@ import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.assessment import Assessment, FlowTemplate, PhaseInstance, TaskInstance
 from app.models.document_knowledge import DocumentAnalysisRun, DocumentBlock, DocumentFile, DocumentRunFile
-from app.models.finding import Finding
+from app.models.finding import Finding, Judgment
 from app.models.project import ComplianceLevel, Project
 from app.services.document_control_engine import DocumentControlEngine
 from app.services.document_pipeline import create_document_batch_run, process_document_batch_run, process_document_run
@@ -33,6 +33,7 @@ async def main() -> None:
     original_base_path = file_storage.base_path
     original_from_graph = DocumentControlEngine.from_graph
     original_graph_sync = knowledge_graph.sync_document_structure
+    original_graph_expand = knowledge_graph.expand_block_ids
 
     async def engine_from_seed(cls, db):
         return cls(LIBRARY)
@@ -40,8 +41,12 @@ async def main() -> None:
     async def no_graph(*args, **kwargs):
         return None
 
+    async def seed_blocks(_db, block_ids, limit=12):
+        return list(block_ids)[:limit]
+
     DocumentControlEngine.from_graph = classmethod(engine_from_seed)
     knowledge_graph.sync_document_structure = no_graph
+    knowledge_graph.expand_block_ids = seed_blocks
     try:
         with tempfile.TemporaryDirectory() as directory:
             file_storage.base_path = Path(directory)
@@ -52,7 +57,7 @@ async def main() -> None:
 
             async with sessions() as db:
                 project = Project(user_id=1, name="批量文档回归", compliance_level=ComplianceLevel.LEVEL_3)
-                template = FlowTemplate(name="五阶段", compliance_level=3, phases_config=[])
+                template = FlowTemplate(name="四阶段", compliance_level=3, phases_config=[])
                 db.add_all([project, template])
                 await db.flush()
                 assessment = Assessment(project_id=project.id, template_id=template.id, name="回归测评")
@@ -113,9 +118,12 @@ async def main() -> None:
                 await process_document_run(db, queued)
                 assert queued.status == "completed", "analysis execution should complete even when its conclusion is unable"
                 assert queued.result_summary["status"] == "unable", "missing evidence model must be unable, never a false pass"
-                assert task.status == "completed"
+                assert task.status == "failed", "unable document conclusions must block assessment progress and report generation"
+                assert task.result["status"] == "unable"
                 findings = (await db.execute(select(Finding))).scalars().all()
-                assert findings and {finding.judgment.value for finding in findings} <= {"partial", "fail"}
+                assert len(findings) == 1
+                assert findings[0].judgment == Judgment.NOT_TESTED
+                assert findings[0].source_type == "document"
                 active_blocks = (await db.execute(select(DocumentBlock).where(
                     DocumentBlock.document_file_id == document_file.id,
                     DocumentBlock.is_active.is_(True),
@@ -125,6 +133,7 @@ async def main() -> None:
         file_storage.base_path = original_base_path
         DocumentControlEngine.from_graph = original_from_graph
         knowledge_graph.sync_document_structure = original_graph_sync
+        knowledge_graph.expand_block_ids = original_graph_expand
         await engine.dispose()
 
     print("gap batch orchestration check passed")

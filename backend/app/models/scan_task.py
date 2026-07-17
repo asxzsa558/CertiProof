@@ -47,7 +47,7 @@ class ScanTask(Base):
     lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     # Control state remains durable across API/worker restarts.  Status stays
     # compatible with the public scan lifecycle while this captures pause intent.
-    control_state = Column(String(24), nullable=False, default="running", index=True)
+    control_state = Column(String(24), nullable=False, default="queued", index=True)
     checkpoint = Column(JSON, nullable=True)
     paused_at = Column(DateTime(timezone=True), nullable=True)
     cancel_requested_at = Column(DateTime(timezone=True), nullable=True)
@@ -70,6 +70,13 @@ class ScanTask(Base):
     project = relationship("Project", back_populates="scan_tasks")
     asset = relationship("Asset", back_populates="scan_tasks")
     findings = relationship("Finding", back_populates="scan_task", cascade="all, delete-orphan")
+
+    @property
+    def effective_control_state(self) -> str:
+        status = self.status.value if hasattr(self.status, "value") else str(self.status)
+        if status in {"completed", "failed", "cancelled"}:
+            return status
+        return self.control_state or (self.progress or {}).get("status") or status
     
     def __repr__(self):
         return f"<ScanTask(id={self.id}, type={self.task_type}, status={self.status})>"

@@ -4,8 +4,11 @@ Security Tools MCP Server - 统一安全工具服务
 """
 
 import asyncio
+import contextlib
 import json
+import os
 import re
+import signal
 import socket
 import subprocess
 import time
@@ -30,6 +33,21 @@ app.add_middleware(
 class ExecuteRequest(BaseModel):
     tool: str
     params: Dict[str, Any]
+
+
+async def _terminate_process(process) -> None:
+    if not process or process.returncode is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=3)
+    except asyncio.TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        await process.wait()
 
 
 # ============== Nmap 工具 ==============
@@ -137,7 +155,11 @@ def parse_ignored_filtered_count(output: str) -> int:
     except ValueError:
         return 0
 
-async def nmap_scan(params: Dict[str, Any], progress_callback: Optional[callable] = None) -> Dict[str, Any]:
+async def nmap_scan(
+    params: Dict[str, Any],
+    progress_callback: Optional[callable] = None,
+    process_callback: Optional[callable] = None,
+) -> Dict[str, Any]:
     """执行 nmap 端口扫描"""
     target = params.get("target")
     if not target:
@@ -170,13 +192,17 @@ async def nmap_scan(params: Dict[str, Any], progress_callback: Optional[callable
         cmd.extend(["-p", port_range, target])
     
     start_time = time.time()
-    
+    process = None
+
     try:
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
+        if process_callback:
+            process_callback(process)
         
         # 基于时间的进度估算（nmap 在无 TTY 时不输出 --stats-every 进度）
         # 经验值：1000 端口约 33 秒，按端口数线性估算
@@ -295,6 +321,8 @@ async def nmap_scan(params: Dict[str, Any], progress_callback: Optional[callable
             raise ValueError(f"nmap permission denied (try running as root): {error_msg}")
         else:
             raise ValueError(f"nmap scan error: {error_msg}")
+    finally:
+        await _terminate_process(process)
 
 
 # ============== Ping 工具 ==============
@@ -317,6 +345,7 @@ async def ping_host(params: Dict[str, Any]) -> Dict[str, Any]:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
         
@@ -372,7 +401,7 @@ async def ping_host(params: Dict[str, Any]) -> Dict[str, Any]:
 
 # ============== TestSSL 工具 ==============
 
-async def testssl_scan(params: Dict[str, Any]) -> Dict[str, Any]:
+async def testssl_scan(params: Dict[str, Any], process_callback: Optional[callable] = None) -> Dict[str, Any]:
     """执行 testssl.sh SSL/TLS 检测"""
     target = params.get("target")
     if not target:
@@ -403,7 +432,10 @@ async def testssl_scan(params: Dict[str, Any]) -> Dict[str, Any]:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
+        if process_callback:
+            process_callback(process)
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         # 读取 JSON 文件
@@ -560,11 +592,15 @@ async def testssl_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         if os.path.exists(json_file):
             os.remove(json_file)
         raise ValueError(f"testssl scan error: {e}")
+    finally:
+        await _terminate_process(process)
+        if os.path.exists(json_file):
+            os.remove(json_file)
 
 
 # ============== Nuclei 工具 ==============
 
-async def nuclei_scan(params: Dict[str, Any]) -> Dict[str, Any]:
+async def nuclei_scan(params: Dict[str, Any], process_callback: Optional[callable] = None) -> Dict[str, Any]:
     """执行 nuclei 漏洞扫描"""
     target = params.get("target")
     if not target:
@@ -583,13 +619,17 @@ async def nuclei_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     cmd.extend(["-timeout", "30", "-retries", "2"])
     
     start_time = time.time()
+    process = None
     
     try:
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
+        if process_callback:
+            process_callback(process)
         timeout = max(30, min(int(params.get("timeout", 180)), MAX_COMMAND_TIMEOUT))
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
@@ -676,6 +716,8 @@ async def nuclei_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         }
     except Exception as e:
         raise ValueError(f"nuclei scan error: {e}")
+    finally:
+        await _terminate_process(process)
 
 
 # ============== Hydra 工具 ==============
@@ -683,7 +725,7 @@ async def nuclei_scan(params: Dict[str, Any]) -> Dict[str, Any]:
 COMMON_USERNAMES = ["admin", "root", "administrator", "user", "test", "guest"]
 COMMON_PASSWORDS = ["admin", "123456", "password", "root", "admin123", "P@ssw0rd", "test", "12345678"]
 
-async def hydra_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
+async def hydra_bruteforce(params: Dict[str, Any], process_callback: Optional[callable] = None) -> Dict[str, Any]:
     """执行 hydra 暴力破解（批量模式）"""
     import tempfile
     import os
@@ -708,6 +750,7 @@ async def hydra_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
     # 写入临时文件
     credential_file = None
     output_file = None
+    process = None
     
     try:
         credential_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt')
@@ -735,7 +778,10 @@ async def hydra_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
+        if process_callback:
+            process_callback(process)
         
         timeout = max(30, min(int(params.get("timeout", 180)), MAX_COMMAND_TIMEOUT))
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
@@ -821,6 +867,7 @@ async def hydra_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
         }
         
     finally:
+        await _terminate_process(process)
         # 清理临时文件
         if credential_file and os.path.exists(credential_file.name):
             os.remove(credential_file.name)
@@ -832,6 +879,10 @@ async def hydra_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
 
 # 异步任务存储
 SCAN_TASKS = {}
+
+
+def _remember_process(task_id: str):
+    return lambda process: SCAN_TASKS[task_id].update(process=process)
 
 @app.get("/")
 async def root():
@@ -929,12 +980,19 @@ async def run_async_nmap(task_id: str, params: Dict[str, Any]):
         SCAN_TASKS[task_id]["progress"] = 0
         
         # 使用带进度回调的 nmap_scan
-        result = await nmap_scan(params, progress_callback=update_progress)
+        result = await nmap_scan(
+            params,
+            progress_callback=update_progress,
+            process_callback=_remember_process(task_id),
+        )
         
         SCAN_TASKS[task_id]["status"] = "completed"
         SCAN_TASKS[task_id]["progress"] = 100
         SCAN_TASKS[task_id]["result"] = result
         
+    except asyncio.CancelledError:
+        SCAN_TASKS[task_id]["status"] = "cancelled"
+        raise
     except Exception as e:
         error_msg = str(e)
         if "timeout" in error_msg.lower():
@@ -967,7 +1025,7 @@ async def run_async_nuclei(task_id: str, params: Dict[str, Any]):
         
         progress_task = asyncio.create_task(estimate_progress())
         
-        result = await nuclei_scan(params)
+        result = await nuclei_scan(params, process_callback=_remember_process(task_id))
         
         progress_task.cancel()
         
@@ -975,6 +1033,9 @@ async def run_async_nuclei(task_id: str, params: Dict[str, Any]):
         SCAN_TASKS[task_id]["progress"] = 100
         SCAN_TASKS[task_id]["result"] = result
         
+    except asyncio.CancelledError:
+        SCAN_TASKS[task_id]["status"] = "cancelled"
+        raise
     except Exception as e:
         error_msg = str(e)
         if "timeout" in error_msg.lower():
@@ -1004,7 +1065,7 @@ async def run_async_hydra(task_id: str, params: Dict[str, Any]):
         
         progress_task = asyncio.create_task(estimate_progress())
         
-        result = await hydra_bruteforce(params)
+        result = await hydra_bruteforce(params, process_callback=_remember_process(task_id))
         
         progress_task.cancel()
         
@@ -1012,6 +1073,9 @@ async def run_async_hydra(task_id: str, params: Dict[str, Any]):
         SCAN_TASKS[task_id]["progress"] = 100
         SCAN_TASKS[task_id]["result"] = result
         
+    except asyncio.CancelledError:
+        SCAN_TASKS[task_id]["status"] = "cancelled"
+        raise
     except Exception as e:
         error_msg = str(e)
         if "timeout" in error_msg.lower():
@@ -1041,7 +1105,7 @@ async def run_async_testssl(task_id: str, params: Dict[str, Any]):
         
         progress_task = asyncio.create_task(estimate_progress())
         
-        result = await testssl_scan(params)
+        result = await testssl_scan(params, process_callback=_remember_process(task_id))
         
         progress_task.cancel()
         
@@ -1049,6 +1113,9 @@ async def run_async_testssl(task_id: str, params: Dict[str, Any]):
         SCAN_TASKS[task_id]["progress"] = 100
         SCAN_TASKS[task_id]["result"] = result
         
+    except asyncio.CancelledError:
+        SCAN_TASKS[task_id]["status"] = "cancelled"
+        raise
     except Exception as e:
         error_msg = str(e)
         if "timeout" in error_msg.lower():
@@ -1084,13 +1151,14 @@ async def start_scan(request: ExecuteRequest):
     
     # 启动对应的异步任务
     if tool_name == "nmap_scan":
-        asyncio.create_task(run_async_nmap(task_id, params))
+        handle = asyncio.create_task(run_async_nmap(task_id, params))
     elif tool_name == "nuclei_scan":
-        asyncio.create_task(run_async_nuclei(task_id, params))
+        handle = asyncio.create_task(run_async_nuclei(task_id, params))
     elif tool_name == "hydra_bruteforce":
-        asyncio.create_task(run_async_hydra(task_id, params))
+        handle = asyncio.create_task(run_async_hydra(task_id, params))
     elif tool_name == "testssl_scan":
-        asyncio.create_task(run_async_testssl(task_id, params))
+        handle = asyncio.create_task(run_async_testssl(task_id, params))
+    SCAN_TASKS[task_id]["handle"] = handle
     
     return {
         "task_id": task_id,
@@ -1110,7 +1178,27 @@ async def get_scan_progress(task_id: str):
         "task_id": task_id,
         "status": task["status"],
         "progress": task.get("progress", 100 if task["status"] == "completed" else 0),
+        "error": task.get("error"),
     }
+
+
+@app.post("/scan/{task_id}/cancel")
+async def cancel_scan(task_id: str):
+    task = SCAN_TASKS.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] in {"completed", "failed", "cancelled"}:
+        return {"task_id": task_id, "status": task["status"]}
+    task["status"] = "cancelled"
+    task["error"] = "用户已停止扫描"
+    handle = task.get("handle")
+    if handle:
+        handle.cancel()
+    await _terminate_process(task.get("process"))
+    if handle:
+        with contextlib.suppress(asyncio.CancelledError):
+            await handle
+    return {"task_id": task_id, "status": "cancelled"}
 
 
 @app.get("/scan/{task_id}/result")

@@ -12,7 +12,6 @@ from app.models.project import Project, ComplianceLevel, ProjectStatus
 from app.models.asset import Asset, AssetType, VerificationMethod, VerificationStatus
 from app.models.scan_task import ScanTask, ScanTaskStatus, ScanTaskType, TriggeredBy
 from app.models.finding import Finding, FindingStatus, Judgment, JudgmentEngine, Severity
-from app.models.remediation import RemediationTicket, RemediationStatus
 from app.models.evidence import Evidence, EvidenceType
 from app.models.questionnaire import QuestionnaireRecord
 from app.models.assessment import Assessment, FlowTemplate, PhaseInstance, TaskInstance, FlowEvent
@@ -26,7 +25,11 @@ from app.models.context import (
     ProjectMemory, ConversationArchive, ConversationThread,
 )
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse
-from app.services.report_service import generate_html_report, generate_json_report
+from app.services.report_service import (
+    get_latest_report_artifact,
+    read_report_artifact_html,
+    report_artifact_payload,
+)
 from app.services.flow_engine import get_flow_engine
 from app.services.audit import record_audit_event
 from app.services.data_lifecycle import (
@@ -95,14 +98,13 @@ async def create_project(
     db.add(project)
     await db.flush()
 
-    # New projects use the single 5-stage flow. The legacy ProjectAssessment
-    # records are retained only for historical projects and are not initialized here.
+    # New projects use the single four-stage enterprise self-assessment flow.
     engine = get_flow_engine(db)
     templates = await engine.upsert_default_templates()
     target_level = 2 if project.compliance_level == ComplianceLevel.LEVEL_2 else 3
     template = next((item for item in templates if item.compliance_level == target_level), None)
     if not template:
-        raise HTTPException(status_code=500, detail="未找到对应等级的 5 阶段测评模板")
+        raise HTTPException(status_code=500, detail="未找到对应等级的四阶段测评模板")
     level_name = project.compliance_level.value if project.compliance_level else ComplianceLevel.LEVEL_3.value
     await engine.create_assessment(
         project_id=project.id,
@@ -154,7 +156,7 @@ async def create_demo_project(
         owner_id=current_user.id,
         name="CertiProof 演示测评项目",
         system_name="样例企业门户系统",
-        description="样例数据，仅用于演示 5 阶段测评、整改与复测闭环。",
+        description="样例数据，仅用于演示四阶段等保企业自查流程。",
         compliance_level=ComplianceLevel.LEVEL_3,
         compliance_score=58,
     )
@@ -184,6 +186,7 @@ async def create_demo_project(
         asset_id=assets[0].id,
         task_type=ScanTaskType.TARGETED,
         status=ScanTaskStatus.COMPLETED,
+        control_state="completed",
         triggered_by=TriggeredBy.MANUAL,
         parameters={"demo": True, "capability": "scan_ports"},
         result_summary={"demo": True, "message": "样例检测记录，不代表真实资产结论。"},
@@ -196,14 +199,15 @@ async def create_demo_project(
 
     finding_specs = (
         ("8.1.4.1", "安全事件管理", Severity.MEDIUM, Judgment.PARTIAL,
-         "样例制度缺少事件分级和处置时限。", "补充事件分级、处置时限和责任人。", RemediationStatus.IN_PROGRESS),
+         "样例制度缺少事件分级和处置时限。", "补充事件分级、处置时限和责任人。", "document"),
         ("8.1.4.2", "网络与通信安全", Severity.HIGH, Judgment.FAIL,
-         "样例资产存在待核实的对外服务暴露。", "确认服务必要性并配置访问控制策略。", RemediationStatus.OPEN),
+         "样例资产存在待核实的对外服务暴露。", "确认服务必要性并配置访问控制策略。", "technical"),
     )
-    for clause_id, clause_name, severity, judgment, description, suggestion, ticket_status in finding_specs:
+    for clause_id, clause_name, severity, judgment, description, suggestion, source_type in finding_specs:
         finding = Finding(
             project_id=project.id,
             scan_task_id=scan.id,
+            source_type=source_type,
             clause_id=clause_id,
             clause_name=clause_name,
             severity=severity,
@@ -212,7 +216,7 @@ async def create_demo_project(
             confidence=0.92,
             description=description,
             remediation_suggestion=suggestion,
-            status=FindingStatus.IN_PROGRESS if ticket_status == RemediationStatus.IN_PROGRESS else FindingStatus.OPEN,
+            status=FindingStatus.OPEN,
         )
         db.add(finding)
         await db.flush()
@@ -226,17 +230,6 @@ async def create_demo_project(
             description="演示证据，用于展示整改与复测闭环。",
             clause_id=clause_id,
             uploaded_by=current_user.id,
-        ))
-        db.add(RemediationTicket(
-            finding_id=finding.id,
-            project_id=project.id,
-            assigned_to=current_user.id,
-            assigned_by=current_user.id,
-            status=ticket_status,
-            priority="high" if severity == Severity.HIGH else "medium",
-            title=f"样例整改：{clause_name}",
-            description=description,
-            remediation_plan=suggestion,
         ))
 
     assessment = await engine.create_assessment(
@@ -252,7 +245,7 @@ async def create_demo_project(
         "project_id": project.id,
         "assessment_id": assessment.id,
         "created": True,
-        "message": "演示项目已创建：包含样例资产、文档证据、问题与整改项。",
+        "message": "演示项目已创建：包含样例资产、证据和待复测问题。",
     }
 
 
@@ -448,17 +441,26 @@ async def download_report(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate and download HTML self-assessment report."""
+    """Download the latest immutable HTML report artifact."""
     await get_project_for_user(db, project_id, current_user.id, "report:export")
 
     try:
+        artifact = await get_latest_report_artifact(db, project_id)
+        if not artifact:
+            raise HTTPException(status_code=409, detail="该项目尚未生成正式报告")
         return Response(
-            content=await generate_html_report(db, project_id),
+            content=await read_report_artifact_html(artifact),
             media_type="text/html; charset=utf-8",
             headers={
-                "Content-Disposition": f"attachment; filename=certiproof-report-{project_id}.html"
+                "Content-Disposition": f"attachment; filename=certiproof-report-{project_id}-v{artifact.version}.html",
+                "X-Report-Version": str(artifact.version),
+                "X-Report-Status": artifact.status,
             }
         )
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail=str(e))
     except Exception as e:
         import traceback
         error_detail = traceback.format_exc()
@@ -475,20 +477,36 @@ async def download_json_report(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate and download JSON compliance report."""
+    """Download the JSON snapshot used by the latest HTML artifact."""
     await get_project_for_user(db, project_id, current_user.id, "report:export")
 
     try:
-        report_data = await generate_json_report(db, project_id)
+        artifact = await get_latest_report_artifact(db, project_id)
+        if not artifact:
+            raise HTTPException(status_code=409, detail="该项目尚未生成正式报告")
 
         return JSONResponse(
-            content=report_data,
+            content=artifact.snapshot,
             headers={
-                "Content-Disposition": f"attachment; filename=verisure_report_{project_id}.json"
+                "Content-Disposition": f"attachment; filename=certiproof-report-{project_id}-v{artifact.version}.json",
+                "X-Report-Version": str(artifact.version),
+                "X-Report-Status": artifact.status,
             }
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate report: {str(e)}",
         )
+
+
+@router.get("/{project_id}/report/status")
+async def get_report_status(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await get_project_for_user(db, project_id, current_user.id, "report:export")
+    return report_artifact_payload(await get_latest_report_artifact(db, project_id))

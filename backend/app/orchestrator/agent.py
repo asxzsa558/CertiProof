@@ -249,9 +249,11 @@ class Agent:
             if scan_task:
                 if error:
                     scan_task.status = ScanTaskStatus.FAILED
+                    scan_task.control_state = "failed"
                     scan_task.error_message = error
                 else:
                     scan_task.status = ScanTaskStatus.COMPLETED
+                    scan_task.control_state = "completed"
                     scan_task.completed_at = datetime.utcnow()
                     
                     # 统计 findings

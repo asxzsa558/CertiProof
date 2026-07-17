@@ -1,8 +1,8 @@
-"""HTTP smoke test for the five-stage assessment API.
+"""HTTP smoke test for the four-stage assessment API.
 
 Creates a temporary project through the public API, uploads one document,
-polls the queued document analysis, checks restart/reset behavior, downloads
-the HTML report, then deletes the project.
+polls the queued document analysis, checks the formal-report gate and reset
+behavior, then deletes the project.
 """
 
 import asyncio
@@ -104,9 +104,23 @@ def main() -> None:
     _wait_for_api()
     token, org_id = asyncio.run(_auth_context())
     project_id = None
+    run_id = None
     marker = uuid.uuid4().hex[:8]
 
     try:
+        status, diagnostics = _request("GET", "/diagnostics/mcp/health", token, org_id)
+        assert status == 200 and diagnostics["status"] in {"healthy", "degraded"}, diagnostics
+        for core_service in ("mcp_gateway", "gateway_routes"):
+            assert diagnostics["services"][core_service]["status"] != "unhealthy", diagnostics["services"][core_service]
+
+        status, operations = _request(
+            "GET", f"/diagnostics/operations?organization_id={org_id}", token, org_id
+        )
+        assert status == 200
+        assert operations["knowledge_graph"]["available"] is True, operations["knowledge_graph"]
+        assert operations["document_retrieval"]["embedding_configured"] is True, operations["document_retrieval"]
+        assert operations["scan_tasks"]["stale_leases"] == 0, operations["scan_tasks"]
+
         status, _ = _request("POST", "/assessments/templates/init", token, org_id)
         assert status == 200
         status, templates = _request("GET", "/assessments/templates", token, org_id)
@@ -141,7 +155,7 @@ def main() -> None:
 
         status, assessment = _request("POST", f"/assessments/projects/{project_id}", token, org_id, {
             "template_id": template["id"],
-            "name": "API 5 阶段烟测",
+            "name": "API 四阶段烟测",
         })
         assert status == 200
         assessment_id = assessment["id"]
@@ -151,7 +165,7 @@ def main() -> None:
 
         status, phases = _request("GET", f"/assessments/{assessment_id}/phases", token, org_id)
         names = [phase["name"] for phase in phases]
-        assert names == ["差距分析", "现场测评", "整改加固", "复测验证", "生成报告"], names
+        assert names == ["差距分析", "现场测评", "整改与复测", "生成报告"], names
         gap_phase = next(phase for phase in phases if phase["name"] == "差距分析")
 
         status, tasks = _request("GET", f"/assessments/phases/{gap_phase['id']}/tasks", token, org_id)
@@ -186,7 +200,7 @@ def main() -> None:
         run_id = upload["run_id"]
 
         terminal = None
-        for _ in range(30):
+        for _ in range(180):
             status, run = _request("GET", f"/assessments/document-runs/{run_id}", token, org_id)
             assert status == 200
             if run["status"] in {"completed", "failed", "cancelled"}:
@@ -195,8 +209,13 @@ def main() -> None:
             time.sleep(1)
         assert terminal and terminal["status"] == "completed", terminal
 
-        status, report_html = _request("GET", f"/projects/{project_id}/report", token, org_id)
-        assert status == 200 and "自查结论" in report_html and "文档合规核查" in report_html
+        try:
+            _request("GET", f"/projects/{project_id}/report", token, org_id)
+        except AssertionError as exc:
+            error_text = str(exc)
+            assert "HTTP 409" in error_text and "尚未生成正式报告" in error_text, error_text
+        else:
+            raise AssertionError("前置阶段未完成时不应允许下载正式报告")
 
         status, restart = _request("POST", f"/assessments/{assessment_id}/restart", token, org_id, {"mode": "reset"})
         assert status == 200 and restart["status"] == "reset"
@@ -213,6 +232,19 @@ def main() -> None:
         }, ensure_ascii=False))
     finally:
         if project_id:
+            if run_id:
+                try:
+                    _, run = _request("GET", f"/assessments/document-runs/{run_id}", token, org_id)
+                    if run["status"] in {"queued", "running"}:
+                        _request(
+                            "POST",
+                            f"/assessments/document-runs/{run_id}/stop",
+                            token,
+                            org_id,
+                            {"reason": "API 烟测结束，清理临时任务"},
+                        )
+                except AssertionError:
+                    pass
             _request("DELETE", f"/projects/{project_id}", token, org_id)
 
 

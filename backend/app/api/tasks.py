@@ -154,7 +154,7 @@ async def get_task_status(
     status = orchestrator.get_task_status(task_id)
     progress = orchestrator.task_progress.get(task_id, {})
     if persisted_task:
-        status = persisted_task.control_state or (persisted_task.progress or {}).get("status") or persisted_task.status.value
+        status = persisted_task.effective_control_state
         progress = persisted_task.progress or {}
     
     return {
@@ -283,7 +283,7 @@ async def list_running_tasks(
             continue
         running_tasks.append({
             "task_id": task_id,
-            "status": scan_task.control_state or (scan_task.progress or {}).get("status") or scan_task.status.value,
+            "status": scan_task.effective_control_state,
             "progress": scan_task.progress or {},
             "scan_task_id": scan_task.id,
         })

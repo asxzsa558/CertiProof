@@ -1,5 +1,46 @@
 version: "3.8"
 
+x-worker-common: &worker-common
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  command: ["python", "-m", "app.worker"]
+  environment: &worker-environment
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certiproof}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-certiproof}
+    REDIS_URL: redis://redis:6379/0
+    SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+    APP_ENV: ${APP_ENV:-production}
+    DEBUG: ${DEBUG:-false}
+    MCP_GATEWAY_URL: http://mcp-gateway:9000
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    TASK_EXECUTION_MODE: worker
+    TASK_WORKER_POLL_SECONDS: ${TASK_WORKER_POLL_SECONDS:-3}
+    TASK_LEASE_MINUTES: ${TASK_LEASE_MINUTES:-2}
+    MONITORING_WORKER_BATCH_SIZE: ${MONITORING_WORKER_BATCH_SIZE:-5}
+    DOCUMENT_ANALYSIS_MODE: ${DOCUMENT_ANALYSIS_MODE:-standard}
+    GRAPH_NAME: ${GRAPH_NAME:-certiproof}
+    GRAPH_REQUIRED: ${GRAPH_REQUIRED:-true}
+    EMBEDDING_SERVER_URL: http://embedding-server:8017
+    DOCUMENT_EMBEDDING_MODEL: ${DOCUMENT_EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
+    DOCUMENT_EMBEDDING_DIMENSION: ${DOCUMENT_EMBEDDING_DIMENSION:-1024}
+  volumes:
+    - ./reference:/reference
+    - uploads_data:/app/uploads
+  depends_on:
+    backend:
+      condition: service_started
+    migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+    mcp-gateway:
+      condition: service_started
+    embedding-server:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - certiproof-net
+
 services:
   # 数据库
   db:
@@ -112,46 +153,63 @@ services:
     networks:
       - certiproof-net
 
-  # 后台任务 Worker（执行持久化扫描任务）
-  worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: certiproof-worker
-    command: ["python", "-m", "app.worker"]
+  # 交互扫描 Worker（聊天、快捷按钮、/ 命令共用）
+  interactive-worker:
+    <<: *worker-common
+    container_name: certiproof-interactive-worker
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certiproof}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-certiproof}
-      REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
-      APP_ENV: ${APP_ENV:-production}
-      DEBUG: ${DEBUG:-false}
-      MCP_GATEWAY_URL: http://mcp-gateway:9000
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      TASK_EXECUTION_MODE: worker
-      TASK_WORKER_POLL_SECONDS: ${TASK_WORKER_POLL_SECONDS:-3}
-      TASK_LEASE_MINUTES: ${TASK_LEASE_MINUTES:-120}
-      MONITORING_WORKER_BATCH_SIZE: ${MONITORING_WORKER_BATCH_SIZE:-5}
-      DOCUMENT_ANALYSIS_MODE: ${DOCUMENT_ANALYSIS_MODE:-standard}
-      GRAPH_NAME: ${GRAPH_NAME:-certiproof}
-      GRAPH_REQUIRED: ${GRAPH_REQUIRED:-true}
-      EMBEDDING_SERVER_URL: http://embedding-server:8017
-      DOCUMENT_EMBEDDING_MODEL: ${DOCUMENT_EMBEDDING_MODEL:-intfloat/multilingual-e5-large}
-      DOCUMENT_EMBEDDING_DIMENSION: ${DOCUMENT_EMBEDDING_DIMENSION:-1024}
-    volumes:
-      - ./reference:/reference
-      - uploads_data:/app/uploads
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      mcp-gateway:
-        condition: service_started
-      embedding-server:
-        condition: service_healthy
-    restart: unless-stopped
+      <<: *worker-environment
+      WORKER_ROLE: interactive
+      INTERACTIVE_SCAN_MAX_CONCURRENT: ${INTERACTIVE_SCAN_MAX_CONCURRENT:-5}
+
+  # 文档解析、归类与合规判定 Worker
+  document-worker:
+    <<: *worker-common
+    container_name: certiproof-document-worker
+    environment:
+      <<: *worker-environment
+      WORKER_ROLE: document
+
+  # 差距分析和现场测评技术检测 Worker
+  assessment-worker:
+    <<: *worker-common
+    container_name: certiproof-assessment-worker
+    environment:
+      <<: *worker-environment
+      WORKER_ROLE: assessment
+
+  # 整改复查与复测 Worker
+  verification-worker:
+    <<: *worker-common
+    container_name: certiproof-verification-worker
+    environment:
+      <<: *worker-environment
+      WORKER_ROLE: verification
+
+  # 定时检测、归档和会话摘要 Worker
+  maintenance-worker:
+    <<: *worker-common
+    container_name: certiproof-maintenance-worker
+    environment:
+      <<: *worker-environment
+      WORKER_ROLE: maintenance
+
+  # 仅用于自动化验收的隔离 SSH/Web 靶标，不随生产服务启动。
+  e2e-target:
+    profiles: ["acceptance"]
+    build:
+      context: .
+      dockerfile: docker/e2e-target/Dockerfile
+    container_name: certiproof-e2e-target
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; [socket.create_connection(('127.0.0.1', p), 2).close() for p in (22, 80, 443)]"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: "no"
     networks:
-      - certiproof-net
+      certiproof-net:
+        ipv4_address: 172.23.0.17
 
   # MCP Gateway
   mcp-gateway:
@@ -308,3 +366,6 @@ volumes:
 networks:
   certiproof-net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.23.0.0/16

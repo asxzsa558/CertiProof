@@ -46,7 +46,6 @@ class Project(Base):
     assets = relationship("Asset", back_populates="project", cascade="all, delete-orphan")
     scan_tasks = relationship("ScanTask", back_populates="project", cascade="all, delete-orphan")
     findings = relationship("Finding", back_populates="project", cascade="all, delete-orphan")
-    remediation_tickets = relationship("RemediationTicket", back_populates="project", cascade="all, delete-orphan")
     questionnaires = relationship("QuestionnaireRecord", back_populates="project", cascade="all, delete-orphan")
     assessments = relationship("ProjectAssessment", back_populates="project", cascade="all, delete-orphan")
     

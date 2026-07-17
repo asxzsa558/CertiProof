@@ -4,6 +4,7 @@
 将流程任务类型映射到具体的安全工具执行
 """
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -11,8 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.finding import Finding, FindingStatus, Judgment, JudgmentEngine, Severity
-from app.models.remediation import RemediationTicket, RemediationStatus
 from app.models.scan_task import ScanTask, ScanTaskStatus, ScanTaskType, TriggeredBy
+from app.services.verification_service import add_finding_event, make_finding_fingerprint, scrub_sensitive_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +145,6 @@ TASK_CAPABILITY_MAP = {
         "description": "SSH/主机基线核查",
     },
     "doc_review": None,
-    "remediation": None,
-    "retest": None,
     "html_report": None,
     "interview": None,
 }
@@ -189,35 +188,88 @@ class TaskExecutor:
             return result.get("skip_reason") or "目标不支持或条件不足，检测已跳过"
         if result.get("tool_status") == "failed":
             return result.get("error") or "工具执行失败"
-        for sub in result.get("sub_results") or []:
+        sub_results = [sub for sub in result.get("sub_results") or [] if isinstance(sub, dict)]
+        if sub_results and all(sub.get("status") == "skipped" for sub in sub_results):
+            return None
+        sub_issues = []
+        for sub in sub_results:
             if not isinstance(sub, dict):
                 continue
             if sub.get("status") in {"failed", "warning", "skipped"}:
-                return sub.get("error") or sub.get("message") or f"{sub.get('name') or sub.get('capability') or '子检测'}未完成"
+                data = sub.get("data") if isinstance(sub.get("data"), dict) else {}
+                reason = sub.get("error") or sub.get("message") or data.get("tool_error") or data.get("skip_reason") or "未完整执行"
+                label = sub.get("label") or sub.get("name") or sub.get("capability") or "子检测"
+                sub_issues.append(f"{label}：{reason}")
+        if sub_issues:
+            return "；".join(sub_issues[:5])
         return None
 
     @staticmethod
     def _risk_items(capability: str, execution: dict, target: str) -> list[dict]:
         data = execution.get("result") or {}
         items = []
+        if execution.get("status") in {"warning", "failed"}:
+            reason = execution.get("warning") or execution.get("error") or "检测未可靠完成"
+            items.append({
+                "description": f"{target}: {reason}",
+                "severity": "medium",
+                "judgment": "not_tested",
+                "risk_key": "execution:unable",
+                "remediation": "确认目标服务是否适用并恢复网络、凭据或工具条件后重新检测；未完成前不得视为通过。",
+            })
         if capability == "scan_ports":
             risky = {21, 23, 135, 139, 445, 1433, 1521, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017}
             items.extend(
-                {"description": f"{target} 暴露高风险端口 {port.get('port')}/{port.get('protocol', 'tcp')}", "severity": "high"}
+                {
+                    "description": f"{target} 暴露高风险端口 {port.get('port')}/{port.get('protocol', 'tcp')}",
+                    "severity": "high",
+                    "risk_key": f"port:{port.get('port')}/{port.get('protocol', 'tcp')}",
+                }
                 for port in data.get("open_ports", [])
                 if port.get("port") in risky
             )
+        if capability == "baseline_check":
+            high_risk_checks = {"empty_passwords", "permit_root_login", "password_authentication", "danger_ports"}
+            for check_key, check in (data.get("results") or {}).items():
+                if not isinstance(check, dict) or check.get("compliant") is not False:
+                    continue
+                description = check.get("description") or check_key
+                requirement = check.get("requirement") or "满足安全基线要求"
+                output = check.get("output") or "未返回配置值"
+                items.append({
+                    "description": f"{target}: {description}不符合；要求：{requirement}；当前值：{output}",
+                    "severity": "high" if check_key in high_risk_checks else "medium",
+                    "risk_key": f"baseline:{check_key}",
+                    "raw": check,
+                })
         for key in ("findings", "vulnerabilities", "issues", "found", "injection_points", "failed_checks"):
             for item in data.get(key) or []:
                 item = item if isinstance(item, dict) else {"description": str(item)}
-                description = item.get("description") or item.get("name") or item.get("title") or str(item)
-                items.append({"description": f"{target}: {description}", "severity": item.get("severity") or "medium"})
+                description = item.get("description") or item.get("name") or item.get("title")
+                if not description and item.get("finding"):
+                    description = (
+                        f"testssl 总体评级：{item['finding']}（工具原始等级）"
+                        if item.get("id") == "overall_grade"
+                        else f"{item.get('id')}: {item['finding']}" if item.get("id") else item["finding"]
+                    )
+                description = description or item.get("id") or str(item)
+                risk_key = item.get("id") or item.get("template_id") or item.get("matcher_name") or item.get("name") or item.get("title") or description
+                items.append({
+                    "description": f"{target}: {description}",
+                    "severity": item.get("severity") or "medium",
+                    "risk_key": str(risk_key),
+                    "raw": item,
+                })
         if data.get("unauthorized") or data.get("empty_password"):
-            items.append({"description": f"{target}: 数据库存在未授权或空密码访问", "severity": "critical"})
+            items.append({
+                "description": f"{target}: 数据库存在未授权或空密码访问",
+                "severity": "critical",
+                "risk_key": "database:unauthorized_or_empty_password",
+            })
         return items
 
     async def _sync_findings(self, scan_task: ScanTask, results: list[dict], target: str) -> int:
-        created = 0
+        current_risk_count = 0
         severity_map = {
             "critical": Severity.CRITICAL,
             "high": Severity.HIGH,
@@ -229,40 +281,51 @@ class TaskExecutor:
             capability = result["capability"]
             clause_id = f"TECH-{capability.upper()[:40]}"
             current = self._risk_items(capability, result, target)
-            existing_result = await self.db.execute(
-                select(Finding).where(
+            unable_fingerprint = make_finding_fingerprint("technical", target, capability, "execution:unable")
+            if not any(item.get("judgment") == "not_tested" for item in current):
+                recovered = (await self.db.execute(select(Finding).where(
                     Finding.project_id == scan_task.project_id,
-                    Finding.clause_id == clause_id,
-                    Finding.status != FindingStatus.RESOLVED,
-                    Finding.description.like(f"{target}%"),
-                )
-            )
-            existing = {finding.description: finding for finding in existing_result.scalars().all()}
-            descriptions = {item["description"] for item in current}
-            # Never resolve an earlier finding merely because this run was partial or failed.
-            # A missing result is evidence only after the same capability completed cleanly.
-            if result.get("status") == "completed":
-                for description, finding in existing.items():
-                    if description not in descriptions:
-                        finding.status = FindingStatus.RESOLVED
-                        finding.resolved_at = datetime.utcnow()
-                        ticket_result = await self.db.execute(
-                            select(RemediationTicket).where(RemediationTicket.finding_id == finding.id)
-                        )
-                        ticket = ticket_result.scalar_one_or_none()
-                        if ticket and ticket.status not in (RemediationStatus.CLOSED, RemediationStatus.SKIPPED):
-                            ticket.status = RemediationStatus.RESOLVED
-                            ticket.resolved_at = ticket.resolved_at or datetime.utcnow()
+                    Finding.fingerprint == unable_fingerprint,
+                    Finding.status == FindingStatus.OPEN,
+                    Finding.judgment == Judgment.NOT_TESTED,
+                ))).scalar_one_or_none()
+                if recovered:
+                    recovered.status = FindingStatus.FIXED
+                    recovered.resolved_at = datetime.utcnow()
+                    recovered.scan_task_id = scan_task.id
+                    await add_finding_event(self.db, recovered, "execution_recovered", data={"scan_task_id": scan_task.id})
             for item in current:
-                if item["description"] in existing:
+                fingerprint = make_finding_fingerprint("technical", target, capability, item.get("risk_key") or item["description"])
+                judgment = Judgment.NOT_TESTED if item.get("judgment") == "not_tested" else Judgment.FAIL
+                if judgment != Judgment.NOT_TESTED:
+                    current_risk_count += 1
+                finding = (await self.db.execute(
+                    select(Finding).where(
+                        Finding.project_id == scan_task.project_id,
+                        Finding.fingerprint == fingerprint,
+                    )
+                )).scalar_one_or_none()
+                if finding:
+                    finding.scan_task_id = scan_task.id
+                    finding.description = item["description"]
+                    finding.severity = severity_map.get(str(item["severity"]).lower(), Severity.MEDIUM)
+                    finding.judgment = judgment
+                    if finding.status == FindingStatus.FIXED:
+                        finding.status = FindingStatus.OPEN
+                        finding.resolved_at = None
+                    await add_finding_event(self.db, finding, "finding_detected", data={"scan_task_id": scan_task.id})
                     continue
                 finding = Finding(
                     project_id=scan_task.project_id,
                     scan_task_id=scan_task.id,
+                    fingerprint=fingerprint,
+                    source_type="technical",
+                    source_key=capability,
+                    scope_key=target,
                     clause_id=clause_id,
                     clause_name=CAPABILITY_NAMES.get(capability, capability),
                     severity=severity_map.get(str(item["severity"]).lower(), Severity.MEDIUM),
-                    judgment=Judgment.FAIL,
+                    judgment=judgment,
                     judgment_engine=JudgmentEngine.RULE,
                     description=item["description"],
                     remediation_suggestion=item.get("remediation") or "确认风险是否为业务必要；按最小暴露原则修复配置后重新检测。",
@@ -270,17 +333,8 @@ class TaskExecutor:
                 )
                 self.db.add(finding)
                 await self.db.flush()
-                self.db.add(RemediationTicket(
-                    finding_id=finding.id,
-                    project_id=scan_task.project_id,
-                    title=item["description"][:500],
-                    description=item["description"],
-                    remediation_plan=finding.remediation_suggestion,
-                    priority="high" if finding.severity in (Severity.CRITICAL, Severity.HIGH) else "medium",
-                    status=RemediationStatus.OPEN,
-                ))
-                created += 1
-        return created
+                await add_finding_event(self.db, finding, "finding_created", data={"scan_task_id": scan_task.id})
+        return current_risk_count
     
     async def execute_task(
         self,
@@ -327,17 +381,21 @@ class TaskExecutor:
         
         logger.info(f"Executing task {task_type} -> {capabilities} for target {target}")
 
+        persisted_params = scrub_sensitive_parameters(scan_params)
         scan_task = ScanTask(
             project_id=project_id,
             asset_id=asset.id,
             task_type=ScanTaskType.TARGETED,
             status=ScanTaskStatus.RUNNING,
+            control_state="running",
             triggered_by=TriggeredBy.MANUAL,
-            parameters={"source": "assessment_task", "task_type": task_type, "target": target, **scan_params},
+            parameters={"source": "assessment_task", "task_type": task_type, "target": target, **persisted_params},
             started_at=datetime.utcnow(),
         )
         self.db.add(scan_task)
         await self.db.flush()
+        from app.services.report_service import invalidate_report_artifacts
+        await invalidate_report_artifacts(self.db, project_id, "已重新执行测评技术检测")
         
         from app.services.execution_engine import ExecutionEngine
         engine = ExecutionEngine()
@@ -368,6 +426,20 @@ class TaskExecutor:
                         "status": "warning",
                         "error": issue,
                     })
+            except asyncio.CancelledError:
+                scan_task.status = ScanTaskStatus.CANCELLED
+                scan_task.control_state = "cancelled"
+                scan_task.cancel_requested_at = datetime.utcnow()
+                scan_task.completed_at = datetime.utcnow()
+                scan_task.error_message = "用户已停止检测"
+                scan_task.result_summary = {
+                    "target": target,
+                    "task_type": task_type,
+                    "results": results,
+                    "status": "cancelled",
+                }
+                await self.db.commit()
+                raise
             except Exception as e:
                 logger.error(f"Capability {capability} failed: {e}")
                 failed.append({
@@ -376,17 +448,38 @@ class TaskExecutor:
                     "error": str(e),
                 })
         
-        overall_status = "completed" if not failed and not warnings else ("partial" if results else "failed")
+        blocking = any(
+            item.get("capability") == "baseline_check"
+            and isinstance(item.get("result"), dict)
+            and item["result"].get("connection_error")
+            for item in results
+        )
+        not_applicable = bool(results) and all(
+            isinstance(item.get("result"), dict)
+            and (
+                item["result"].get("skipped") is True
+                or (
+                    (item["result"].get("summary") or {}).get("total", 0) > 0
+                    and (item["result"].get("summary") or {}).get("skipped")
+                    == (item["result"].get("summary") or {}).get("total")
+                )
+            )
+            for item in results
+        )
+        overall_status = "failed" if blocking else (
+            "completed" if not failed and not warnings else ("partial" if results else "failed")
+        )
 
-        scan_task.status = ScanTaskStatus.COMPLETED if results else ScanTaskStatus.FAILED
+        scan_task.status = ScanTaskStatus.FAILED if blocking or not results else ScanTaskStatus.COMPLETED
+        scan_task.control_state = "failed" if scan_task.status == ScanTaskStatus.FAILED else "completed"
         scan_task.completed_at = datetime.utcnow()
-        scan_task.error_message = "; ".join(item["error"] for item in failed) or None
+        scan_task.error_message = "; ".join(item["error"] for item in (failed or warnings)) or None
         scan_task.findings_count = await self._sync_findings(scan_task, [*results, *failed], target)
         port_results = {
             target: {
                 "capability": item["capability"],
                 "status": "success",
-                "parameters": scan_params,
+                "parameters": persisted_params,
                 "data": item["result"],
             }
             for item in results
@@ -400,17 +493,21 @@ class TaskExecutor:
             "results": results,
             "failed": failed,
             "warnings": warnings,
+            "outcome": "not_applicable" if not_applicable else overall_status,
             "change_detection": {"port_changes": port_changes},
         }
         await self.db.commit()
         
         return {
             "status": overall_status,
+            "blocking": blocking,
+            "scan_task_id": scan_task.id,
             "task_type": task_type,
             "target": target,
             "results": results,
             "failed": failed,
             "warnings": warnings,
+            "outcome": "not_applicable" if not_applicable else overall_status,
         }
     
     def get_task_info(self, task_type: str) -> Optional[Dict[str, Any]]:

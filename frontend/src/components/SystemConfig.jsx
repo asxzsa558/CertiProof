@@ -145,6 +145,7 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
       content: (
         <div className="document-clear-confirm">
           <p>将删除原文、内容块、向量、证据图谱、文档 Finding 和整改项；资产、技术检测和标准图谱不受影响。</p>
+          <p>预计释放 <b>{formatBytes(storage?.total_bytes || 0)}</b>，其中原文件 {storage?.categories?.original_files?.count || 0} 项、内容块 {storage?.categories?.parsed_content?.count || 0} 项、向量 {storage?.categories?.vectors?.count || 0} 项。</p>
           <span>输入项目名称 <b>{projectName}</b> 确认：</span>
           <Input onChange={(event) => { confirmation = event.target.value }} />
         </div>

@@ -47,7 +47,11 @@ class Settings(BaseSettings):
     # 任务执行配置
     TASK_EXECUTION_MODE: str = "inline"  # inline: API 进程执行；worker: 只入库，由 app.worker 执行
     TASK_WORKER_POLL_SECONDS: int = 3
-    TASK_LEASE_MINUTES: int = 120
+    WORKER_ROLE: str = "interactive"
+    INTERACTIVE_SCAN_MAX_CONCURRENT: int = 5
+    TASK_LEASE_MINUTES: int = 2
+    TASK_HEARTBEAT_SECONDS: int = 10
+    TASK_MAX_RECOVERY_ATTEMPTS: int = 3
     MONITORING_WORKER_BATCH_SIZE: int = 5
 
     # 文件上传
@@ -56,6 +60,10 @@ class Settings(BaseSettings):
     EMBEDDING_SERVER_URL: str = "http://embedding-server:8017"
     DOCUMENT_MAX_TOTAL_PAGES: int = 200
     DOCUMENT_WORKER_BATCH_SIZE: int = 2
+    DOCUMENT_LEASE_MINUTES: int = 15
+    DOCUMENT_RUN_TIMEOUT_MINUTES: int = 240
+    DOCUMENT_MAX_RECOVERY_ATTEMPTS: int = 3
+    DOCUMENT_FILE_RETRY_ATTEMPTS: int = 3
     DOCUMENT_ANALYSIS_MODE: str = "standard"  # standard/deep
     DOCUMENT_EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large"
     DOCUMENT_EMBEDDING_DIMENSION: int = 1024
@@ -69,6 +77,10 @@ class Settings(BaseSettings):
         """Fail fast on unsafe production settings."""
         if self.TASK_EXECUTION_MODE not in {"inline", "worker"}:
             raise RuntimeError("Invalid configuration: TASK_EXECUTION_MODE must be 'inline' or 'worker'")
+        if self.WORKER_ROLE not in {"interactive", "document", "assessment", "verification", "maintenance"}:
+            raise RuntimeError("Invalid configuration: unsupported WORKER_ROLE")
+        if self.INTERACTIVE_SCAN_MAX_CONCURRENT < 1:
+            raise RuntimeError("Invalid configuration: INTERACTIVE_SCAN_MAX_CONCURRENT must be positive")
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", self.GRAPH_NAME):
             raise RuntimeError("Invalid configuration: GRAPH_NAME must be a safe PostgreSQL identifier")
         if self.DOCUMENT_EMBEDDING_DIMENSION != 1024:

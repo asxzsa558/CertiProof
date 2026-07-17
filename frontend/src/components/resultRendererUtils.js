@@ -16,15 +16,25 @@ const hexToRgba = (hex, alpha = 0.2) => {
 
 const RESULT_STATES = {
   success: { key: 'success', label: '成功', color: 'success', risk: 'low' },
-  warning: { key: 'warning', label: '警告/未完成', color: 'warning', risk: 'medium' },
+  warning: { key: 'warning', label: '未完成/无法判定', color: 'warning', risk: 'medium' },
   failed: { key: 'failed', label: '失败', color: 'error', risk: 'high' },
   skipped: { key: 'skipped', label: '已跳过', color: 'default', risk: 'medium' },
 }
 
+const SEVERITY_LABELS = {
+  critical: '严重',
+  high: '高危',
+  medium: '中危',
+  low: '低危',
+  info: '提示',
+}
+
+const severityLabel = (value, fallback = '提示') => SEVERITY_LABELS[String(value || '').toLowerCase()] || value || fallback
+
 const inferResultState = (assetData = {}) => {
   const result = assetData.result || assetData.data || assetData
   const explicit = String(assetData.display_status || assetData.status || result.status || '').toLowerCase()
-  if (['failed', 'failure', 'error'].includes(explicit) || assetData.error || result.error_detail) return RESULT_STATES.failed
+  if (['failed', 'failure', 'error'].includes(explicit)) return RESULT_STATES.failed
   if (['skipped', 'cancelled', 'canceled'].includes(explicit) || result.skipped) return RESULT_STATES.skipped
   if (
     ['warning', 'partial', 'incomplete', 'timeout', 'unreachable'].includes(explicit) ||
@@ -34,7 +44,14 @@ const inferResultState = (assetData = {}) => {
   ) {
     return RESULT_STATES.warning
   }
+  if (assetData.error || result.error_detail) return RESULT_STATES.failed
   return RESULT_STATES.success
 }
 
-export { safeJson, hexToRgba, RESULT_STATES, inferResultState }
+const readableFindingText = (finding, fallback = '安全发现项') => {
+  if (typeof finding === 'string') return finding
+  if (!finding || typeof finding !== 'object') return fallback
+  return finding.description || finding.finding || finding.message || finding.name || finding.info?.name || finding.id || finding.template_id || fallback
+}
+
+export { safeJson, hexToRgba, RESULT_STATES, SEVERITY_LABELS, severityLabel, inferResultState, readableFindingText }

@@ -23,6 +23,13 @@ app.add_middleware(
 )
 
 
+def clean_snmp_error(value: str) -> str:
+    return "\n".join(
+        line for line in (value or "").splitlines()
+        if line.strip() and not line.lower().startswith("created directory:")
+    ).strip()
+
+
 class ExecuteRequest(BaseModel):
     tool: str
     params: Dict[str, Any]
@@ -61,7 +68,7 @@ async def snmp_walk(params: Dict[str, Any]) -> Dict[str, Any]:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         output = stdout.decode("utf-8", errors="replace")
-        stderr_output = stderr.decode("utf-8", errors="replace")
+        stderr_output = clean_snmp_error(stderr.decode("utf-8", errors="replace"))
         duration_ms = int((time.time() - start_time) * 1000)
         
         # 解析 SNMP 输出
@@ -141,7 +148,7 @@ async def snmp_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         output = stdout.decode("utf-8", errors="replace")
-        stderr_output = stderr.decode("utf-8", errors="replace").strip()
+        stderr_output = clean_snmp_error(stderr.decode("utf-8", errors="replace"))
         duration_ms = int((time.time() - start_time) * 1000)
         
         # 解析 onesixtyone 输出
@@ -165,7 +172,7 @@ async def snmp_bruteforce(params: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "tool": "snmp_bruteforce",
             "version": "1.0",
-            "status": "success",
+            "status": "success" if scan_completed else "failed",
             "data": {
                 "target": target,
                 "found": found,
@@ -225,7 +232,7 @@ async def snmp_get(params: Dict[str, Any]) -> Dict[str, Any]:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         output = stdout.decode("utf-8", errors="replace")
-        stderr_output = stderr.decode("utf-8", errors="replace").strip()
+        stderr_output = clean_snmp_error(stderr.decode("utf-8", errors="replace"))
         duration_ms = int((time.time() - start_time) * 1000)
         
         # 解析输出
@@ -243,7 +250,7 @@ async def snmp_get(params: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "tool": "snmp_get",
             "version": "1.0",
-            "status": "success",
+            "status": "success" if scan_completed else "failed",
             "data": {
                 "target": target,
                 "oid": oid,

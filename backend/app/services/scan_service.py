@@ -73,6 +73,8 @@ class ScanService:
             parameters=redact_sensitive(parameters),
         )
         db.add(scan_task)
+        from app.services.report_service import invalidate_report_artifacts
+        await invalidate_report_artifacts(db, project_id, "已发起新的安全检测")
         await db.commit()
         await db.refresh(scan_task)
         
@@ -132,6 +134,7 @@ class ScanService:
         
         # Update scan task status
         scan_task.status = ScanTaskStatus.RUNNING
+        scan_task.control_state = "running"
         scan_task.started_at = datetime.utcnow()
         await db.commit()
         

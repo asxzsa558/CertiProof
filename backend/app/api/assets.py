@@ -129,7 +129,7 @@ async def get_asset_inventory(
     type_counts.update({_enum_value(kind): int(count) for kind, count in type_rows.all()})
 
     organization_project_ids = select(Project.id).where(organization_filter)
-    active_risks = [FindingStatus.OPEN, FindingStatus.IN_PROGRESS]
+    active_risks = [FindingStatus.OPEN]
     at_risk_result = await db.execute(
         select(func.count(func.distinct(ScanTask.asset_id)))
         .select_from(ScanTask)

@@ -222,7 +222,7 @@ export default function ProjectsList() {
     try {
       const values = await createForm.validateFields()
       const response = await api.post('/projects/', { ...values, organization_id: currentOrgId })
-      message.success('项目与 5 阶段测评流程已创建')
+      message.success('项目与四阶段测评流程已创建')
       setCreateModalVisible(false)
       createForm.resetFields()
       await fetchProjects({ silent: true })

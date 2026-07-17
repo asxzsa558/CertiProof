@@ -30,8 +30,7 @@ class JudgmentEngine(str, enum.Enum):
 
 class FindingStatus(str, enum.Enum):
     OPEN = "open"
-    IN_PROGRESS = "in_progress"
-    RESOLVED = "resolved"
+    FIXED = "fixed"
     FALSE_POSITIVE = "false_positive"
 
 
@@ -42,6 +41,10 @@ class Finding(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     scan_task_id = Column(Integer, ForeignKey("scan_tasks.id"), nullable=True, index=True)
     document_run_id = Column(Integer, ForeignKey("document_analysis_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    fingerprint = Column(String(64), nullable=True, index=True)
+    source_type = Column(String(24), nullable=False, default="manual", index=True)
+    source_key = Column(String(120), nullable=True, index=True)
+    scope_key = Column(String(500), nullable=True, index=True)
     
     # Finding info
     clause_id = Column(String(50), nullable=False, index=True)  # e.g., "8.1.4.1"
@@ -58,7 +61,15 @@ class Finding(Base):
     remediation_suggestion = Column(Text, nullable=True)
     
     # Status
-    status = Column(SQLEnum(FindingStatus), default=FindingStatus.OPEN, nullable=False)
+    status = Column(
+        SQLEnum(
+            FindingStatus,
+            native_enum=False,
+            values_callable=lambda values: [item.value for item in values],
+        ),
+        default=FindingStatus.OPEN,
+        nullable=False,
+    )
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
     
     # Evidence references
@@ -74,7 +85,8 @@ class Finding(Base):
     scan_task = relationship("ScanTask", back_populates="findings")
     document_run = relationship("DocumentAnalysisRun", back_populates="findings")
     evidences = relationship("Evidence", back_populates="finding", cascade="all, delete-orphan")
-    remediation_ticket = relationship("RemediationTicket", back_populates="finding", cascade="all, delete-orphan")
+    events = relationship("FindingEvent", back_populates="finding", cascade="all, delete-orphan")
+    verification_items = relationship("VerificationItem", back_populates="finding", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Finding(id={self.id}, clause={self.clause_id}, judgment={self.judgment})>"

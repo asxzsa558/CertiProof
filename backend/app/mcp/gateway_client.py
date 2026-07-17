@@ -157,6 +157,12 @@ class MCPGatewayClient:
                 raise Exception(f"MCP Gateway error: {e.response.status_code} - {e.response.text}")
             except httpx.RequestError as e:
                 raise Exception(f"MCP Gateway request error: {e}")
+
+    async def cancel(self, tool_name: str, task_id: str) -> dict:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(f"{self.gateway_url}/cancel/{tool_name}/{task_id}")
+            response.raise_for_status()
+            return response.json()
     
     async def call_with_progress(
         self,
@@ -180,24 +186,31 @@ class MCPGatewayClient:
         # 启动异步任务
         task_id = await self.call_async(tool_name, params)
         
-        # 轮询进度
-        while True:
-            progress = await self.get_progress(tool_name, task_id)
+        try:
+            # 轮询进度
+            while True:
+                progress = await self.get_progress(tool_name, task_id)
             
-            # 回调进度
-            if on_progress:
-                on_progress(progress)
+                # 回调进度
+                if on_progress:
+                    on_progress(progress)
             
-            # 检查是否完成
-            status = progress.get("status")
-            if status == "completed":
-                # 获取最终结果
-                return await self.get_result(tool_name, task_id)
-            elif status == "failed":
-                raise Exception(f"Task failed: {progress.get('error', 'Unknown error')}")
-            
-            # 等待下一次轮询
-            await asyncio.sleep(poll_interval)
+                # 检查是否完成
+                status = progress.get("status")
+                if status == "completed":
+                    return await self.get_result(tool_name, task_id)
+                if status == "failed":
+                    raise Exception(f"Task failed: {progress.get('error', 'Unknown error')}")
+                if status == "cancelled":
+                    raise Exception("Task cancelled")
+
+                await asyncio.sleep(poll_interval)
+        except asyncio.CancelledError:
+            try:
+                await self.cancel(tool_name, task_id)
+            except Exception as exc:
+                logger.warning("Failed to cancel MCP task %s/%s: %s", tool_name, task_id, exc)
+            raise
     
     async def health(self) -> dict:
         """

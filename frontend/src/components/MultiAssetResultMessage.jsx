@@ -37,7 +37,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
 
     const assetStatusConfig = {
       success: { color: 'success', text: '成功', icon: <CheckCircleFilled /> },
-      warning: { color: 'warning', text: '警告/未完成', icon: <ExclamationCircleFilled /> },
+      warning: { color: 'warning', text: '未完成/无法判定', icon: <ExclamationCircleFilled /> },
       failed: { color: 'error', text: '失败', icon: <CloseCircleFilled /> },
       skipped: { color: 'default', text: '已跳过', icon: <ExclamationCircleFilled /> },
     }
@@ -48,7 +48,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
     const auditFilters = [
       { key: 'all', label: '全部', count: totalAssets },
       { key: 'success', label: '成功', count: successCount },
-      { key: 'warning', label: '警告/未完成', count: warningCount },
+      { key: 'warning', label: '未完成/无法判定', count: warningCount },
       { key: 'failed', label: '失败', count: failedCount },
       { key: 'skipped', label: '跳过', count: skippedCount },
     ]
@@ -98,7 +98,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       if (msg.content) lines.push(msg.content)
       lines.push(`总资产数: ${totalAssets}`)
       lines.push(`成功: ${successCount}`)
-      if (warningCount) lines.push(`警告/未完成: ${warningCount}`)
+      if (warningCount) lines.push(`未完成/无法判定: ${warningCount}`)
       if (failedCount) lines.push(`失败: ${failedCount}`)
       if (skippedCount) lines.push(`跳过: ${skippedCount}`)
       if (quality.verdict) lines.push(`结果可信度: ${quality.verdict} - ${quality.note || ''}`)

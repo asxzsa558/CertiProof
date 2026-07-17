@@ -55,6 +55,7 @@ def load_orchestrator_class():
     module("app.mcp")
     module("app.mcp.gateway_client", MCPGatewayClient=Dummy)
     module("app.services")
+    module("app.services.asset_scope", target_identity=lambda value: value)
     module("app.services.ai_engine", ai_engine=Dummy())
     module("app.services.audit", record_audit_event=lambda *args, **kwargs: None)
     module("app.services.execution_engine", execution_engine=Dummy())

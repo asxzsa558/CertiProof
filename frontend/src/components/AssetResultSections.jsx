@@ -17,7 +17,7 @@ import {
   SearchOutlined,
   RadarChartOutlined,
 } from '@ant-design/icons'
-import { hexToRgba } from './resultRendererUtils'
+import { hexToRgba, readableFindingText, severityLabel } from './resultRendererUtils'
 import { createPortColumns } from './resultColumns'
 
 const portColumns = createPortColumns()
@@ -278,9 +278,9 @@ const buildAssetDetails = (assetData, capability) => {
         <div className="section-title">Web 漏洞列表</div>
         {webVulnerabilities.map((vuln, idx) => (
           <div key={idx} className="vulnerability-item">
-            <Tag color="red">{vuln.severity || '未知'}</Tag>
+            <Tag color="red">{severityLabel(vuln.severity, '未知')}</Tag>
             <span className="vuln-target">[{vuln.target}]</span>
-            <span>{vuln.name || vuln.id || 'Web 漏洞'}</span>
+            <span>{readableFindingText(vuln, 'Web 漏洞')}</span>
             {vuln.tool && <Tag color="purple" style={{ marginLeft: 4 }}>{vuln.tool}</Tag>}
           </div>
         ))}
@@ -289,10 +289,11 @@ const buildAssetDetails = (assetData, capability) => {
   }
 
   if (capability === 'nikto_scan') {
+    const niktoDone = result.scan_completed !== false
     sections.push(
-      <div key="nikto-summary" className={`result-details-section ${findings.length ? '' : 'success-section'}`}>
-        <div className={`section-title ${findings.length ? '' : 'success'}`}>
-          Nikto Web 扫描：{findings.length ? `发现 ${findings.length} 个问题` : '未发现 Web 问题'}
+      <div key="nikto-summary" className={`result-details-section ${!niktoDone ? 'warning-section' : findings.length ? '' : 'success-section'}`}>
+        <div className={`section-title ${!niktoDone ? 'warning' : findings.length ? '' : 'success'}`}>
+          Nikto Web 扫描：{!niktoDone ? '未完成，无法判断是否存在漏洞' : findings.length ? `发现 ${findings.length} 个问题` : '扫描完成，未发现 Web 问题'}
         </div>
         <div className="baseline-target-item">
           <span>扫描目标</span>
@@ -300,8 +301,8 @@ const buildAssetDetails = (assetData, capability) => {
         </div>
         {findings.map((finding, idx) => (
           <div key={idx} className="vulnerability-item">
-            <Tag color="orange">{finding.severity || finding.osvdb || '发现'}</Tag>
-            <span>{finding.name || finding.description || finding.message || finding.id || 'Web 问题'}</span>
+            <Tag color="orange">{finding.severity ? severityLabel(finding.severity) : finding.osvdb || '发现'}</Tag>
+            <span>{readableFindingText(finding, 'Web 问题')}</span>
           </div>
         ))}
       </div>
@@ -358,10 +359,10 @@ const buildAssetDetails = (assetData, capability) => {
         {findings.map((finding, idx) => (
           <div key={idx} className="vulnerability-item">
             <Tag color={finding.severity === 'critical' || finding.severity === 'high' ? 'red' : finding.severity === 'medium' ? 'orange' : 'blue'}>
-              {finding.severity || 'info'}
+              {severityLabel(finding.severity)}
             </Tag>
             <span className="vuln-target">[{finding.host || finding.matched_at || result.target}]</span>
-            <span>{finding.name || finding.template_id || '漏洞发现项'}</span>
+            <span>{readableFindingText(finding, '漏洞发现项')}</span>
             {finding.template_id && <Tag color="purple" style={{ marginLeft: 4 }}>{finding.template_id}</Tag>}
           </div>
         ))}
@@ -618,8 +619,8 @@ const buildAssetDetails = (assetData, capability) => {
         <div className="section-title">漏洞列表</div>
         {vulnerabilities.map((vuln, idx) => (
           <div key={idx} className="vulnerability-item">
-            <Tag color={vuln.severity === 'critical' ? 'red' : vuln.severity === 'high' ? 'red' : 'orange'}>{vuln.severity || '未知'}</Tag>
-            <span>{vuln.name || vuln.id || '漏洞'}</span>
+            <Tag color={vuln.severity === 'critical' ? 'red' : vuln.severity === 'high' ? 'red' : 'orange'}>{severityLabel(vuln.severity, '未知')}</Tag>
+            <span>{readableFindingText(vuln, '漏洞')}</span>
           </div>
         ))}
       </div>

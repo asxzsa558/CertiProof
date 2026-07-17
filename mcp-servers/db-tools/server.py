@@ -49,6 +49,16 @@ def no_response_result(tool: str, target: str, port: int, duration_ms: int, fiel
     }
 
 
+async def tcp_open(target: str, port: int, timeout: float) -> bool:
+    try:
+        _reader, writer = await asyncio.wait_for(asyncio.open_connection(target, port), timeout=timeout)
+        writer.close()
+        await writer.wait_closed()
+        return True
+    except (OSError, asyncio.TimeoutError):
+        return False
+
+
 # ============== Redis Check ==============
 
 async def redis_check(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -240,6 +250,12 @@ async def mongodb_check(params: Dict[str, Any]) -> Dict[str, Any]:
     ]
     
     start_time = time.time()
+    if not await tcp_open(target, port, min(timeout, 2)):
+        return no_response_result(
+            "mongodb_check", target, port, int((time.time() - start_time) * 1000),
+            {"unauthorized": False, "raw_output": None},
+            "Connection refused or service not listening",
+        )
     
     try:
         process = await asyncio.create_subprocess_exec(
@@ -319,6 +335,12 @@ async def memcached_check(params: Dict[str, Any]) -> Dict[str, Any]:
     ]
     
     start_time = time.time()
+    if not await tcp_open(target, port, min(timeout, 2)):
+        return no_response_result(
+            "memcached_check", target, port, int((time.time() - start_time) * 1000),
+            {"unauthorized": False, "raw_output": None},
+            "Connection refused or service not listening",
+        )
     
     try:
         process = await asyncio.create_subprocess_exec(

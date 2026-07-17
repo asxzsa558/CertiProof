@@ -232,7 +232,7 @@ def build_page(
     .lead {{ max-width:790px; color:#a9bfce; font-size:16px; line-height:1.9; }}
     .signals {{ display:flex; flex-wrap:wrap; gap:8px; margin-top:27px; }}
     .signals span {{ padding:7px 10px; color:#b7d9e5; border:1px solid var(--line); background:rgba(9,31,48,.62); font-size:11px; }}
-    .flow {{ display:grid; grid-template-columns:repeat(5,1fr); max-width:1100px; margin:0 auto 58px; border-block:1px solid var(--line); }}
+    .flow {{ display:grid; grid-template-columns:repeat(4,1fr); max-width:1100px; margin:0 auto 58px; border-block:1px solid var(--line); }}
     .flow div {{ position:relative; padding:18px 14px; border-right:1px solid var(--line); }}
     .flow div:last-child {{ border:0; }}
     .flow b {{ display:block; color:var(--cyan); font:600 10px/1 ui-monospace,monospace; }}
@@ -283,10 +283,10 @@ def build_page(
       <header class="hero">
         <div class="eyebrow">// ENTERPRISE COMPLIANCE SELF-ASSESSMENT</div>
         <h1>CertiProof<br>产品设计文档</h1>
-        <p class="lead">面向被测评企业的等保合规自查平台，从资产与文档检查出发，贯通差距发现、整改跟踪、复测验证和 HTML 报告。</p>
+        <p class="lead">面向被测评企业的等保合规自查平台，从资产与文档检查出发，贯通差距发现、直接整改复测和 HTML 报告。</p>
         <div class="signals"><span>企业自查</span><span>自动化检测</span><span>文档合规</span><span>整改闭环</span><span>HTML 报告</span></div>
       </header>
-      <section class="flow" aria-label="五阶段测评流程"><div><b>01</b><span>差距分析</span></div><div><b>02</b><span>现场测评</span></div><div><b>03</b><span>整改加固</span></div><div><b>04</b><span>复测验证</span></div><div><b>05</b><span>生成报告</span></div></section>
+      <section class="flow" aria-label="四阶段测评流程"><div><b>01</b><span>差距分析</span></div><div><b>02</b><span>现场测评</span></div><div><b>03</b><span>整改与复测</span></div><div><b>04</b><span>生成报告</span></div></section>
       <article>{article}</article>
       <footer>CertiProof 产品设计文档 · 由 ARCHITECTURE.md 自动生成</footer>
     </main>

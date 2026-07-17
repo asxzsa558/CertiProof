@@ -4,7 +4,6 @@ import {
   CheckCircleFilled,
   ClockCircleFilled,
   CloseCircleFilled,
-  MinusCircleFilled,
   PlayCircleFilled,
   RocketOutlined,
   SafetyCertificateOutlined,
@@ -34,6 +33,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
+import VerificationWorkspace from './VerificationWorkspace'
 import './AssessmentProgress.css'
 
 const { Step } = Steps
@@ -156,9 +156,6 @@ const PHASE_ICONS = {
   2: <FileProtectOutlined />,
   3: <RadarChartOutlined />,
   4: <BugOutlined />,
-  5: <SettingOutlined />,
-  6: <CheckCircleFilled />,
-  7: <FileTextOutlined />,
 }
 
 const STATUS_CONFIG = {
@@ -173,7 +170,6 @@ const PHASE_STATUS_CONFIG = {
   pending: { color: '#64748b', text: '待开始', className: 'pending' },
   active: { color: '#6366f1', text: '进行中', className: 'active' },
   completed: { color: '#10b981', text: '已完成', className: 'completed' },
-  skipped: { color: '#94a3b8', text: '已跳过', className: 'skipped' },
   failed: { color: '#ef4444', text: '失败', className: 'failed' },
 }
 
@@ -183,6 +179,17 @@ const TASK_STATUS_CONFIG = {
   completed: { color: '#10b981', text: '已完成', className: 'completed' },
   failed: { color: '#ef4444', text: '失败', className: 'failed' },
   cancelled: { color: '#94a3b8', text: '已取消', className: 'cancelled' },
+}
+
+const COMPLETION_STATE_CONFIG = {
+  all_fixed: { title: '本轮测评已完成', label: '全部问题已修复', color: 'success', tone: 'success' },
+  coverage_limited: { title: '本轮测评已完成', label: '存在无法验证项', color: 'error', tone: 'warning' },
+  needs_remediation: { title: '本轮测评已完成', label: '仍有待整改问题', color: 'error', tone: 'warning' },
+}
+
+const VERIFICATION_RUN_STATUS = {
+  completed: '已完成', partial: '部分完成', failed: '失败', cancelled: '已停止',
+  queued: '排队中', running: '执行中', paused: '已暂停',
 }
 
 function AssessmentProgress({ projectId, projectName }) {
@@ -210,12 +217,6 @@ function AssessmentProgress({ projectId, projectName }) {
   const [batchUploadMode, setBatchUploadMode] = useState(false)
   const [batchDocumentRun, setBatchDocumentRun] = useState(null)
   const batchPollingRef = useRef(null)
-
-  // 跳过任务弹窗
-  const [skipModalVisible, setSkipModalVisible] = useState(false)
-  const [skipTask, setSkipTask] = useState(null)
-  const [skipReason, setSkipReason] = useState('')
-  const [skipping, setSkipping] = useState(false)
 
   // 任务执行参数弹窗
   const [executeModalVisible, setExecuteModalVisible] = useState(false)
@@ -287,17 +288,30 @@ function AssessmentProgress({ projectId, projectName }) {
     const reset = mode === 'reset'
     
     Modal.confirm({
-      title: reset ? '确认完全重置测评' : '继续测评',
+      title: reset ? '确认完全重置测评' : '继续整改或补充材料',
       content: reset
-        ? '将清空阶段进度、任务结果、问题、证据和整改队列，让测评从头开始。'
-        : '将重新打开测评以便补充证据或执行复测，已有阶段、任务结果和证据都会保留。',
-      okText: reset ? '完全重置' : '继续',
+        ? '此操作不可恢复。系统将停止当前任务，并永久删除本项目的测评进度、文档与解析数据、技术检测结果、问题证据、整改复测记录、变更快照和历史报告。项目、资产、成员权限、标准库及审计日志不会删除。'
+        : '测评将恢复为可编辑状态，可上传改进后的文档或重新执行技术检测；已有结果、证据和处置记录都会保留。',
+      okText: reset ? '完全重置' : '恢复可编辑',
       cancelText: '取消',
       okButtonProps: reset ? { danger: true } : undefined,
       onOk: async () => {
         try {
-          await api.post(`/assessments/${assessment.id}/restart`, { mode })
-          message.success(reset ? '测评进度已完全重置' : '测评已重新打开')
+          const response = await api.post(`/assessments/${assessment.id}/restart`, { mode })
+          const cleanup = response.data?.cleanup || {}
+          const deletedRecords = Number(cleanup.scan_tasks || 0)
+            + Number(cleanup.findings || 0)
+            + Number(cleanup.evidences || 0)
+            + Number(cleanup.document_files || 0)
+            + Number(cleanup.document_runs || 0)
+            + Number(cleanup.reports || 0)
+            + Number(cleanup.change_snapshots || 0)
+          const releasedSize = cleanup.released_file_bytes >= 1024 * 1024
+            ? `${(cleanup.released_file_bytes / 1024 / 1024).toFixed(1)} MB`
+            : `${(Number(cleanup.released_file_bytes || 0) / 1024).toFixed(1)} KB`
+          message.success(reset
+            ? `测评已完全重置，清理 ${deletedRecords} 条测评数据、${cleanup.deleted_file_count || 0} 个文件，释放 ${releasedSize}`
+            : '测评已恢复为可编辑状态')
           window.dispatchEvent(new CustomEvent('certiproof:assessment-reset', {
             detail: { projectId, assessmentId: assessment.id, mode },
           }))
@@ -427,7 +441,7 @@ function AssessmentProgress({ projectId, projectName }) {
     }
   }, [])
 
-  const fetchAssessment = async (options = {}) => {
+  const fetchAssessment = useCallback(async (options = {}) => {
     const silent = options.silent === true
     if (!silent) setLoading(true)
     try {
@@ -452,7 +466,7 @@ function AssessmentProgress({ projectId, projectName }) {
     } finally {
       if (!silent) setLoading(false)
     }
-  }
+  }, [projectId])
 
   const startBatchPolling = (runId, phaseId, notify = false) => {
     if (!runId || !phaseId) return
@@ -474,6 +488,8 @@ function AssessmentProgress({ projectId, projectName }) {
               const count = run.result?.classified?.length || 0
               const unresolved = run.result?.unclassified?.length || 0
               message.success(`已归类 ${count} 个文档${unresolved ? `，${unresolved} 个需调整文件名或内容` : ''}`)
+            } else if (run.status === 'cancelled') {
+              message.info('批量文档归类已停止')
             } else {
               message.error(run.error || '批量文档归类失败')
             }
@@ -495,7 +511,7 @@ function AssessmentProgress({ projectId, projectName }) {
     try {
       const [response, latestBatchResponse] = await Promise.all([
         api.get(`/assessments/phases/${phase.id}/tasks`),
-        phase.phase_id === 'gap_analysis'
+        ['gap_analysis', 'remediation_verification'].includes(phase.phase_id)
           ? api.get(`/assessments/phases/${phase.id}/documents/batch/latest`)
           : Promise.resolve({ data: null }),
       ])
@@ -584,13 +600,13 @@ function AssessmentProgress({ projectId, projectName }) {
   const handleCompletePhase = async (phaseId) => {
     try {
       await api.post(`/assessments/phases/${phaseId}/complete`, {})
-      fetchAssessment()
-      if (selectedPhase && selectedPhase.id === phaseId) {
-        const response = await api.get(`/assessments/phases/${phaseId}`)
-        setSelectedPhase(response.data)
-      }
+      const current = await fetchAssessment({ silent: true })
+      const reportPhase = current?.phases?.find(phase => phase.phase_id === 'report')
+      message.success('已进入生成报告阶段，未解决问题会如实写入报告')
+      if (reportPhase) await handlePhaseClick(reportPhase)
     } catch (error) {
       console.error('Failed to complete phase:', error)
+      message.error(error.response?.data?.detail || '暂时无法进入生成报告阶段')
     }
   }
 
@@ -637,7 +653,10 @@ function AssessmentProgress({ projectId, projectName }) {
   }
 
   const handleOpenTechnicalBatch = async () => {
-    setExecuteTask({ task_type: GAP_TECH_BATCH_TYPE, name: '自动基础技术检测' })
+    setExecuteTask({
+      task_type: GAP_TECH_BATCH_TYPE,
+      name: selectedPhase?.phase_id === 'field_assessment' ? '自动现场技术检测' : '自动基础技术检测',
+    })
     setExecuteMode('all')
     setExecuteParams({ target: '', username: 'root', password: '', key_file: '' })
     setSelectedAssets([])
@@ -726,17 +745,6 @@ function AssessmentProgress({ projectId, projectName }) {
     }
   }
 
-  const handleCompleteTask = async (taskId) => {
-    try {
-      await api.post(`/assessments/tasks/${taskId}/complete`, { result: {} })
-      const response = await api.get(`/assessments/phases/${selectedPhase.id}/tasks`)
-      setTasks(response.data)
-      fetchAssessment()
-    } catch (error) {
-      console.error('Failed to complete task:', error)
-    }
-  }
-
   const handleStopTask = async (taskId) => {
     try {
       await api.post(`/assessments/tasks/${taskId}/stop`, { reason: '' })
@@ -746,6 +754,18 @@ function AssessmentProgress({ projectId, projectName }) {
     } catch (error) {
       console.error('Failed to stop task:', error)
       message.error(`停止任务失败: ${error.response?.data?.detail || error.message}`)
+    }
+  }
+
+  const handleStopBatchDocumentRun = async () => {
+    if (!batchDocumentRun?.id) return
+    try {
+      await api.post(`/assessments/document-runs/${batchDocumentRun.id}/stop`, { reason: '' })
+      message.success('文档合规检查已停止')
+      const response = await api.get(`/assessments/document-runs/${batchDocumentRun.id}`)
+      setBatchDocumentRun(response.data)
+    } catch (error) {
+      message.error(`停止文档检查失败: ${error.response?.data?.detail || error.message}`)
     }
   }
 
@@ -813,7 +833,9 @@ function AssessmentProgress({ projectId, projectName }) {
         { headers: { 'Content-Type': 'multipart/form-data' } }
       )
 
-      message.success(batchUploadMode ? '文档集已上传，正在自动归类' : `已上传 ${uploadFiles.length} 个文件，正在后台分析`)
+      message.success(batchUploadMode
+        ? (isVerificationPhase ? '整改材料已上传，正在自动归类并重新检查' : '文档集已上传，正在自动归类')
+        : `已上传 ${uploadFiles.length} 个文件，正在后台分析`)
       if (batchUploadMode) {
         setBatchDocumentRun({ id: response.data.run_id, status: 'pending', progress: { percent: 0, message: '等待批量文档归类' } })
         startBatchPolling(response.data.run_id, selectedPhase.id, true)
@@ -877,33 +899,6 @@ function AssessmentProgress({ projectId, projectName }) {
         }
       },
     })
-  }
-
-  const handleOpenSkip = (task) => {
-    setSkipTask(task)
-    setSkipReason('')
-    setSkipModalVisible(true)
-  }
-
-  const handleSubmitSkip = async () => {
-    if (!skipTask) return
-
-    setSkipping(true)
-    try {
-      await api.post(`/assessments/tasks/${skipTask.id}/skip`, {
-        reason: skipReason,
-      })
-      message.success('任务已跳过')
-      const tasksResponse = await api.get(`/assessments/phases/${selectedPhase.id}/tasks`)
-      setTasks(tasksResponse.data)
-      fetchAssessment()
-      setSkipModalVisible(false)
-    } catch (error) {
-      console.error('Skip failed:', error)
-      message.error(error.response?.data?.detail || '跳过失败')
-    } finally {
-      setSkipping(false)
-    }
   }
 
   // 切换错误详情展开
@@ -1101,7 +1096,12 @@ function AssessmentProgress({ projectId, projectName }) {
                     ? `提取失败：${file.error || '未知错误'}`
                     : `${file.page_count || 0} 页 · 原生 ${file.native_blocks || 0} · OCR ${file.ocr_blocks || 0} · 视觉 ${Math.max((file.vision_blocks || 0) - (file.ocr_blocks || 0), 0)} · 向量${file.embedding_status === 'ready' ? '就绪' : '不可用'}`}
                 </em>
-                {(file.warnings || []).length > 0 && <small>{file.warnings.join('；')}</small>}
+                {(file.warnings || []).length > 0 && (
+                  <small>
+                    {file.visual_degraded && !file.visual_incomplete ? '视觉交叉验证部分降级，已使用原生或轻量 OCR 结果继续判定：' : ''}
+                    {file.warnings.join('；')}
+                  </small>
+                )}
               </div>
             ))}
           </div>
@@ -1115,7 +1115,7 @@ function AssessmentProgress({ projectId, projectName }) {
             </strong>
             <span>{comparison.delta > 0 ? '+' : ''}{Math.round((comparison.delta || 0) * 100)}%</span>
             {comparison.comparison_reliable !== false && (
-              <em>已修复 {comparison.fixed_gap_ids?.length || 0} · 仍存在 {comparison.remaining_gap_ids?.length || 0} · 新增 {comparison.new_gap_ids?.length || 0}</em>
+              <em>已修复 {comparison.fixed_gap_ids?.length || 0} · 未解决 {comparison.remaining_gap_ids?.length || 0} · 新增 {comparison.new_gap_ids?.length || 0}</em>
             )}
             {comparison.comparison_reliable === false && <em>初检或本次分析未完成，不自动关闭原问题</em>}
           </div>
@@ -1218,12 +1218,19 @@ function AssessmentProgress({ projectId, projectName }) {
 
   const statusConfig = STATUS_CONFIG[assessment.status] || STATUS_CONFIG.not_started
   const isGapAnalysis = selectedPhase?.phase_id === 'gap_analysis'
+  const isFieldAssessment = selectedPhase?.phase_id === 'field_assessment'
+  const isVerificationPhase = selectedPhase?.phase_id === 'remediation_verification'
   const documentTasks = tasks.filter(task => task.task_type === 'doc_review')
-  const technicalTasks = tasks.filter(task => BASIC_TECHNICAL_TASK_TYPES.has(task.task_type))
+  const technicalTasks = tasks.filter(task => (
+    isGapAnalysis ? BASIC_TECHNICAL_TASK_TYPES.has(task.task_type) : isFieldAssessment && EXECUTABLE_TASK_TYPES.includes(task.task_type)
+  ))
   const documentCompleted = documentTasks.filter(task => task.status === 'completed').length
   const technicalCompleted = technicalTasks.filter(task => task.status === 'completed').length
-  const technicalRunning = technicalTasks.filter(task => task.status === 'in_progress').length
+  const technicalQueued = technicalTasks.filter(task => task.status === 'in_progress' && task.result?.execution?.state === 'queued').length
+  const technicalRunning = technicalTasks.filter(task => task.status === 'in_progress' && task.result?.execution?.state !== 'queued').length
+  const technicalActive = technicalQueued + technicalRunning
   const batchDocumentRunning = ['queued', 'pending', 'running'].includes(batchDocumentRun?.status)
+  const completionState = COMPLETION_STATE_CONFIG[completionSummary?.completion_state] || COMPLETION_STATE_CONFIG.needs_remediation
 
   return (
     <>
@@ -1274,7 +1281,6 @@ function AssessmentProgress({ projectId, projectName }) {
             const isActive = phase.status === 'active'
             const isCompleted = phase.status === 'completed'
             const isPending = phase.status === 'pending'
-            const isSkipped = phase.status === 'skipped'
 
             return (
               <div
@@ -1289,8 +1295,6 @@ function AssessmentProgress({ projectId, projectName }) {
                       <CheckCircleFilled />
                     ) : isActive ? (
                       <div className="pulse-dot" />
-                    ) : isSkipped ? (
-                      <MinusCircleFilled style={{ color: '#94a3b8' }} />
                     ) : (
                       <div className="empty-dot" />
                     )}
@@ -1306,12 +1310,7 @@ function AssessmentProgress({ projectId, projectName }) {
                     )}
                     {isCompleted && (
                       <Tag color="#10b981" icon={<CheckCircleFilled />} className="phase-done-tag">
-                        完成
-                      </Tag>
-                    )}
-                    {isSkipped && (
-                      <Tag color="#94a3b8" className="phase-skipped-tag">
-                        已跳过
+                        {phase.phase_id === 'remediation_verification' ? '本轮结束' : '完成'}
                       </Tag>
                     )}
                     <Button
@@ -1398,12 +1397,13 @@ function AssessmentProgress({ projectId, projectName }) {
         {completionSummary && (
           <div className="completion-view">
             {/* Header */}
-            <div className="completion-header">
+            <div className={`completion-header ${completionState.tone}`}>
               <div className="completion-icon">
-                <CheckCircleFilled />
+                {completionState.tone === 'success' ? <CheckCircleFilled /> : <WarningOutlined />}
               </div>
-              <h2>测评完成</h2>
+              <h2>{completionState.title}</h2>
               <p className="completion-project-name">{completionSummary.project?.name}</p>
+              <Tag color={completionState.color}>{completionState.label}</Tag>
             </div>
 
             {/* Score Card */}
@@ -1411,7 +1411,7 @@ function AssessmentProgress({ projectId, projectName }) {
               <div className="score-circle">
                 <Progress
                   type="circle"
-                  percent={completionSummary.project?.score || 0}
+                  percent={completionSummary.project?.score ?? 0}
                   size={120}
                   strokeColor={{
                     '0%': completionSummary.project?.score >= 75 ? '#10b981' : '#f59e0b',
@@ -1419,8 +1419,8 @@ function AssessmentProgress({ projectId, projectName }) {
                   }}
                   format={(percent) => (
                     <div className="score-content">
-                      <span className="score-number">{percent}</span>
-                      <span className="score-unit">分</span>
+                      <span className="score-number">{completionSummary.project?.score == null ? '-' : percent}</span>
+                      <span className="score-unit">{completionSummary.project?.score == null ? '未判定' : '合规分'}</span>
                     </div>
                   )}
                 />
@@ -1439,26 +1439,30 @@ function AssessmentProgress({ projectId, projectName }) {
                   <SafetyCertificateOutlined style={{ marginRight: 6 }} />
                   {completionSummary.project?.level || '等保'}
                 </div>
+                <div className="score-coverage">
+                  可靠检测覆盖 {completionSummary.score_metrics?.coverage ?? 0}%
+                  <span>只有可靠检测通过或真实复测修复的问题才计入合规结果。</span>
+                </div>
               </div>
             </div>
 
             {/* Stats Grid */}
             <div className="completion-stats">
               <div className="stat-card">
-                <div className="stat-value">{completionSummary.stats?.total_tasks || 0}</div>
-                <div className="stat-label">总任务数</div>
+                <div className="stat-value">{completionSummary.stats?.completion_rate || 0}%</div>
+                <div className="stat-label">流程已处理</div>
               </div>
               <div className="stat-card success">
-                <div className="stat-value">{completionSummary.stats?.completed_tasks || 0}</div>
-                <div className="stat-label">已完成</div>
+                <div className="stat-value">{completionSummary.phases?.find(item => item.disposition)?.disposition?.fixed || 0}</div>
+                <div className="stat-label">已修复问题</div>
+              </div>
+              <div className="stat-card warning">
+                <div className="stat-value">{completionSummary.phases?.find(item => item.disposition)?.disposition?.open || 0}</div>
+                <div className="stat-label">待处理问题</div>
               </div>
               <div className="stat-card failed">
-                <div className="stat-value">{completionSummary.stats?.failed_tasks || 0}</div>
-                <div className="stat-label">失败</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-value">{completionSummary.stats?.completion_rate || 0}%</div>
-                <div className="stat-label">完成率</div>
+                <div className="stat-value">{completionSummary.phases?.find(item => item.disposition)?.disposition?.unable || 0}</div>
+                <div className="stat-label">无法验证</div>
               </div>
             </div>
 
@@ -1471,10 +1475,10 @@ function AssessmentProgress({ projectId, projectName }) {
                   
                   return (
                     <div key={phase.id} className="phase-timeline-item">
-                      <div 
+                      <button
+                        type="button"
                         className="phase-timeline-header"
                         onClick={() => togglePhaseExpand(phase.id)}
-                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 12, flex: 1 }}
                       >
                         <div className="phase-timeline-dot">
                           <CheckCircleFilled style={{ color: '#10b981' }} />
@@ -1485,16 +1489,38 @@ function AssessmentProgress({ projectId, projectName }) {
                             {phase.name}
                           </div>
                           <div className="phase-timeline-meta">
-                            {phase.completed_tasks}/{phase.total_tasks} 任务 · 分数 {phase.score}
+                            {phase.completed_tasks}/{phase.total_tasks} {phase.metric_label || '任务'}{phase.metric_suffix || '已处理'}
+                            {phase.execution_coverage != null && <> · 执行覆盖 {phase.execution_coverage}%</>}
+                            {phase.skipped_tasks > 0 && <> · {phase.skipped_tasks} 项不适用 / 跳过</>}
                             {phase.completed_at && (
                               <span> · {new Date(phase.completed_at).toLocaleDateString('zh-CN')}</span>
                             )}
                           </div>
                         </div>
-                      </div>
+                      </button>
                       
                       {/* 展开的任务列表 */}
-                      {isExpanded && phase.tasks && (
+                      {isExpanded && phase.disposition && (
+                        <div className="phase-remediation-detail">
+                          <div className="phase-remediation-summary">
+                            <span><b>{phase.disposition.fixed || 0}</b>已修复</span>
+                            <span><b>{phase.disposition.unable || 0}</b>无法验证</span>
+                            <span><b>{phase.disposition.open || 0}</b>待处理</span>
+                          </div>
+                          <div className="phase-verification-runs">
+                            {(phase.verification_runs || []).length ? phase.verification_runs.map(run => (
+                              <div className="phase-verification-run" key={run.id}>
+                                <span>{run.source_type === 'document' ? '文档复测' : '技术复测'} #{run.id}</span>
+                                <em>{VERIFICATION_RUN_STATUS[run.status] || run.status}</em>
+                                <small>
+                                  已修复 {run.summary?.fixed || 0} · 未解决 {run.summary?.still_present || 0} · 无法验证 {run.summary?.unable || 0}
+                                </small>
+                              </div>
+                            )) : <div className="phase-empty-detail">尚未产生复测记录</div>}
+                          </div>
+                        </div>
+                      )}
+                      {isExpanded && !phase.disposition && phase.tasks && (
                         <div className="phase-timeline-tasks">
                           {phase.tasks.map((task, idx) => (
                             <div key={idx} className="task-item-mini">
@@ -1508,9 +1534,9 @@ function AssessmentProgress({ projectId, projectName }) {
                                 size="small"
                               >
                                 {
-                                  task.status === 'completed' ? '通过' : 
-                                  task.status === 'failed' ? '失败' : 
-                                  task.status === 'cancelled' ? '已跳过' : 
+                                  task.status === 'completed' ? '已执行' :
+                                  task.status === 'failed' ? '执行失败' :
+                                  task.status === 'cancelled' ? '不适用 / 已跳过' :
                                   task.status === 'todo' ? '待办' :
                                   task.status === 'in_progress' ? '进行中' : task.status
                                 }
@@ -1557,7 +1583,7 @@ function AssessmentProgress({ projectId, projectName }) {
                 onClick={() => handleRestartAssessment('continue')}
                 size="large"
               >
-                继续补充
+                继续整改 / 重新检测
               </Button>
               <Button
                 icon={<ReloadOutlined />}
@@ -1578,12 +1604,14 @@ function AssessmentProgress({ projectId, projectName }) {
           <div className="drawer-title">
             <span>{selectedPhase?.name}</span>
             <Tag color={PHASE_STATUS_CONFIG[selectedPhase?.status]?.color}>
-              {PHASE_STATUS_CONFIG[selectedPhase?.status]?.text}
+              {selectedPhase?.phase_id === 'remediation_verification' && selectedPhase?.status === 'completed'
+                ? '本轮结束'
+                : PHASE_STATUS_CONFIG[selectedPhase?.status]?.text}
             </Tag>
           </div>
         }
         placement="right"
-        width={isGapAnalysis ? 'min(920px, 96vw)' : 'min(720px, 94vw)'}
+        width={isGapAnalysis || isVerificationPhase ? 'min(920px, 96vw)' : 'min(720px, 94vw)'}
         onClose={() => {
           setDrawerVisible(false)
           stopPolling()
@@ -1636,7 +1664,13 @@ function AssessmentProgress({ projectId, projectName }) {
                       {batchDocumentRunning ? (
                         <>
                           <DocumentPipelineProgress progress={batchDocumentRun.progress} batch />
+                          {batchDocumentRun.stale && <Alert type="warning" showIcon message="Worker 心跳已过期，任务将自动恢复" />}
+                          <Button danger size="small" icon={<StopOutlined />} onClick={handleStopBatchDocumentRun}>
+                            停止文档检查
+                          </Button>
                         </>
+                      ) : batchDocumentRun.status === 'cancelled' ? (
+                        <span><StopOutlined /> 文档合规检查已停止，可重新上传后再次执行</span>
                       ) : batchDocumentRun.status === 'failed' ? (
                         <span><WarningOutlined /> {batchDocumentRun.error || '批量文档归类失败'}</span>
                       ) : (
@@ -1648,10 +1682,14 @@ function AssessmentProgress({ projectId, projectName }) {
                               {batchDocumentRun.result.classified.map(item => (
                                 <div key={item.document_file_id} className="classification-result-row">
                                   <span>{item.file_name} → {item.document_name}</span>
-                                  <Tag color={item.naming_status === 'filename_warning' ? 'warning' : 'success'}>
-                                    {item.naming_status === 'filename_warning' ? '命名不规范' : '名称匹配'}
+                                  <Tag color={item.extraction_status === 'unable' ? 'error' : item.naming_status === 'filename_warning' ? 'warning' : 'success'}>
+                                    {item.extraction_status === 'unable' ? '内容提取失败' : item.naming_status === 'filename_warning' ? '命名不规范' : '名称匹配'}
                                   </Tag>
-                                  <em>{item.classifier === 'hybrid' ? '规则 + LLM' : item.classifier === 'rule_fallback' ? '规则降级' : '规则确认'} · {Math.round((item.confidence || 0) * 100)}%</em>
+                                  <em>
+                                    {item.extraction_status === 'unable'
+                                      ? item.extraction_error
+                                      : `${item.classifier === 'hybrid' ? '规则 + LLM' : item.classifier === 'rule_fallback' ? '规则降级' : '规则确认'} · ${Math.round((item.confidence || 0) * 100)}%`}
+                                  </em>
                                 </div>
                               ))}
                             </details>
@@ -1689,19 +1727,20 @@ function AssessmentProgress({ projectId, projectName }) {
                   <div className="gap-track-stats">
                     <span><b>{technicalCompleted}</b> / {technicalTasks.length} 已完成</span>
                     <span><b>{technicalRunning}</b> 执行中</span>
+                    <span><b>{technicalQueued}</b> 排队中</span>
                     <span><b>{technicalTasks.filter(task => task.status === 'failed').length}</b> 失败</span>
                   </div>
-                  {technicalRunning > 0 && (
+                  {technicalActive > 0 && (
                     <div className="technical-batch-status">
                       <Spin size="small" />
-                      <span>{technicalRunning} 项检测正在后台执行，可继续进行文档检查</span>
+                      <span>{technicalRunning} 项执行中，{technicalQueued} 项排队中；可继续文档检查或提交其他扫描</span>
                     </div>
                   )}
                   <Button
                     type="primary"
                     icon={<ThunderboltOutlined />}
                     onClick={handleOpenTechnicalBatch}
-                    disabled={technicalTasks.length === 0 || technicalRunning > 0}
+                    disabled={technicalTasks.length === 0 || technicalActive > 0}
                   >
                     自动检测全部资产
                   </Button>
@@ -1709,7 +1748,89 @@ function AssessmentProgress({ projectId, projectName }) {
               </div>
             )}
 
+            {isFieldAssessment && (
+              <section className="gap-track technical-track field-auto-track">
+                <div className="gap-track-header">
+                  <span className="gap-track-icon"><RadarChartOutlined /></span>
+                  <div>
+                    <strong>自动现场技术检测</strong>
+                    <p>一次选择资产和凭证，后台并发执行适用的 Web、数据库、网络设备、Windows/AD 和主机深度检测。</p>
+                  </div>
+                </div>
+                <div className="gap-track-stats">
+                  <span><b>{technicalCompleted}</b> / {technicalTasks.length} 已完成</span>
+                  <span><b>{technicalRunning}</b> 执行中</span>
+                  <span><b>{technicalQueued}</b> 排队中</span>
+                  <span><b>{technicalTasks.filter(task => task.status === 'failed').length}</b> 无法完成</span>
+                </div>
+                {technicalActive > 0 && <div className="technical-batch-status"><Spin size="small" /><span>{technicalRunning} 项执行中，{technicalQueued} 项排队中；结果和失败原因会逐项回写</span></div>}
+                <Button type="primary" icon={<ThunderboltOutlined />} onClick={handleOpenTechnicalBatch} disabled={!technicalTasks.length || technicalActive > 0}>
+                  自动执行全部现场检测
+                </Button>
+              </section>
+            )}
+
+            {isVerificationPhase && (
+              <>
+                <section className="gap-track document-track verification-document-track">
+                  <div className="gap-track-header">
+                    <span className="gap-track-icon"><FileProtectOutlined /></span>
+                    <div>
+                      <strong>批量提交整改材料</strong>
+                      <p>一次提交多个文件、文件夹、ZIP、RAR 或 7z。系统自动归类，同类材料替换旧版本并重新检查该类全部未解决问题。</p>
+                    </div>
+                  </div>
+                  <div className="gap-track-stats">
+                    <span><b>{batchDocumentRun?.result?.classified?.length || 0}</b> 已归类</span>
+                    <span><b>{batchDocumentRun?.result?.verification_runs?.length || 0}</b> 已复测排队</span>
+                    <span><b>{batchDocumentRun?.result?.unclassified?.length || 0}</b> 未归类</span>
+                  </div>
+                  {batchDocumentRun && (
+                    <div className={`batch-document-status ${batchDocumentRun.status}`}>
+                      {batchDocumentRunning ? (
+                        <>
+                          <DocumentPipelineProgress progress={batchDocumentRun.progress} batch />
+                          {batchDocumentRun.stale && <Alert type="warning" showIcon message="Worker 心跳已过期，任务将自动恢复" />}
+                          <Button danger size="small" icon={<StopOutlined />} onClick={handleStopBatchDocumentRun}>停止批量整改检查</Button>
+                        </>
+                      ) : batchDocumentRun.status === 'failed' ? (
+                        <span><WarningOutlined /> {batchDocumentRun.error || '整改材料归类失败'}</span>
+                      ) : batchDocumentRun.status === 'cancelled' ? (
+                        <span><StopOutlined /> 本次批量整改检查已停止</span>
+                      ) : (
+                        <>
+                          <span>{batchDocumentRun.progress?.message || '整改材料已处理'}</span>
+                          {(batchDocumentRun.result?.unclassified?.length || 0) > 0 && (
+                            <details>
+                              <summary>{batchDocumentRun.result.unclassified.length} 个文件未可靠归类</summary>
+                              {batchDocumentRun.result.unclassified.map(item => <div key={item.document_file_id}>{item.file_name}：{item.reason}</div>)}
+                            </details>
+                          )}
+                          {(batchDocumentRun.result?.verification_skipped?.length || 0) > 0 && (
+                            <details>
+                              <summary>{batchDocumentRun.result.verification_skipped.length} 类未进入复测</summary>
+                              {batchDocumentRun.result.verification_skipped.map(item => <div key={item.task_id}>{item.document_name}：{item.reason}</div>)}
+                            </details>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <Button type="primary" icon={<InboxOutlined />} onClick={handleOpenBatchUpload} disabled={batchDocumentRunning}>
+                    批量上传并自动重新检查
+                  </Button>
+                </section>
+                <VerificationWorkspace
+                  projectId={projectId}
+                  onChanged={fetchAssessment}
+                  refreshKey={`${batchDocumentRun?.id || ''}:${batchDocumentRun?.status || ''}`}
+                  onContinue={selectedPhase.status === 'active' ? () => handleCompletePhase(selectedPhase.id) : null}
+                />
+              </>
+            )}
+
             {/* Tasks List */}
+            {!isVerificationPhase && (
             <div className="tasks-section">
               <h4>{isGapAnalysis ? '单项检查与结果' : '任务列表'}</h4>
               {tasksLoading ? (
@@ -1728,6 +1849,7 @@ function AssessmentProgress({ projectId, projectName }) {
                     const hasOnlyWarnings = hasIssues && taskIssues.every(item => item.level === 'warning')
                     const isFailed = task.status === 'failed'
                     const isInProgress = task.status === 'in_progress'
+                    const isQueued = isInProgress && task.result?.execution?.state === 'queued'
                     const isExpanded = expandedErrors[task.id]
                     const firstDocumentIndex = tasks.findIndex(item => item.task_type === 'doc_review')
                     const firstTechnicalIndex = tasks.findIndex(item => BASIC_TECHNICAL_TASK_TYPES.has(item.task_type))
@@ -1742,7 +1864,9 @@ function AssessmentProgress({ projectId, projectName }) {
                       )}
                       <div className={`task-item ${taskStatus.className} ${hasOnlyWarnings ? 'partial' : ''}`}>
                         <div className="task-icon">
-                          {isInProgress ? (
+                          {isQueued ? (
+                            <ClockCircleFilled style={{ color: '#38bdf8' }} />
+                          ) : isInProgress ? (
                             <Spin size="small" />
                           ) : isFailed ? (
                             <CloseCircleFilled style={{ color: '#ef4444' }} />
@@ -1758,7 +1882,7 @@ function AssessmentProgress({ projectId, projectName }) {
                           <div className="task-name">{task.name}</div>
                           <div className="task-meta">
                             <Tag color={taskStatus.color} size="small">
-                              {taskStatus.text}
+                              {isQueued ? '排队中' : taskStatus.text}
                             </Tag>
                             {hasOnlyWarnings && (
                               <Tag color="warning" size="small">存在无法检测项</Tag>
@@ -1834,33 +1958,29 @@ function AssessmentProgress({ projectId, projectName }) {
                                   icon={<PlayCircleFilled />}
                                   onClick={() => handleStartTask(task.id)}
                                 >
-                                  开始
+                                  {task.task_type === 'html_report' ? '生成报告' : '开始'}
                                 </Button>
                               )}
-                              <Button
-                                type="link"
-                                size="small"
-                                danger
-                                onClick={() => handleOpenSkip(task)}
-                              >
-                                跳过
-                              </Button>
                             </>
                           )}
                           {isInProgress && (
                             <>
                               {task.task_type === 'doc_review' ? (
-                                <Tag color="processing">分析中</Tag>
-                              ) : (
                                 <>
+                                  <Tag color="processing">分析中</Tag>
                                   <Button
                                     type="link"
                                     size="small"
-                                    icon={<CheckCircleFilled />}
-                                    onClick={() => handleCompleteTask(task.id)}
+                                    danger
+                                    icon={<StopOutlined />}
+                                    onClick={() => handleStopTask(task.id)}
                                   >
-                                    完成
+                                    停止
                                   </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <Tag color="processing">执行中</Tag>
                                   <Button
                                     type="link"
                                     size="small"
@@ -1922,18 +2042,12 @@ function AssessmentProgress({ projectId, projectName }) {
                 </div>
               )}
             </div>
+            )}
 
-            {/* Complete Phase Button */}
-            {selectedPhase.status === 'active' && (
-              <Button
-                type="primary"
-                block
-                icon={<CheckCircleFilled />}
-                onClick={() => handleCompletePhase(selectedPhase.id)}
-                className="complete-phase-btn"
-              >
-                完成阶段
-              </Button>
+            {selectedPhase.status === 'active' && isVerificationPhase && (
+              <div className="phase-auto-note">
+                每项问题获得重新检查结论后，本轮自动结束；也可按当前结果生成报告，未解决和无法验证项会如实保留。
+              </div>
             )}
           </div>
         )}
@@ -1944,7 +2058,9 @@ function AssessmentProgress({ projectId, projectName }) {
         title={
           <span>
             <UploadOutlined style={{ marginRight: 8 }} />
-            {batchUploadMode ? '批量上传文档集' : `上传任务文档 - ${uploadTask?.name || ''}`}
+            {batchUploadMode
+              ? (isVerificationPhase ? '批量提交整改材料' : '批量上传文档集')
+              : `上传任务文档 - ${uploadTask?.name || ''}`}
           </span>
         }
         open={uploadModalVisible}
@@ -1960,8 +2076,10 @@ function AssessmentProgress({ projectId, projectName }) {
           <Alert
             type="info"
             showIcon
-            message="系统会先归类，再执行检查"
-            description="文件名允许包含版本号、日期和修订标记；名称不规范但正文标题明确时会归类并提示。名称与正文都无法确认的文件不会被强行判定。"
+            message={isVerificationPhase ? '系统会先归类，再自动重新检查' : '系统会先归类，再执行检查'}
+            description={isVerificationPhase
+              ? '可靠归类后，同类旧材料会停用并保留审计记录，新材料将重新检查该类全部未解决问题。无法可靠归类的文件不会误更新整改结论。'
+              : '文件名允许包含版本号、日期和修订标记；名称不规范但正文标题明确时会归类并提示。名称与正文都无法确认的文件不会被强行判定。'}
             style={{ marginBottom: 16 }}
           />
         )}
@@ -2081,41 +2199,6 @@ function AssessmentProgress({ projectId, projectName }) {
             ))}
           </div>
         )}
-      </Modal>
-
-      {/* 跳过任务弹窗 */}
-      <Modal
-        title={
-          <span>
-            <CloseOutlined style={{ marginRight: 8, color: '#f59e0b' }} />
-            跳过任务 - {skipTask?.name}
-          </span>
-        }
-        open={skipModalVisible}
-        onCancel={() => !skipping && setSkipModalVisible(false)}
-        onOk={handleSubmitSkip}
-        confirmLoading={skipping}
-        okText="确认跳过"
-        cancelText="取消"
-        okButtonProps={{ danger: true }}
-        width={500}
-        destroyOnClose
-      >
-        <div style={{ marginBottom: 16, color: 'rgba(255,255,255,0.7)' }}>
-          确认要跳过这个任务吗？任务将被标记为已取消。
-        </div>
-        <div style={{ marginBottom: 8 }}>
-          <label>跳过原因（选填）：</label>
-          <Input.TextArea
-            rows={3}
-            value={skipReason}
-            onChange={(e) => setSkipReason(e.target.value)}
-            placeholder="例如：此任务不适用于本项目 / 已通过其他方式完成"
-            disabled={skipping}
-            maxLength={500}
-            showCount
-          />
-        </div>
       </Modal>
 
       {/* 任务执行参数弹窗 */}

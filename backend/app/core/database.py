@@ -341,7 +341,7 @@ async def _migrate_scan_tasks_table(conn):
         ("result_summary", "JSONB" if "postgresql" in settings.DATABASE_URL else "JSON"),
         ("lease_owner", "VARCHAR(128)"),
         ("lease_expires_at", "TIMESTAMP"),
-        ("control_state", "VARCHAR(24) DEFAULT 'running'"),
+        ("control_state", "VARCHAR(24) DEFAULT 'queued'"),
         ("checkpoint", "JSONB" if "postgresql" in settings.DATABASE_URL else "JSON"),
         ("paused_at", "TIMESTAMP"),
         ("cancel_requested_at", "TIMESTAMP"),
@@ -367,52 +367,6 @@ async def _migrate_scan_tasks_table(conn):
                 await conn.execute(text(f"ALTER TABLE scan_tasks ADD COLUMN {col_name} {col_type}"))
             except Exception:
                 pass
-
-
-async def _migrate_remediation_tickets_table(conn):
-    """迁移整改工单，支持 skipped 状态和跳过原因。"""
-    if "postgresql" in settings.DATABASE_URL:
-        table_result = await conn.execute(text("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_name = 'remediation_tickets'
-            )
-        """))
-        if not table_result.scalar():
-            return
-        try:
-            await conn.execute(text("ALTER TYPE remediationstatus ADD VALUE IF NOT EXISTS 'SKIPPED'"))
-        except Exception:
-            try:
-                await conn.execute(text("ALTER TYPE remediationstatus ADD VALUE IF NOT EXISTS 'skipped'"))
-            except Exception:
-                pass
-        result = await conn.execute(text("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.columns
-                WHERE table_schema = 'public'
-                AND table_name = 'remediation_tickets'
-                AND column_name = 'skip_reason'
-            )
-        """))
-        col_exists = result.scalar()
-    else:
-        table_result = await conn.execute(text("""
-            SELECT EXISTS (
-                SELECT FROM sqlite_master
-                WHERE type='table' AND name='remediation_tickets'
-            )
-        """))
-        if not table_result.scalar():
-            return
-        result = await conn.execute(text("PRAGMA table_info(remediation_tickets)"))
-        col_exists = any(row[1] == "skip_reason" for row in result.fetchall())
-
-    if not col_exists:
-        try:
-            await conn.execute(text("ALTER TABLE remediation_tickets ADD COLUMN skip_reason TEXT"))
-        except Exception:
-            pass
 
 
 async def _seed_assessment_types(conn):
@@ -551,7 +505,6 @@ async def init_db():
         await _migrate_projects_table(conn)
         await _migrate_organization_members_table(conn)
         await _migrate_scan_tasks_table(conn)
-        await _migrate_remediation_tickets_table(conn)
         await _migrate_assets_table(conn)
         await _migrate_task_instances_table(conn)
         await _migrate_conversation_archive_tables(conn)

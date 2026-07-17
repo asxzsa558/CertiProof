@@ -165,6 +165,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
             isResult: h.context_snapshot?.scan_results ? true : false,
             scanResults: h.context_snapshot?.scan_results || {},
             isMultiAsset: h.context_snapshot?.is_multi_asset || false,
+            dataReset: Boolean(h.context_snapshot?.assessment_data_reset),
           }))
         } else {
           nextMessages = [
@@ -221,6 +222,34 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
       pollRefsRef.current.clear()
     }
   }, [])
+
+  useEffect(() => {
+    const handleAssessmentReset = event => {
+      if (Number(event.detail?.projectId) !== Number(projectId) || event.detail?.mode !== 'reset') return
+      wsRefsRef.current.forEach(ws => ws.close())
+      wsRefsRef.current.clear()
+      pollRefsRef.current.forEach(timeoutId => clearTimeout(timeoutId))
+      pollRefsRef.current.clear()
+      setMessages(previous => [
+        ...previous.map(item => item.isResult || item.taskId
+          ? {
+              ...item,
+              isResult: false,
+              scanResults: {},
+              isMultiAsset: false,
+              taskStatus: item.taskId ? 'stopped' : item.taskStatus,
+              dataReset: true,
+            }
+          : item),
+        {
+          role: 'assistant',
+          content: '本项目测评已完全重置，先前检测结果已从系统中清除。项目和资产仍然保留。',
+        },
+      ])
+    }
+    window.addEventListener('certiproof:assessment-reset', handleAssessmentReset)
+    return () => window.removeEventListener('certiproof:assessment-reset', handleAssessmentReset)
+  }, [projectId])
 
   useEffect(() => {
     if (!externalCommand?.text) return
@@ -328,35 +357,9 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     }
   }
 
-  const handlePing = async (target) => {
-    rememberInput(`/ping ${target}`)
-    setMessages(prev => [...prev, { role: 'user', content: `/ping ${target}` }])
-    setInput('')
-    setActiveRequests(prev => prev + 1)
+  const handlePing = (target) => handleSendToAI(`ping ${target}`, `/ping ${target}`)
 
-    try {
-      const response = await api.post('/chat/', {
-        message: `ping ${target}`,
-        project_id: projectId,
-      })
-      
-      const aiResponse = response.data.response
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: aiResponse,
-      }])
-    } catch (error) {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `Ping 失败: ${error.response?.data?.detail || error.message}`,
-        isError: true,
-      }])
-    } finally {
-      setActiveRequests(prev => Math.max(0, prev - 1))
-    }
-  }
-
-  const handleSendToAI = async (messageText) => {
+  const handleSendToAI = async (messageText, displayText = messageText) => {
     // 防重复
     const now = Date.now()
     if (messageText === lastRequest.message && 
@@ -366,7 +369,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     
     setLastRequest({ message: messageText, timestamp: now })
 
-    const userMessage = { role: 'user', content: messageText }
+    const userMessage = { role: 'user', content: displayText }
     setMessages((prev) => [...prev, userMessage])
     setInput('')
     setActiveRequests(prev => prev + 1)
@@ -1500,6 +1503,9 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
                   <div className={`message-bubble ${msg.role} ${msg.isError ? 'error' : ''}`}>
                     {msg.content}
                   </div>
+                  {msg.dataReset && (
+                    <div className="message-data-reset">相关测评数据已被完全重置，原结果不再可用</div>
+                  )}
                   {/* 任务状态指示器 */}
                   {msg.taskId && (
                     <TaskStatusCard

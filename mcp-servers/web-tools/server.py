@@ -42,7 +42,7 @@ def timeout_result(tool: str, target: str, duration_ms: int, error: str, data: O
     return {
         "tool": tool,
         "version": "1.0",
-        "status": "success",
+        "status": "warning",
         "data": {
             "target": target,
             "scan_completed": False,
@@ -70,6 +70,21 @@ def parse_gobuster_soft_404(stderr: str) -> Optional[Dict[str, str]]:
 
 
 # ============== Nikto ==============
+
+def parse_nikto_findings(output: str) -> List[Dict[str, str]]:
+    findings = []
+    for line in (output or "").splitlines():
+        value = line.strip()
+        if not value.startswith("+"):
+            continue
+        issue = bool(re.match(r"^\+\s+\[\d+\]", value)) or bool(re.search(
+            r"\b(?:OSVDB|CVE-\d+|vulnerable|outdated|dangerous|exposed|misconfiguration)\b",
+            value,
+            re.IGNORECASE,
+        ))
+        if issue:
+            findings.append({"description": value, "severity": "medium"})
+    return findings
 
 async def nikto_scan(params: Dict[str, Any]) -> Dict[str, Any]:
     """执行 nikto Web 服务器扫描"""
@@ -107,13 +122,7 @@ async def nikto_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         duration_ms = int((time.time() - start_time) * 1000)
         
         # Nikto standard output avoids optional Perl JSON/XML modules.
-        findings = []
-        for line in output.split('\n'):
-            if line.lstrip().startswith("+") and not line.startswith("+ Target"):
-                findings.append({
-                    "description": line.strip(),
-                    "severity": "medium",
-                })
+        findings = parse_nikto_findings(output)
 
         scan_completed, tool_error = completed_or_error(
             process.returncode, stderr_output, len(findings)

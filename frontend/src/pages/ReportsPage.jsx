@@ -25,10 +25,21 @@ const reportState = (project) => {
   const risks = Number(project.risk_count || 0)
   const total = Number(project.task_total || 0)
   const done = Number(project.task_done || 0)
-  if (risks > 0) return { label: '存在待整改风险', tone: 'attention', detail: `${risks} 项风险尚未闭环` }
+  const artifact = project.report || {}
+  if (artifact.available && artifact.stale) {
+    return { label: `报告 V${artifact.version} 已过期`, tone: 'attention', detail: artifact.stale_reason || '测评数据已变化，请重新生成' }
+  }
+  if (artifact.available) {
+    return {
+      label: `正式报告 V${artifact.version}`,
+      tone: risks > 0 ? 'attention' : 'ready',
+      detail: risks > 0 ? `报告如实保留 ${risks} 项待处理风险` : '当前版本与测评数据一致',
+    }
+  }
+  if (risks > 0) return { label: '存在待处理风险', tone: 'attention', detail: `${risks} 项风险尚未解决` }
   if (!total) return { label: '尚未测评', tone: 'idle', detail: '尚无测评任务结果' }
   if (progress >= 100 && done < total) return { label: '测评进度待校正', tone: 'attention', detail: `显示 ${progress}% ，但仅完成 ${done}/${total} 项任务` }
-  if (progress >= 100) return { label: '可生成报告', tone: 'ready', detail: '当前没有风险阻塞项' }
+  if (progress >= 100) return { label: '等待生成正式报告', tone: 'progress', detail: '请在项目测评最后阶段生成' }
   return { label: '测评进行中', tone: 'progress', detail: `${done}/${total} 项任务已完成` }
 }
 
@@ -91,7 +102,7 @@ function ReportsPage() {
       window.URL.revokeObjectURL(url)
     } catch (error) {
       console.error('Failed to download report:', error)
-      message.error('报告下载失败')
+      message.error(error.response?.data?.detail || '报告下载失败')
     } finally {
       setDownloadingId(null)
     }
@@ -104,7 +115,7 @@ function ReportsPage() {
       setPreview({ html: response.data, projectId })
     } catch (error) {
       console.error('Failed to preview report:', error)
-      message.error('报告预览失败')
+      message.error(error.response?.data?.detail || '报告预览失败')
     } finally {
       setPreviewingId(null)
     }
@@ -153,7 +164,7 @@ function ReportsPage() {
         <header className="org-topbar">
           <div>
             <h1>报告中心</h1>
-            <p>以当前待整改风险、已执行检测和文档证据为依据生成可追溯的等保自查报告。</p>
+            <p>以当前待处理风险、已执行检测和文档证据为依据生成可追溯的等保自查报告。</p>
           </div>
           <div className="org-top-actions">
             <Select
@@ -173,7 +184,7 @@ function ReportsPage() {
         <section className="report-kpis">
           <div className="org-kpi">
             <span><FileTextOutlined /></span>
-            <div><strong>{reports.length}</strong><em>项目报告</em></div>
+            <div><strong>{reports.length}</strong><em>测评项目</em></div>
           </div>
           <div className="org-kpi">
             <span><SafetyCertificateOutlined /></span>
@@ -181,7 +192,7 @@ function ReportsPage() {
           </div>
           <div className="org-kpi">
             <span><CheckCircleFilled /></span>
-            <div><strong>{reports.filter((item) => item.reportState.tone === 'ready').length}</strong><em>可生成</em></div>
+            <div><strong>{reports.filter((item) => item.report?.available).length}</strong><em>正式报告</em></div>
           </div>
           <div className="org-kpi">
             <span><ExclamationCircleFilled /></span>
@@ -205,15 +216,16 @@ function ReportsPage() {
                 </div>
                 <div className="report-item-state"><span className={`report-state-dot ${report.reportState.tone}`} /><div><strong>{report.reportState.label}</strong><p>{report.reportState.detail}</p></div></div>
                 <div className="report-item-progress"><div><span>{report.stage || '尚未开始'}</span><em>{report.progress || 0}%</em></div><div className="mini-progress"><b style={{ width: `${report.progress || 0}%` }} /></div></div>
-                <dl className="report-item-metrics"><div><dt>测评任务</dt><dd>{report.task_done || 0}/{report.task_total || 0}</dd></div><div><dt>待处理风险</dt><dd className={report.risk_count ? 'hot' : ''}>{report.risk_count || 0}</dd></div><div><dt>报告依据</dt><dd>{report.task_total ? '已生成数据' : '等待测评'}</dd></div></dl>
+                <dl className="report-item-metrics"><div><dt>测评任务</dt><dd>{report.task_done || 0}/{report.task_total || 0}</dd></div><div><dt>待处理风险</dt><dd className={report.risk_count ? 'hot' : ''}>{report.risk_count || 0}</dd></div><div><dt>正式报告</dt><dd>{report.report?.available ? `V${report.report.version}${report.report.stale ? ' · 已过期' : ''}` : '尚未生成'}</dd></div></dl>
                 <div className="report-actions">
                   <Button
                     size="small"
                     icon={<EyeOutlined />}
                     loading={previewingId === report.project_id}
                     onClick={() => handlePreviewReport(report.project_id)}
+                    disabled={!report.report?.available}
                   >
-                    预览
+                    {report.report?.stale ? '查看旧版本' : '预览'}
                   </Button>
                   <Tooltip title="下载 HTML 报告">
                     <Button
@@ -222,6 +234,7 @@ function ReportsPage() {
                       loading={downloadingId === report.project_id}
                       onClick={() => handleDownloadReport(report.project_id)}
                       aria-label="下载 HTML 报告"
+                      disabled={!report.report?.available}
                     />
                   </Tooltip>
                 </div>

@@ -844,53 +844,6 @@ class CapabilityRegistry:
             category="asset"
         ))
         
-        # ========== 整改管理类能力 ==========
-        
-        self.register(Capability(
-            name="create_remediation_ticket",
-            description="为发现的问题创建整改工单。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "finding_id": {"type": "integer", "description": "发现ID"},
-                    "title": {"type": "string", "description": "工单标题"},
-                    "description": {"type": "string", "description": "工单描述"},
-                    "priority": {"type": "string", "description": "优先级：'low'、'medium'、'high'、'critical'"},
-                },
-                "required": ["finding_id", "title"]
-            },
-            category="remediation"
-        ))
-        
-        self.register(Capability(
-            name="list_remediation_tickets",
-            description="列出整改工单，可以按状态过滤。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "status": {"type": "string", "description": "状态过滤：'open'、'in_progress'、'resolved'、'verified'、'closed'、'skipped'"},
-                },
-                "required": []
-            },
-            category="remediation"
-        ))
-        
-        self.register(Capability(
-            name="update_ticket_status",
-            description="更新整改工单状态。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "ticket_id": {"type": "integer", "description": "工单ID"},
-                    "status": {"type": "string", "description": "新状态：'in_progress'、'resolved'、'verified'、'closed'、'skipped'"},
-                    "resolution_notes": {"type": "string", "description": "解决说明"},
-                    "skip_reason": {"type": "string", "description": "跳过原因"},
-                },
-                "required": ["ticket_id", "status"]
-            },
-            category="remediation"
-        ))
-        
         # ========== 报告生成类能力 ==========
         
         self.register(Capability(

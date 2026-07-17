@@ -4,6 +4,8 @@ Orchestrator - 调度中枢（包工头）
 """
 
 import asyncio
+import json
+import re
 import uuid
 import logging
 import socket
@@ -26,6 +28,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.config import settings
 from app.core.redaction import redact_sensitive
 from app.services.audit import record_audit_event
+from app.services.asset_scope import target_identity
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +204,8 @@ class Orchestrator:
             started_at=datetime.utcnow() if status == ScanTaskStatus.RUNNING else None,
         )
         db.add(scan_task)
+        from app.services.report_service import invalidate_report_artifacts
+        await invalidate_report_artifacts(db, project_id, "已发起新的安全检测")
         await db.commit()
         await db.refresh(scan_task)
         return scan_task.id
@@ -533,7 +538,9 @@ class Orchestrator:
         
         plan = plan_result.get("plan", [])
         response = plan_result.get("response", "")
+        plan, response = self._normalize_explicit_asset_plan(plan, context, user_input, response)
         plan, response = self._normalize_project_asset_plan(plan, context, user_input, response)
+        plan, response = self._keep_current_command_targets(plan, user_input, response)
         plan = self._expand_project_asset_targets(plan, context)
         
         logger.info(f"AI plan: {plan}")
@@ -593,6 +600,38 @@ class Orchestrator:
                 "message": response,
             }
 
+    def _normalize_explicit_asset_plan(
+        self,
+        plan: List[Dict],
+        context: Dict,
+        user_input: str,
+        response: str = "",
+    ) -> tuple[List[Dict], str]:
+        """Use the current command as the source of truth for an explicitly named project asset."""
+        capability = self._requested_scan_capability(user_input)
+        if not capability:
+            return plan, response
+
+        text = (user_input or "").lower()
+        matched = []
+        for asset in context.get("project_assets") or []:
+            value = asset.get("value")
+            identity = target_identity(value)
+            if identity and identity.lower() in text and value not in matched:
+                matched.append(value)
+        if not matched:
+            return plan, response
+
+        normalized = [{
+            "capability": capability,
+            "parameters": self._explicit_asset_parameters_for(capability, target, user_input),
+        } for target in matched]
+        return normalized, self._project_asset_scan_response(
+            capability,
+            [{"value": target} for target in matched],
+            current_project=False,
+        )
+
     def _normalize_project_asset_plan(
         self,
         plan: List[Dict],
@@ -645,6 +684,50 @@ class Orchestrator:
 
         return normalized, response
 
+    def _keep_current_command_targets(
+        self,
+        plan: List[Dict],
+        user_input: str,
+        response: str,
+    ) -> tuple[List[Dict], str]:
+        """Drop targets copied from earlier turns when this command names a target."""
+        capability = self._requested_scan_capability(user_input)
+        if not capability or not plan:
+            return plan, response
+
+        current_text = (user_input or "").lower()
+        retained = []
+        retained_targets = []
+        seen = set()
+        for step in plan:
+            parameters = step.get("parameters") if isinstance(step, dict) else None
+            if not isinstance(parameters, dict):
+                retained.append(step)
+                continue
+            raw_targets = [parameters.get("target"), parameters.get("url"), parameters.get("network")]
+            if isinstance(parameters.get("targets"), list):
+                raw_targets.extend(parameters["targets"])
+            identities = [target_identity(value) for value in raw_targets if value]
+            concrete = [value for value in identities if value and value not in {"项目资产", "项目资产网段"}]
+            if concrete and not any(value in current_text for value in concrete):
+                continue
+            key = (step.get("capability"), json.dumps(parameters, sort_keys=True, ensure_ascii=False))
+            if key in seen:
+                continue
+            seen.add(key)
+            retained.append(step)
+            retained_targets.extend(value for value in concrete if value not in retained_targets)
+
+        if not retained or len(retained) == len(plan):
+            return retained or plan, response
+        if retained_targets:
+            display_name = self._project_asset_scan_response(
+                capability,
+                [{"value": value} for value in retained_targets],
+            ).split("执行", 1)[-1].split("：", 1)[0]
+            response = f"好的，我将对 {', '.join(retained_targets)} 执行{display_name}。"
+        return retained, response
+
     def _project_asset_parameters_for(self, capability: str, user_input: str) -> Dict:
         if capability == "fping_scan":
             return {"network": "项目资产网段"}
@@ -656,7 +739,29 @@ class Orchestrator:
             ) else "high-risk"
         return parameters
 
-    def _project_asset_scan_response(self, capability: str, assets: List[Dict]) -> str:
+    def _explicit_asset_parameters_for(self, capability: str, target: str, user_input: str) -> Dict:
+        if capability == "fping_scan":
+            return {"targets": [target]}
+        if capability in {"sqlmap_scan", "gobuster_scan", "ffuf_scan", "web_discovery_scan"}:
+            match = re.search(r"https?://[^\s，。；]+", user_input or "", flags=re.IGNORECASE)
+            url = match.group(0) if match else f"http://{target}"
+            if capability == "ffuf_scan" and "FUZZ" not in url:
+                url = f"{url.rstrip('/')}/FUZZ"
+            return {"url": url}
+        parameters = {"target": target}
+        if capability == "scan_ports":
+            parameters["port_range"] = "1-65535" if any(
+                token in user_input for token in ("全端口", "全部端口", "1-65535")
+            ) else "high-risk"
+        return parameters
+
+    def _project_asset_scan_response(
+        self,
+        capability: str,
+        assets: List[Dict],
+        *,
+        current_project: bool = True,
+    ) -> str:
         names = [asset.get("value") for asset in assets if asset.get("value")]
         display_name = {
             "scan_ports": "端口扫描",
@@ -672,7 +777,9 @@ class Orchestrator:
             "fping_scan": "批量存活检测",
             "ping_asset": "Ping 检测",
         }.get(capability, capability)
-        return f"好的，我将对当前项目的 {len(names)} 个资产执行{display_name}：{', '.join(names)}"
+        if current_project:
+            return f"好的，我将对当前项目的 {len(names)} 个资产执行{display_name}：{', '.join(names)}"
+        return f"好的，我将对 {', '.join(names)} 执行{display_name}。"
 
     def _requested_scan_capability(self, user_input: str) -> Optional[str]:
         text = user_input or ""
@@ -680,22 +787,24 @@ class Orchestrator:
             return "scan_ports"
         if "弱口令" in text or "密码" in text:
             return "scan_weak_passwords"
-        if "漏洞" in text:
-            return "scan_vulnerabilities"
         if "数据库" in text:
             return "database_security_scan"
         if "基线" in text:
             return "baseline_check"
         if "SSL" in text or "ssl" in text or "TLS" in text or "tls" in text:
             return "scan_ssl"
-        if "Web" in text or "web" in text:
-            return "nikto_scan"
         if "SNMP" in text or "snmp" in text or "网络设备" in text:
             return "network_device_scan"
         if "Windows" in text or "windows" in text or "SMB" in text or "smb" in text or "AD" in text:
             return "windows_security_scan"
         if "目录" in text or "爆破" in text or "模糊" in text:
             return "web_discovery_scan"
+        if "SQL 注入" in text or "sql注入" in text.lower() or "/sqlmap" in text.lower():
+            return "sqlmap_scan"
+        if "Web" in text or "web" in text:
+            return "nikto_scan"
+        if "漏洞" in text:
+            return "scan_vulnerabilities"
         if "存活" in text or "fping" in text or "批量 Ping" in text:
             return "fping_scan"
         if "Ping" in text or "ping" in text:
@@ -875,6 +984,9 @@ class Orchestrator:
                     execution_result["success_count"] = sum(
                         1 for item in execution_result["results"] if item.get("status") == "success"
                     )
+                    execution_result["warning_count"] = sum(
+                        1 for item in execution_result["results"] if item.get("status") in {"warning", "skipped"}
+                    )
                     execution_result["failed_count"] = sum(
                         1 for item in execution_result["results"] if item.get("status") in {"failed", "cancelled"}
                     )
@@ -937,8 +1049,8 @@ class Orchestrator:
                     },
                 )
 
-                # 计算合规分数并更新 Project
-                if project_id and scan_results.get("open_ports"):
+                # Any new technical fact may affect an assessment control.
+                if project_id:
                     await self._calculate_and_update_score(async_db, project_id)
 
                 # 记录项目记忆
@@ -1161,11 +1273,7 @@ class Orchestrator:
             "add_asset": "添加资产",
             "list_assets": "列出资产",
             "verify_asset": "验证资产",
-            "create_remediation_ticket": "创建整改工单",
-            "list_remediation_tickets": "列出整改工单",
-            "update_ticket_status": "更新工单状态",
             "generate_html_report": "生成 HTML 报告",
-            "generate_pdf_report": "生成 HTML 报告",
             "generate_json_report": "生成 JSON 报告",
             "create_scheduled_scan": "创建定时扫描",
             "list_scheduled_scans": "列出定时扫描",
@@ -1182,6 +1290,10 @@ class Orchestrator:
             self.task_progress[task_id]["current_step"] = f"已完成: {display_name}"
         elif status == "failed":
             self.task_progress[task_id]["current_step"] = f"失败: {display_name}"
+        elif status == "warning":
+            self.task_progress[task_id]["current_step"] = f"未完整/无法判定: {display_name}"
+        elif status == "skipped":
+            self.task_progress[task_id]["current_step"] = f"已跳过: {display_name}"
         
         self.task_progress[task_id]["step_index"] = step_index
         self.task_progress[task_id]["total_steps"] = total_steps
@@ -1321,6 +1433,7 @@ class Orchestrator:
             "success": "已完成",
             "failed": "失败",
             "error": "失败",
+            "warning": "未完整/无法判定",
             "skipped": "已跳过",
         }.get(status, "正在执行")
         self.task_progress[task_id]["current_step"] = (
@@ -1389,14 +1502,6 @@ class Orchestrator:
                         content=summary,
                     )
             
-            remediation_capabilities = ["create_remediation_ticket", "list_remediation_tickets",
-                                        "update_ticket_status"]
-            executed_remediation = [s for s in plan if s.get("capability") in remediation_capabilities]
-            if executed_remediation:
-                await context_manager.add_project_memory(
-                    memory_type="remediation_status",
-                    content=f"执行了 {len(executed_remediation)} 个整改操作",
-                )
         except Exception as e:
             logger.warning(f"Failed to record project memory: {e}")
     
@@ -1618,6 +1723,9 @@ class Orchestrator:
             return f"{label}{target_str}: 跳过 - {detail or '条件不满足'}"
         if status not in ["success", "completed", "warning"]:
             return f"{label}{target_str}: 失败 - {detail}"
+        if data.get("scan_completed") is False or data.get("success") is False or data.get("reachable") is False:
+            reason = data.get("tool_error") or data.get("connection_error") or detail or "工具未完成执行"
+            return f"{label}{target_str}: 未完成/无法判定 - {reason}"
 
         if capability in ("scan_ports", "masscan_scan"):
             open_ports = data.get("open_ports", [])
@@ -1707,8 +1815,21 @@ class Orchestrator:
 
     def _capability_label(self, capability: str) -> str:
         labels = {
+            "scan_ports": "端口扫描",
+            "masscan_scan": "高速端口扫描",
+            "fping_scan": "批量存活检测",
+            "scan_ssl": "SSL/TLS 检测",
+            "scan_vulnerabilities": "漏洞扫描",
+            "scan_weak_passwords": "弱口令检测",
+            "nikto_scan": "Web 安全扫描",
+            "sqlmap_scan": "SQL 注入检测",
+            "gobuster_scan": "目录爆破",
+            "ffuf_scan": "Web 模糊测试",
             "baseline_check": "安全基线核查",
             "linux_baseline": "安全基线核查",
+            "snmp_walk": "SNMP 检测",
+            "snmp_bruteforce": "SNMP 团体字检测",
+            "snmp_get": "SNMP OID 读取",
             "mongodb_check": "MongoDB 未授权访问检测",
             "redis_check": "Redis 未授权访问检测",
             "mysql_check": "MySQL 空口令检测",
@@ -1742,6 +1863,7 @@ class Orchestrator:
         results = execution_result.get("results", [])
         success_count = execution_result.get("success_count", 0)
         failed_count = execution_result.get("failed_count", 0)
+        warning_count = execution_result.get("warning_count", 0)
         total_count = len(results)
 
         parts = []
@@ -1753,7 +1875,7 @@ class Orchestrator:
             parts.append(self._describe_result_line(capability, target, status, data, result.get("error")))
 
         if parts:
-            summary = f"\n\n【汇总】共 {total_count} 个任务，成功 {success_count}，失败 {failed_count}"
+            summary = f"\n\n【汇总】共 {total_count} 个任务，成功 {success_count}，未完成/不可判定 {warning_count}，失败 {failed_count}"
             return "\n".join(parts) + summary
 
         for result in results:
@@ -1898,9 +2020,9 @@ class Orchestrator:
             elif success_count == total_count:
                 return f"任务执行完成（成功 {success_count}/{total_count}）"
             else:
-                return f"任务执行完成（成功 {success_count}，失败 {failed_count}，共 {total_count}）"
+                return f"任务执行完成（成功 {success_count}，未完成/不可判定 {warning_count}，失败 {failed_count}，共 {total_count}）"
 
-        summary = f"\n\n【汇总】共 {total_count} 个任务，成功 {success_count}，失败 {failed_count}"
+        summary = f"\n\n【汇总】共 {total_count} 个任务，成功 {success_count}，未完成/不可判定 {warning_count}，失败 {failed_count}"
         return "\n".join(parts) + summary
     
     def _format_history(self, history: List[Dict]) -> str:
@@ -1975,12 +2097,17 @@ class Orchestrator:
             if status in ["success", "completed", "warning"]:
                 # 更新资产状态
                 if not is_sub_result:
-                    results["asset_results"][target]["status"] = "success"
+                    results["asset_results"][target]["status"] = status
                     results["asset_results"][target]["result"] = data
 
                 # 判断显示状态 - 根据工具类型区分
                 if is_sub_result:
                     pass
+                elif data.get("scan_completed") is False or data.get("success") is False or data.get("reachable") is False:
+                    results["asset_results"][target]["display_status"] = "warning"
+                    results["asset_results"][target]["error"] = (
+                        data.get("tool_error") or data.get("connection_error") or "工具未完成执行，无法判定安全结论"
+                    )
                 elif capability in ("baseline_check", "linux_baseline", "password_policy_check", "ssh_config_check", "audit_config_check", "service_port_check", "file_permission_check", "mac_check") and data.get("skipped"):
                     detail = data.get("error_detail") or error_detail or {}
                     results["asset_results"][target]["display_status"] = "warning"
@@ -2188,31 +2315,24 @@ class Orchestrator:
         return results
     
     async def _calculate_and_update_score(self, db: AsyncSession, project_id: int):
-        """计算合规分数并更新 Project"""
+        """Recalculate through Flow Engine, the sole owner of compliance scoring."""
         try:
-            result = await db.execute(
-                select(Finding).where(Finding.project_id == project_id)
-            )
-            findings = result.scalars().all()
-            
-            if not findings:
+            from app.models.assessment import Assessment
+            from app.services.flow_engine import FlowEngine
+
+            assessment = (await db.execute(
+                select(Assessment)
+                .where(Assessment.project_id == project_id)
+                .order_by(Assessment.created_at.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+            if not assessment:
                 return
-            
-            passed = sum(1 for f in findings if f.judgment and f.judgment.value == "pass")
-            total = len(findings)
-            
-            score = int((passed / total) * 100) if total > 0 else 0
-            
-            result = await db.execute(
-                select(Project).where(Project.id == project_id)
-            )
-            project = result.scalar_one_or_none()
-            
-            if project:
-                project.compliance_score = score
-                await db.commit()
-                logger.info(f"Project {project_id} compliance score updated: {score}")
-            
+
+            engine = FlowEngine(db)
+            await engine._sync_project_assessment(assessment)
+            await db.commit()
+            logger.info("Project %s compliance score recalculated by Flow Engine", project_id)
         except Exception as e:
             logger.error(f"Failed to calculate score for project {project_id}: {e}", exc_info=True)
             await db.rollback()

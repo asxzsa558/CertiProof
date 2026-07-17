@@ -6,7 +6,7 @@ from app.models.asset import Asset, AssetType, VerificationStatus, VerificationM
 from app.models.scan_task import ScanTask, ScanTaskType, ScanTaskStatus, TriggeredBy
 from app.models.finding import Finding, Severity, Judgment, JudgmentEngine, FindingStatus
 from app.models.evidence import Evidence, EvidenceType
-from app.models.remediation import RemediationTicket, RemediationStatus
+from app.models.verification import FindingEvent, VerificationItem, VerificationOutcome, VerificationRun, VerificationRunStatus
 from app.models.monitoring import ScheduledScan, ScanHistory, ScheduleFrequency
 from app.models.change_snapshot import ChangeSnapshot
 from app.models.model_config import ModelProvider, ModelConfig, ModelUsage, ProviderType
@@ -20,6 +20,7 @@ from app.models.assessment import (
 from app.models.config import SystemConfig
 from app.models.questionnaire import QuestionnaireRecord
 from app.models.audit import AuditEvent
+from app.models.report import ReportArtifact
 from app.models.document_knowledge import (
     KnowledgeGraphRevision,
     DocumentAnalysisRun,
@@ -59,8 +60,11 @@ __all__ = [
     "FindingStatus",
     "Evidence",
     "EvidenceType",
-    "RemediationTicket",
-    "RemediationStatus",
+    "VerificationRun",
+    "VerificationRunStatus",
+    "VerificationItem",
+    "VerificationOutcome",
+    "FindingEvent",
     "ScheduledScan",
     "ScanHistory",
     "ScheduleFrequency",
@@ -84,6 +88,7 @@ __all__ = [
     "FlowEvent",
     "QuestionnaireRecord",
     "AuditEvent",
+    "ReportArtifact",
     "KnowledgeGraphRevision",
     "DocumentAnalysisRun",
     "DocumentFile",

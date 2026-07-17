@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons'
 import api from '../services/api'
 import { scanTaskConclusion, scanTaskName, scanTaskSource, scanTaskTarget } from '../components/toolCatalog'
+import { severityLabel } from '../components/resultRendererUtils'
 import './ResultDetailPage.css'
 
 const { Header, Content } = Layout
@@ -101,7 +102,7 @@ function ResultDetailPage() {
       key: 'severity',
       render: (severity) => (
         <Tag color={getSeverityColor(severity)}>
-          {severity.toUpperCase()}
+          {severityLabel(severity)}
         </Tag>
       ),
     },
@@ -244,7 +245,7 @@ function ResultDetailPage() {
           {/* 发现列表 */}
           <Card title="发现详情">
             {summary.findings.length === 0 ? (
-              <Empty description={conclusion.key === 'warning' ? '本次未形成风险发现，但存在未完成检测，请查看上方说明' : '本次未发现安全问题'} />
+              <Empty description={conclusion.key === 'warning' ? '本次未形成风险发现，但存在未完成检测，请查看上方说明' : conclusion.key === 'skipped' ? '目标未启用该类服务，本项不适用' : '本次未发现安全问题'} />
             ) : (
               <Table
                 columns={findingColumns}

@@ -2,6 +2,7 @@
 Diagnostics API - 诊断和连通性测试
 """
 
+import asyncio
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,6 +23,31 @@ from app.services.knowledge_graph import knowledge_graph
 import httpx
 
 router = APIRouter(prefix="/diagnostics", tags=["Diagnostics"])
+
+
+def _diagnostic_status(payload: dict) -> str:
+    declared = payload.get("status")
+    if declared in {"healthy", "ready", "lazy"}:
+        return "healthy"
+    if declared in {"degraded", "fallback"}:
+        return "degraded"
+    return "unhealthy"
+
+
+def _overall_diagnostic_status(results: dict[str, dict]) -> str:
+    core_statuses = {
+        results.get(name, {}).get("status", "unhealthy")
+        for name in ("mcp_gateway", "gateway_routes")
+    }
+    if "unhealthy" in core_statuses:
+        return "unhealthy"
+    statuses = {result.get("status") for result in results.values()}
+    return "degraded" if statuses & {"degraded", "unhealthy"} else "healthy"
+
+
+def _diagnostic_error(exc: Exception) -> str:
+    detail = str(exc).strip()
+    return f"{type(exc).__name__}: {detail or '请求超时或连接被中断'}"
 
 
 @router.get("/operations")
@@ -50,7 +76,7 @@ async def get_operations_snapshot(
     for scan in scans:
         status_name = scan.status.value if hasattr(scan.status, "value") else str(scan.status)
         status_counts[status_name] = status_counts.get(status_name, 0) + 1
-        control = scan.control_state or status_name
+        control = scan.effective_control_state
         control_counts[control] = control_counts.get(control, 0) + 1
     terminal = status_counts.get("completed", 0) + status_counts.get("failed", 0) + status_counts.get("cancelled", 0)
     failures = status_counts.get("failed", 0) + status_counts.get("cancelled", 0)
@@ -166,36 +192,31 @@ async def test_mcp_health(
     }
     
     async with httpx.AsyncClient(timeout=10.0) as client:
-        for name, base_url in services.items():
+        async def check_service(name: str, base_url: str) -> tuple[str, dict]:
             try:
                 response = await client.get(f"{base_url}/health")
                 if response.status_code == 200:
-                    results[name] = {"status": "healthy", "details": response.json()}
-                else:
-                    results[name] = {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
+                    payload = response.json()
+                    return name, {"status": _diagnostic_status(payload), "details": payload}
+                return name, {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
             except Exception as e:
-                results[name] = {"status": "unhealthy", "error": str(e)}
+                return name, {"status": "unhealthy", "error": _diagnostic_error(e)}
 
-        try:
-            response = await client.get("http://mcp-gateway:9000/tools")
-            if response.status_code == 200:
-                results["gateway_routes"] = {
-                    "status": "healthy",
-                    "details": response.json(),
-                }
-            else:
-                results["gateway_routes"] = {
-                    "status": "unhealthy",
-                    "error": f"HTTP {response.status_code}",
-                }
-        except Exception as e:
-            results["gateway_routes"] = {"status": "unhealthy", "error": str(e)}
-    
-    # 判断整体状态
-    all_healthy = all(r.get("status") == "healthy" for r in results.values())
+        async def check_routes() -> tuple[str, dict]:
+            try:
+                response = await client.get("http://mcp-gateway:9000/tools")
+                if response.status_code == 200:
+                    return "gateway_routes", {"status": "healthy", "details": response.json()}
+                return "gateway_routes", {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
+            except Exception as e:
+                return "gateway_routes", {"status": "unhealthy", "error": _diagnostic_error(e)}
+
+        checks = [check_service(name, base_url) for name, base_url in services.items()]
+        checks.append(check_routes())
+        results.update(dict(await asyncio.gather(*checks)))
     
     return {
-        "status": "healthy" if all_healthy else "degraded",
+        "status": _overall_diagnostic_status(results),
         "services": results,
     }
 

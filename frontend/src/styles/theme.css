@@ -696,6 +696,20 @@ body::before {
   letter-spacing: 1px !important;
 }
 
+.ant-modal-confirm .ant-modal-confirm-title {
+  color: var(--text-primary) !important;
+}
+
+.ant-modal-confirm .ant-modal-confirm-content {
+  color: var(--text-secondary) !important;
+}
+
+.ant-modal-confirm .ant-btn-default {
+  color: var(--text-primary) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: var(--border-subtle) !important;
+}
+
 .ant-tooltip-inner {
   background: var(--bg-tertiary) !important;
   border: 1px solid var(--border-subtle) !important;
