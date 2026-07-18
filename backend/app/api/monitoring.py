@@ -340,12 +340,11 @@ async def execute_scheduled_scan(db: AsyncSession, scheduled_scan: ScheduledScan
         status=ScanTaskStatus.RUNNING,
         control_state="running",
         triggered_by=TriggeredBy.SCHEDULED,
+        parameters={"source": "scheduled_monitoring", "scheduled_scan_id": scheduled_scan.id},
         started_at=datetime.utcnow(),
     )
     db.add(scan_task)
     await db.flush()
-    from app.services.report_service import invalidate_report_artifacts
-    await invalidate_report_artifacts(db, scheduled_scan.project_id, "定时安全检测已产生新数据")
     
     try:
         scan_parameters = scheduled_scan.scan_parameters or {}

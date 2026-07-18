@@ -287,7 +287,10 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
     result = await db.execute(
         select(ScanTask).where(ScanTask.project_id == project_id).order_by(ScanTask.created_at.desc())
     )
-    scan_tasks = result.scalars().all()
+    scan_tasks = [
+        task for task in result.scalars().all()
+        if (task.parameters or {}).get("source") == "assessment_task"
+    ]
 
     result = await db.execute(
         select(Asset).where(Asset.project_id == project_id).order_by(Asset.id)
@@ -808,10 +811,14 @@ async def ensure_report_generation_ready(
         suffix = f"等 {len(unfinished_tasks)} 项" if len(unfinished_tasks) > 3 else ""
         raise ValueError(f"仍有正式检查未形成结论：{labels}{suffix}")
 
-    active_scans = int((await db.execute(select(func.count(ScanTask.id)).where(
+    running_scan_parameters = (await db.execute(select(ScanTask.parameters).where(
         ScanTask.project_id == project_id,
         ScanTask.status.in_([ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING]),
-    ))).scalar() or 0)
+    ))).scalars().all()
+    active_scans = sum(
+        1 for parameters in running_scan_parameters
+        if (parameters or {}).get("source") == "assessment_task"
+    )
     active_documents = int((await db.execute(select(func.count(DocumentAnalysisRun.id)).where(
         DocumentAnalysisRun.project_id == project_id,
         DocumentAnalysisRun.status.in_(["queued", "running"]),

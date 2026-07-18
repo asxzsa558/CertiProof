@@ -1983,6 +1983,53 @@
   font-size: 12px;
 }
 
+.cockpit-phase-title .cockpit-phase-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.cockpit-phase-meta > span {
+  white-space: nowrap;
+}
+
+.cockpit-pending-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 18px;
+  padding: 1px 5px;
+  color: #ffd57a;
+  border: 1px solid rgba(245, 186, 73, 0.3);
+  border-radius: 3px;
+  background: rgba(111, 72, 9, 0.18);
+}
+
+.cockpit-pending-badge b {
+  color: #ffe29a;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.cockpit-phase-title em {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  line-height: 1.05;
+  white-space: nowrap;
+}
+
+.cockpit-phase-title em b {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cockpit-phase-title em span {
+  font-size: 10px;
+}
+
 .cockpit-phase.expanded .cockpit-phase-content {
   padding: 12px 11px 11px;
   border-color: rgba(42, 167, 255, 0.68);

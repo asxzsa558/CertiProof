@@ -250,9 +250,7 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
           </div>
           {detailCollapsed && (
             <Tooltip title="展开测评详情">
-              <Button className="detail-reopen-button" type="text" icon={<RightOutlined />} onClick={() => setDetailCollapsed(false)} aria-label="展开测评详情">
-                <span>测评详情</span>
-              </Button>
+              <Button className="detail-reopen-button" type="text" icon={<RightOutlined />} onClick={() => setDetailCollapsed(false)} aria-label="展开测评详情" />
             </Tooltip>
           )}
         </main>

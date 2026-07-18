@@ -5,11 +5,8 @@
   min-height: 100vh;
   padding: 18px;
   color: #edf7ff;
-  background:
-    linear-gradient(rgba(83, 222, 241, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(83, 222, 241, 0.03) 1px, transparent 1px),
-    linear-gradient(125deg, #020611 0%, #060c1b 48%, #071120 100%);
-  background-size: 34px 34px, 34px 34px, 100% 100%;
+  background: var(--workspace-page-background);
+  background-size: var(--workspace-page-background-size);
 }
 
 .projects-topbar,

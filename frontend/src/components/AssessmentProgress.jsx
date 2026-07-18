@@ -1296,14 +1296,14 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
                     <div className="cockpit-phase-title">
                       <div>
                         <strong>{phase.name}</strong>
-                        <small>
-                          任务 {phase.completed_tasks || 0}/{phase.total_tasks || 0}
-                          {' · '}{phase.phase_id === 'remediation_verification' && Number.isFinite(openIssues)
-                            ? `待处理 ${openIssues}`
-                            : `${tracks.length} 个步骤`}
+                        <small className="cockpit-phase-meta">
+                          <span>任务 {phase.completed_tasks || 0}/{phase.total_tasks || 0}</span>
+                          {phase.phase_id === 'remediation_verification' && Number.isFinite(openIssues)
+                            ? <span className="cockpit-pending-badge"><b>{openIssues}</b> 待处理</span>
+                            : <span>{tracks.length} 个步骤</span>}
                         </small>
                       </div>
-                      <em>{`${Math.round(phaseProgress)}% · ${phaseStatus.text}`}</em>
+                      <em><b>{Math.round(phaseProgress)}%</b><span>{phaseStatus.text}</span></em>
                     </div>
 
                     {isExpanded && (

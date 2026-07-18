@@ -496,39 +496,37 @@ function ChatPage() {
               icon={<MenuUnfoldOutlined />}
               onClick={() => setSiderCollapsed(false)}
               aria-label="展开等保自查流程"
-            >
-              <span>等保流程</span>
-            </Button>
+            />
           </Tooltip>
         </div>
       )}
 
-      <Sider
-        width={360}
-        collapsed={siderCollapsed}
-        collapsedWidth={0}
-        trigger={null}
-        className="workspace-assessment-sider"
-      >
-        <div className="assessment-drawer-header">
-          <strong className="assessment-drawer-kicker">等保自查流程</strong>
-          <Tooltip title="收起测评栏">
-            <Button type="text" icon={<MenuFoldOutlined />} onClick={() => setSiderCollapsed(true)} aria-label="收起测评栏" />
-          </Tooltip>
-        </div>
-        <div className="assessment-drawer-scroll">
-          {selectedProject && (
-            <div className="assessment-drawer-flow">
-              <AssessmentProgress
-                projectId={selectedProject.id}
-                projectName={selectedProject.name}
-                variant="cockpit"
-                openIssues={workspaceSummary.open}
-              />
-            </div>
-          )}
-        </div>
-      </Sider>
+      {!siderCollapsed && (
+        <Sider
+          width={360}
+          trigger={null}
+          className="workspace-assessment-sider"
+        >
+          <div className="assessment-drawer-header">
+            <strong className="assessment-drawer-kicker">等保自查流程</strong>
+            <Tooltip title="收起测评栏">
+              <Button type="text" icon={<MenuFoldOutlined />} onClick={() => setSiderCollapsed(true)} aria-label="收起测评栏" />
+            </Tooltip>
+          </div>
+          <div className="assessment-drawer-scroll">
+            {selectedProject && (
+              <div className="assessment-drawer-flow">
+                <AssessmentProgress
+                  projectId={selectedProject.id}
+                  projectName={selectedProject.name}
+                  variant="cockpit"
+                  openIssues={workspaceSummary.open}
+                />
+              </div>
+            )}
+          </div>
+        </Sider>
+      )}
 
       <Layout className="chat-main-layout">
         <Content className="chat-page-content">

@@ -183,6 +183,7 @@ class Orchestrator:
             status=status,
             triggered_by=TriggeredBy.MANUAL,
             parameters={
+                "source": "interactive",
                 "plan": plan,
                 "orchestrator_task_id": task_id,
                 "user_id": user_id,
@@ -204,8 +205,6 @@ class Orchestrator:
             started_at=datetime.utcnow() if status == ScanTaskStatus.RUNNING else None,
         )
         db.add(scan_task)
-        from app.services.report_service import invalidate_report_artifacts
-        await invalidate_report_artifacts(db, project_id, "已发起新的安全检测")
         await db.commit()
         await db.refresh(scan_task)
         return scan_task.id
@@ -1048,10 +1047,6 @@ class Orchestrator:
                         "failed_count": execution_result.get("failed_count", 0),
                     },
                 )
-
-                # Any new technical fact may affect an assessment control.
-                if project_id:
-                    await self._calculate_and_update_score(async_db, project_id)
 
                 # 记录项目记忆
                 if project_id:

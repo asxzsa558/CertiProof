@@ -10,6 +10,7 @@ import {
   FolderOutlined,
   FileTextOutlined,
   PaperClipOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import VeriSureLogo from './VeriSureLogo'
@@ -1620,6 +1621,17 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
             </Tooltip>
             <Tooltip title="输入快捷命令">
               <Button type="text" onClick={openSlashPalette} aria-label="输入快捷命令">/</Button>
+            </Tooltip>
+            <Tooltip title="打开快捷指令">
+              <Button
+                type="text"
+                className="composer-shortcut-button"
+                icon={<ThunderboltOutlined />}
+                onClick={openSlashPalette}
+                aria-label="打开快捷指令"
+              >
+                快捷指令
+              </Button>
             </Tooltip>
           </div>
           <TextArea

@@ -1,6 +1,7 @@
 .model-settings-layout {
   min-height: 100vh;
-  background: var(--bg-primary);
+  background: var(--workspace-page-background) !important;
+  background-size: var(--workspace-page-background-size);
 }
 
 .model-settings-header {

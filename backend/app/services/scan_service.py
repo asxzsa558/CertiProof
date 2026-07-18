@@ -63,6 +63,8 @@ class ScanService:
                 raise ValueError("Asset not found")
         
         # Create scan task
+        persisted_parameters = redact_sensitive(parameters or {})
+        persisted_parameters.setdefault("source", "interactive")
         scan_task = ScanTask(
             project_id=project_id,
             asset_id=asset_id,
@@ -70,11 +72,9 @@ class ScanService:
             status=ScanTaskStatus.PENDING,
             control_state="queued",
             triggered_by=TriggeredBy.MANUAL,
-            parameters=redact_sensitive(parameters),
+            parameters=persisted_parameters,
         )
         db.add(scan_task)
-        from app.services.report_service import invalidate_report_artifacts
-        await invalidate_report_artifacts(db, project_id, "已发起新的安全检测")
         await db.commit()
         await db.refresh(scan_task)
         

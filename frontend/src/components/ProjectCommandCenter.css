@@ -2390,23 +2390,17 @@ body.command-center-active::before {
   top: 50%;
   right: 0;
   z-index: 20;
-  display: flex;
+  display: grid;
   width: 34px;
-  height: 126px;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 4px;
+  height: 72px;
+  place-items: center;
+  padding: 0;
   color: #9defff;
   border: 1px solid rgba(67, 153, 188, 0.34);
   border-right: 0;
   border-radius: 4px 0 0 4px;
   background: #091721;
   transform: translateY(-50%);
-}
-
-.detail-reopen-button.ant-btn > span:not(.anticon):not(.ant-btn-icon) {
-  writing-mode: vertical-rl;
-  letter-spacing: 2px;
 }
 
 @media (max-width: 1680px) {

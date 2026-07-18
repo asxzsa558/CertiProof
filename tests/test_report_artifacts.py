@@ -9,12 +9,15 @@ from app.models.assessment import Assessment, FlowTemplate, PhaseInstance, TaskI
 from app.models.organization import Organization
 from app.models.project import Project
 from app.models.report import ReportArtifact
+from app.models.scan_task import ScanTask, ScanTaskStatus, ScanTaskType, TriggeredBy
 from app.models.user import User
+from app.orchestrator.orchestrator import Orchestrator
 from app.services.file_storage import file_storage
 from app.services.report_service import (
     _asset_verification_badge,
     create_report_artifact,
     ensure_report_generation_ready,
+    generate_json_report,
     get_latest_report_artifact,
     get_report_artifact_version,
     invalidate_report_artifacts,
@@ -142,6 +145,91 @@ def test_report_artifact_is_versioned_and_invalidated(tmp_path):
         finally:
             file_storage.base_path = previous_path
             await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_interactive_scan_does_not_invalidate_current_report(tmp_path):
+    async def run():
+        engine, session_factory = await _database()
+        previous_path = file_storage.base_path
+        file_storage.base_path = tmp_path
+        try:
+            async with session_factory() as db:
+                user, project, assessment, report_phase, report_task = await _assessment(db)
+                artifact = await create_report_artifact(
+                    db,
+                    project_id=project.id,
+                    assessment_id=assessment.id,
+                    task_id=report_task.id,
+                    generated_by=user.id,
+                )
+                report_phase.status = "completed"
+                report_phase.progress = 100
+                report_phase.completed_tasks = report_phase.total_tasks
+                report_task.status = "completed"
+                assessment.status = "completed"
+                assessment.progress = 100
+                assessment.completed_phases = assessment.total_phases
+                await db.commit()
+
+                scan_task_id = await Orchestrator()._create_scan_task_record(
+                    db,
+                    project.id,
+                    [{"capability": "scan_ports", "parameters": {"target": "127.0.0.1"}}],
+                    "interactive-test",
+                    user_id=user.id,
+                    user_input="扫描端口",
+                )
+
+                assert scan_task_id is not None
+                assert artifact.status == "current"
+                assert report_phase.status == "completed"
+                assert report_task.status == "completed"
+                assert assessment.progress == 100
+                scan_task = await db.get(ScanTask, scan_task_id)
+                assert scan_task.parameters["source"] == "interactive"
+        finally:
+            file_storage.base_path = previous_path
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_report_gate_and_snapshot_ignore_independent_scans():
+    async def run():
+        engine, session_factory = await _database()
+        async with session_factory() as db:
+            user, project, assessment, _, _ = await _assessment(db)
+            interactive = ScanTask(
+                project_id=project.id,
+                task_type=ScanTaskType.TARGETED,
+                status=ScanTaskStatus.RUNNING,
+                triggered_by=TriggeredBy.MANUAL,
+                parameters={"source": "interactive", "target": "127.0.0.1"},
+            )
+            assessment_scan = ScanTask(
+                project_id=project.id,
+                task_type=ScanTaskType.TARGETED,
+                status=ScanTaskStatus.COMPLETED,
+                triggered_by=TriggeredBy.MANUAL,
+                parameters={"source": "assessment_task", "target": "127.0.0.1"},
+            )
+            db.add_all([interactive, assessment_scan])
+            await db.commit()
+
+            await ensure_report_generation_ready(db, project.id, assessment.id)
+            report = await generate_json_report(db, project.id)
+            assert [task["id"] for task in report["scan_tasks"]] == [assessment_scan.id]
+
+            assessment_scan.status = ScanTaskStatus.RUNNING
+            await db.commit()
+            try:
+                await ensure_report_generation_ready(db, project.id, assessment.id)
+                raise AssertionError("running assessment scans must block the report")
+            except ValueError as exc:
+                assert "技术检测 1 个" in str(exc)
+        await engine.dispose()
 
     asyncio.run(run())
 

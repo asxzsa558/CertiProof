@@ -2430,6 +2430,15 @@
   font-size: 16px;
 }
 
+.cockpit-composer-tools .composer-shortcut-button.ant-btn {
+  width: auto;
+  min-width: 84px;
+  padding: 0 9px;
+  gap: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .cockpit-input-row .workspace-input.ant-input,
 .command-center-shell .chat-glass-frame .cockpit-input-row .workspace-input.ant-input {
   min-height: 80px !important;
