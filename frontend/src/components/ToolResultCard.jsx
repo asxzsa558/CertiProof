@@ -55,7 +55,6 @@ const TOOL_ICONS = {
   
   // 查询工具
   view_open_ports: <MonitorOutlined />,
-  view_scan_results: <FileTextOutlined />,
   view_vulnerabilities: <CloseCircleFilled />,
   view_findings: <FileTextOutlined />,
   view_compliance_score: <CheckCircleFilled />,
@@ -118,7 +117,6 @@ const TOOL_NAMES = {
   windows_security_scan: 'Windows/AD/SMB 检测',
   ping_host: 'Ping 检测',
   view_open_ports: '查看开放端口',
-  view_scan_results: '查看扫描结果',
   view_vulnerabilities: '查看漏洞',
   view_findings: '查看合规发现',
   view_compliance_score: '查看合规评分',
@@ -163,7 +161,7 @@ const ToolResultCard = ({ tool, status, summary, details, copyText, defaultExpan
   // 状态配置
   const statusConfig = {
     success: { color: 'success', text: '成功', icon: <CheckCircleFilled /> },
-    warning: { color: 'warning', text: '未完成/无法判定', icon: <ExclamationCircleFilled /> },
+    warning: { color: 'warning', text: '无法判定', icon: <ExclamationCircleFilled /> },
     failed: { color: 'error', text: '失败', icon: <CloseCircleFilled /> },
     skipped: { color: 'default', text: '已跳过', icon: <ExclamationCircleFilled /> },
   }
@@ -184,7 +182,19 @@ const ToolResultCard = ({ tool, status, summary, details, copyText, defaultExpan
   return (
     <div className="tool-result-card">
       {/* 卡片头部 */}
-      <div className="tool-card-header">
+      <div
+        className={`tool-card-header ${details ? 'expandable' : ''}`}
+        role={details ? 'button' : undefined}
+        tabIndex={details ? 0 : undefined}
+        aria-expanded={details ? expanded : undefined}
+        onClick={details ? () => setExpanded(value => !value) : undefined}
+        onKeyDown={details ? (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            setExpanded(value => !value)
+          }
+        } : undefined}
+      >
         <div className="tool-info">
           <span className="tool-icon">{toolIcon}</span>
           <span className="tool-name">{toolName}</span>
@@ -197,7 +207,10 @@ const ToolResultCard = ({ tool, status, summary, details, copyText, defaultExpan
             type="text"
             size="small"
             icon={<CopyOutlined />}
-            onClick={handleCopy}
+            onClick={(event) => {
+              event.stopPropagation()
+              handleCopy()
+            }}
           >
             复制
           </Button>
@@ -206,7 +219,10 @@ const ToolResultCard = ({ tool, status, summary, details, copyText, defaultExpan
               type="text"
               size="small"
               icon={expanded ? <UpOutlined /> : <DownOutlined />}
-              onClick={() => setExpanded(!expanded)}
+              onClick={(event) => {
+                event.stopPropagation()
+                setExpanded(!expanded)
+              }}
             >
               {expanded ? '收起' : '展开'}
             </Button>

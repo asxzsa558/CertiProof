@@ -19,9 +19,40 @@ import { safeJson, inferResultState, readableFindingText, severityLabel } from '
 import { createPortColumns } from './resultColumns'
 
 const portColumns = createPortColumns()
+const assetTypeLabels = { ip: 'IP', domain: '域名', cloud_resource: '云资源' }
+const verificationLabels = { verified: '已验证', pending: '待验证', failed: '验证失败' }
+const assetColumns = [
+  {
+    title: '资产名称',
+    dataIndex: 'name',
+    key: 'name',
+    render: value => value || '未命名资产',
+  },
+  {
+    title: '类型',
+    dataIndex: 'type',
+    key: 'type',
+    width: 90,
+    render: value => assetTypeLabels[value] || value || '资产',
+  },
+  {
+    title: '地址',
+    dataIndex: 'value',
+    key: 'value',
+  },
+  {
+    title: '验证状态',
+    dataIndex: 'verification_status',
+    key: 'verification_status',
+    width: 100,
+    render: value => verificationLabels[value] || value || '状态未知',
+  },
+]
 
 const renderResultMessage = (msg, options = {}) => {
   const scanResults = msg.scanResults || {}
+  const queryResult = scanResults.query_result || null
+  const listedAssets = queryResult?.capability === 'list_assets' ? (queryResult.assets || []) : []
   const openPorts = scanResults.open_ports || []
   const filteredPorts = scanResults.filtered_ports || []
   const vulnerabilities = scanResults.vulnerabilities || []
@@ -44,14 +75,20 @@ const renderResultMessage = (msg, options = {}) => {
   // 从 asset_results 提取工具类型和状态
   const assetResults = scanResults.asset_results || {}
   const firstAsset = Object.values(assetResults)[0]
-  const tool = firstAsset?.capability || 'scan_ports'
-  const status = inferResultState(firstAsset || scanResults).key
-  const error = firstAsset?.error
+  const tool = queryResult?.capability || firstAsset?.capability || 'scan_ports'
+  const status = inferResultState(queryResult || firstAsset || scanResults).key
+  const error = queryResult?.error || firstAsset?.error
   const firstResult = firstAsset?.result || {}
   const isVulnerabilityScan = ['nikto_scan', 'scan_vulnerabilities'].includes(tool)
-  const vulnerabilityScanIncomplete = firstResult.scan_completed === false
+  const vulnerabilityScanIncomplete = firstResult.scan_completed === false || (
+    tool === 'scan_vulnerabilities' &&
+    firstResult.reachable !== true &&
+    !(firstResult.findings || []).length
+  )
   const resultTarget = Object.keys(assetResults)[0] || firstAsset?.result?.target || scanResults.target || scanResults.asset || ''
-  const displayQuality = vulnerabilityScanIncomplete
+  const displayQuality = queryResult
+    ? {}
+    : vulnerabilityScanIncomplete
     ? {
         ...quality,
         verdict: 'conditional',
@@ -72,6 +109,17 @@ const renderResultMessage = (msg, options = {}) => {
   // 构建摘要内容
   const summary = (
     <div className="result-summary">
+      {queryResult?.capability === 'list_assets' && (
+        <div className="summary-item">
+          <div className="summary-icon" style={{ background: 'rgba(14, 165, 233, 0.2)' }}>
+            <DatabaseOutlined style={{ color: '#38bdf8' }} />
+          </div>
+          <div className="summary-content">
+            <div className="summary-title">项目资产</div>
+            <div className="summary-value">{listedAssets.length} 个</div>
+          </div>
+        </div>
+      )}
       {openPorts.length > 0 && (
         <div className="summary-item">
           <div className="summary-icon" style={{ background: 'rgba(59, 130, 246, 0.2)' }}>
@@ -210,6 +258,22 @@ const renderResultMessage = (msg, options = {}) => {
   // 构建详情内容
   const details = (
     <>
+      {queryResult?.capability === 'list_assets' && (
+        <div className="result-details-table">
+          <div className="table-header">
+            <span>项目资产清单</span>
+          </div>
+          <Table
+            dataSource={listedAssets.map(asset => ({ ...asset, key: asset.id || asset.value }))}
+            columns={assetColumns}
+            pagination={listedAssets.length > 10 ? { defaultPageSize: 10, showSizeChanger: true } : false}
+            locale={{ emptyText: '当前项目暂无资产' }}
+            size="small"
+            className="port-table"
+          />
+        </div>
+      )}
+
       {(resultTarget || tool) && (
         <div className="result-details-section result-identity-section">
           {resultTarget && (
@@ -233,7 +297,7 @@ const renderResultMessage = (msg, options = {}) => {
           <div className="baseline-target-item">
             <span>资产状态</span>
             <span className="text-muted">
-              成功 {displayQuality.success || 0}，未完成/不可判定 {displayQuality.warning || 0}，失败 {displayQuality.failed || 0}
+              成功 {displayQuality.success || 0}，无法判定 {displayQuality.warning || 0}，失败 {displayQuality.failed || 0}
             </span>
           </div>
           <div className="baseline-target-item">
@@ -525,7 +589,9 @@ const renderResultMessage = (msg, options = {}) => {
   return (
     <div className="scan-animation-fade-in">
       <div className="message-bubble assistant" style={{ whiteSpace: 'pre-wrap' }}>
-        {msg.content}
+        {vulnerabilityScanIncomplete
+          ? `漏洞扫描未能验证目标 ${resultTarget || ''} 是否可达，本次不能得出“未发现漏洞”的结论。`
+          : msg.content}
       </div>
 
       <ToolResultCard

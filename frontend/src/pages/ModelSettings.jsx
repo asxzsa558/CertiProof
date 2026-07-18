@@ -29,6 +29,8 @@ function ModelSettings() {
   const [editingModel, setEditingModel] = useState(null)
   const [providerForm] = Form.useForm()
   const [modelForm] = Form.useForm()
+  const lastProjectId = localStorage.getItem('lastProjectId')
+  const returnToWorkspace = () => navigate(lastProjectId ? `/projects/${lastProjectId}` : '/projects')
 
   useEffect(() => {
     fetchData()
@@ -287,9 +289,11 @@ function ModelSettings() {
           <Button
             type="text"
             icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/')}
+            onClick={returnToWorkspace}
             className="back-btn"
-          />
+          >
+            返回项目对话
+          </Button>
           <h1>模型配置</h1>
         </div>
       </Header>

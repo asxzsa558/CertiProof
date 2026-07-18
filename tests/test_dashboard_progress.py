@@ -4,15 +4,18 @@ from datetime import datetime, timedelta
 from app.api.dashboard import _matrix_progress, _tool_health
 
 
-def test_matrix_progress_uses_task_completion_when_assessment_progress_is_stale():
-    assessment = SimpleNamespace(progress=0)
-    phases = [SimpleNamespace(status="active", total_tasks=27, completed_tasks=7, progress=0)]
+def test_matrix_progress_matches_authoritative_phase_progress():
+    assessment = SimpleNamespace(progress=70)
+    phases = [
+        SimpleNamespace(status="completed", total_tasks=27, completed_tasks=18, progress=67),
+        SimpleNamespace(status="active", total_tasks=10, completed_tasks=4, progress=40),
+    ]
 
-    assert _matrix_progress(assessment, phases, 26) == 26
+    assert _matrix_progress(assessment, phases, 55) == 70
 
 
-def test_matrix_progress_rejects_stale_completed_assessment_progress():
-    assessment = SimpleNamespace(progress=100)
+def test_matrix_progress_does_not_mix_in_task_completion_rate():
+    assessment = SimpleNamespace(progress=88)
     phases = [SimpleNamespace(status="active", total_tasks=25, completed_tasks=22, progress=88)]
 
     assert _matrix_progress(assessment, phases, 88) == 88

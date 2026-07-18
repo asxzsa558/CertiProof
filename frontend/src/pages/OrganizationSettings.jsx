@@ -94,6 +94,7 @@ function OrgPanel({ label, value, sub, accentColor }) {
 
 export default function OrganizationSettings() {
   const navigate = useNavigate()
+  const lastProjectId = localStorage.getItem('lastProjectId')
   const [loading, setLoading] = useState(true)
   const [org, setOrg] = useState(null)
   const [members, setMembers] = useState([])
@@ -266,8 +267,8 @@ export default function OrganizationSettings() {
       <div className="org-bg-vignette" />
 
       <header className="org-header">
-        <button className="org-back-btn" onClick={() => navigate('/dashboard')}>
-          <ArrowLeftOutlined /> 返回 Dashboard
+        <button className="org-back-btn" onClick={() => navigate(lastProjectId ? `/projects/${lastProjectId}` : '/dashboard')}>
+          <ArrowLeftOutlined /> {lastProjectId ? '返回项目对话' : '返回 Dashboard'}
         </button>
         <div className="org-header-title">
           <VeriSureLogo size={28} />

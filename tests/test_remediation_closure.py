@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.assessment import Assessment, FlowTemplate, PhaseInstance, TaskInstance
+from app.models.assessment_type import ProjectAssessment
 from app.models.document_knowledge import DocumentFile
 from app.models.finding import Finding, FindingStatus, Judgment, JudgmentEngine, Severity
 from app.models.organization import Organization
@@ -189,6 +190,149 @@ def test_single_task_rerun_recalculates_project_score_after_completion():
             await db.refresh(project)
             assert project.compliance_score == 50.0
 
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_failed_task_deducts_score_instead_of_suppressing_it():
+    async def run():
+        engine, session_factory = await _database()
+        async with session_factory() as db:
+            _user, project, phases = await _project(db)
+            assessment = await db.get(Assessment, phases["field_assessment"].assessment_id)
+            db.add_all([
+                TaskInstance(
+                    phase_id=phases["field_assessment"].id,
+                    task_type="database_security_assessment",
+                    name="数据库安全检测",
+                    status="completed",
+                ),
+                TaskInstance(
+                    phase_id=phases["field_assessment"].id,
+                    task_type="ssh_baseline_assessment",
+                    name="SSH/主机基线核查",
+                    status="failed",
+                    result={
+                        "error": "缺少凭据",
+                        "asset_results": {"192.0.2.10": {"outcome": "not_applicable"}},
+                    },
+                ),
+            ])
+            await db.commit()
+
+            metrics = await FlowEngine(db)._calculate_compliance_metrics(assessment)
+
+            assert metrics == {
+                "score": 50.0,
+                "coverage": 50.0,
+                "reliable": 1,
+                "unable": 1,
+                "not_applicable": 0,
+            }
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_not_applicable_task_is_excluded_from_score():
+    async def run():
+        engine, session_factory = await _database()
+        async with session_factory() as db:
+            _user, project, phases = await _project(db)
+            assessment = await db.get(Assessment, phases["field_assessment"].assessment_id)
+            db.add_all([
+                TaskInstance(
+                    phase_id=phases["field_assessment"].id,
+                    task_type="web_vulnerability_assessment",
+                    name="Web 漏洞扫描",
+                    status="completed",
+                ),
+                TaskInstance(
+                    phase_id=phases["field_assessment"].id,
+                    task_type="database_security_assessment",
+                    name="数据库安全检测",
+                    status="completed",
+                    result={"asset_results": {"192.0.2.10": {"outcome": "not_applicable"}}},
+                ),
+                TaskInstance(
+                    phase_id=phases["field_assessment"].id,
+                    task_type="windows_ad_smb_assessment",
+                    name="Windows/AD/SMB 检测",
+                    status="completed",
+                    result={
+                        "asset_results": {
+                            "192.0.2.10": {"outcome": "not_applicable"},
+                            "192.0.2.11": {"outcome": "completed"},
+                        },
+                    },
+                ),
+            ])
+            await db.commit()
+
+            metrics = await FlowEngine(db)._calculate_compliance_metrics(assessment)
+
+            assert metrics == {
+                "score": 100.0,
+                "coverage": 100.0,
+                "reliable": 2,
+                "unable": 0,
+                "not_applicable": 1,
+            }
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_older_assessment_cannot_overwrite_latest_project_score():
+    async def run():
+        engine, session_factory = await _database()
+        async with session_factory() as db:
+            _user, project, phases = await _project(db)
+            older = await db.get(Assessment, phases["field_assessment"].assessment_id)
+            newer = Assessment(
+                project_id=project.id,
+                template_id=older.template_id,
+                name="Latest",
+                assessment_level=3,
+                status="completed",
+                total_phases=1,
+                completed_phases=1,
+                progress=100,
+            )
+            db.add(newer)
+            await db.flush()
+            phase = PhaseInstance(
+                assessment_id=newer.id,
+                phase_id="field_assessment",
+                name="现场测评",
+                order=1,
+                status="completed",
+                progress=100,
+            )
+            db.add(phase)
+            await db.flush()
+            db.add(TaskInstance(
+                phase_id=phase.id,
+                task_type="database_security_assessment",
+                name="数据库安全检测",
+                status="completed",
+            ))
+            await db.commit()
+
+            flow = FlowEngine(db)
+            await flow._sync_project_assessment(newer)
+            await flow._sync_project_assessment(older)
+            await db.commit()
+            await db.refresh(project)
+
+            assert project.compliance_score == 100.0
+            project_assessment = (await db.execute(select(ProjectAssessment).where(
+                ProjectAssessment.project_id == project.id,
+            ))).scalar_one()
+            assert project_assessment.status == "completed"
+            assert project_assessment.progress == 100
+            assert project_assessment.score == 100.0
         await engine.dispose()
 
     asyncio.run(run())

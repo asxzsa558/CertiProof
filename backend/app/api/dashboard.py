@@ -22,7 +22,6 @@ from app.schemas.dashboard import (
     DashboardAssessmentType,
     DashboardSummary,
 )
-
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
@@ -320,20 +319,9 @@ def _topology_services(summary):
     return services[:6]
 
 
-def _matrix_progress(assessment, phases, task_completion_rate):
-    """Use live phase/task state when the persisted assessment percentage is stale."""
-    phase_progress = []
-    for phase in phases:
-        status = _enum_value(phase.status)
-        if phase.total_tasks:
-            phase_progress.append(round(((phase.completed_tasks or 0) / phase.total_tasks) * 100))
-        elif status in ("completed", "skipped"):
-            phase_progress.append(100)
-        else:
-            phase_progress.append(round(float(phase.progress or 0)))
-
-    derived_progress = round(sum(phase_progress) / len(phase_progress)) if phase_progress else 0
-    return min(100, max(derived_progress, task_completion_rate))
+def _matrix_progress(assessment, _phases, _task_completion_rate):
+    """Read the Flow Engine percentage shown by the project assessment page."""
+    return round(float(assessment.progress or 0), 1)
 
 
 TOOL_GROUPS = (
@@ -506,7 +494,7 @@ async def get_organization_command_dashboard(
         assessment_result = await db.execute(
             select(Assessment)
             .where(Assessment.project_id == project.id)
-            .order_by(Assessment.updated_at.desc())
+            .order_by(Assessment.created_at.desc(), Assessment.id.desc())
             .limit(1)
         )
         assessment = assessment_result.scalar_one_or_none()

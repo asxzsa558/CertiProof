@@ -22,11 +22,19 @@
 }
 
 .model-settings-header .back-btn {
+  width: auto !important;
+  height: 34px !important;
+  padding: 0 12px !important;
   color: rgba(255, 255, 255, 0.6) !important;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 6px;
+  font-size: 12px;
 }
 
 .model-settings-header .back-btn:hover {
   color: #fff !important;
+  border-color: rgba(34, 211, 238, 0.32) !important;
+  background: rgba(34, 211, 238, 0.08) !important;
 }
 
 .model-settings-header h1 {

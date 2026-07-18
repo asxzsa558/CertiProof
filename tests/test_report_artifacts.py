@@ -16,8 +16,11 @@ from app.services.report_service import (
     create_report_artifact,
     ensure_report_generation_ready,
     get_latest_report_artifact,
+    get_report_artifact_version,
     invalidate_report_artifacts,
+    list_report_artifacts,
     read_report_artifact_html,
+    report_artifact_payload,
 )
 
 
@@ -107,6 +110,7 @@ def test_report_artifact_is_versioned_and_invalidated(tmp_path):
                 assert first.version == 1
                 assert first.status == "current"
                 assert first.snapshot["assessment"]["progress"] == 100
+                assert first.snapshot["score_metrics"]["score"] is None
                 assert "HTML / V1" in html
                 assert "流程进度：100%" in html
 
@@ -130,6 +134,11 @@ def test_report_artifact_is_versioned_and_invalidated(tmp_path):
                 assert (await get_latest_report_artifact(db, project.id)).id == second.id
                 artifacts = list((await db.execute(select(ReportArtifact).order_by(ReportArtifact.version))).scalars())
                 assert [(item.version, item.status) for item in artifacts] == [(1, "stale"), (2, "current")]
+                assert [item.version for item in await list_report_artifacts(db, project.id)] == [2, 1]
+                assert (await get_report_artifact_version(db, project.id, 1)).id == first.id
+                payload = report_artifact_payload(second)
+                assert payload["score"] is None
+                assert payload["coverage"] == 0.0
         finally:
             file_storage.base_path = previous_path
             await engine.dispose()

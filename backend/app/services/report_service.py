@@ -616,6 +616,10 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
 def report_artifact_payload(artifact: ReportArtifact | None) -> dict:
     if not artifact:
         return {"available": False}
+    snapshot = artifact.snapshot or {}
+    project = snapshot.get("project") or {}
+    summary = snapshot.get("summary") or {}
+    score_metrics = snapshot.get("score_metrics") or {}
     return {
         "available": True,
         "id": artifact.id,
@@ -630,6 +634,13 @@ def report_artifact_payload(artifact: ReportArtifact | None) -> dict:
         "html_size": artifact.html_size,
         "generated_at": _dt(artifact.created_at),
         "invalidated_at": _dt(artifact.invalidated_at),
+        "score": project.get("compliance_score") if project.get("compliance_score") is not None else score_metrics.get("score"),
+        "coverage": score_metrics.get("coverage"),
+        "reliable": score_metrics.get("reliable"),
+        "unable": score_metrics.get("unable", summary.get("unable_scans", 0)),
+        "not_applicable": score_metrics.get("not_applicable"),
+        "open_findings": summary.get("open_findings", 0),
+        "total_findings": summary.get("total_findings", 0),
     }
 
 
@@ -643,6 +654,25 @@ async def get_latest_report_artifact(
     if assessment_id is not None:
         query = query.where(ReportArtifact.assessment_id == assessment_id)
     return (await db.execute(query.order_by(ReportArtifact.version.desc()).limit(1))).scalar_one_or_none()
+
+
+async def list_report_artifacts(db: AsyncSession, project_id: int) -> list[ReportArtifact]:
+    return list((await db.execute(
+        select(ReportArtifact)
+        .where(ReportArtifact.project_id == project_id)
+        .order_by(ReportArtifact.version.desc())
+    )).scalars().all())
+
+
+async def get_report_artifact_version(
+    db: AsyncSession,
+    project_id: int,
+    version: int,
+) -> ReportArtifact | None:
+    return (await db.execute(select(ReportArtifact).where(
+        ReportArtifact.project_id == project_id,
+        ReportArtifact.version == version,
+    ))).scalar_one_or_none()
 
 
 async def invalidate_report_artifacts(
@@ -808,7 +838,14 @@ async def create_report_artifact(
     version = int((await db.execute(select(func.max(ReportArtifact.version)).where(
         ReportArtifact.project_id == project_id
     ))).scalar() or 0) + 1
-    report = _final_report_snapshot(await generate_json_report(db, project_id), task_id, version)
+    report = await generate_json_report(db, project_id)
+    assessment = await db.get(Assessment, assessment_id)
+    if assessment:
+        from app.services.flow_engine import get_flow_engine
+        score_metrics = await get_flow_engine(db)._calculate_compliance_metrics(assessment)
+        report["score_metrics"] = score_metrics
+        report["project"]["compliance_score"] = score_metrics["score"]
+    report = _final_report_snapshot(report, task_id, version)
     html = await generate_html_report(db, project_id, report=report)
     path, digest, size = await file_storage.save_file(
         project_id,

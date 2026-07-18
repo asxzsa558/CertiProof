@@ -872,9 +872,6 @@ class ExecutionEngine:
             return await self._mac_check(parameters, user_id, project_id, db)
 
         # 查询类能力
-        elif capability_name == "view_scan_results":
-            return await self._view_scan_results(parameters, user_id, project_id, db)
-
         elif capability_name == "view_open_ports":
             return await self._view_open_ports(parameters, user_id, project_id, db)
 
@@ -1466,32 +1463,6 @@ class ExecutionEngine:
     async def _mac_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """强制访问控制检查"""
         return await self._call_ssh_checker("mac_check", parameters)
-
-    async def _view_scan_results(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
-        """查看扫描结果"""
-        # 从缓存或数据库获取最近的扫描结果
-        from app.models.context import ResultCache
-        from sqlalchemy import select
-
-        result = await db.execute(
-            select(ResultCache)
-            .where(ResultCache.user_id == user_id)
-            .where(ResultCache.project_id == project_id)
-            .order_by(ResultCache.created_at.desc())
-            .limit(5)
-        )
-        caches = result.scalars().all()
-
-        return {
-            "recent_scans": [
-                {
-                    "cache_key": c.cache_key,
-                    "result": c.result_data,
-                    "created_at": c.created_at.isoformat(),
-                }
-                for c in caches
-            ]
-        }
 
     async def _view_open_ports(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """查看开放端口 - 如果没有缓存则自动触发全端口扫描"""
@@ -2117,7 +2088,6 @@ class ExecutionEngine:
 - 全量扫描：执行完整的等保合规检测
 
 📊 **数据查询**
-- 查看扫描结果
 - 查看开放端口
 - 查看漏洞列表
 - 查看合规评分

@@ -192,7 +192,7 @@ const VERIFICATION_RUN_STATUS = {
   queued: '排队中', running: '执行中', paused: '已暂停',
 }
 
-function AssessmentProgress({ projectId, projectName }) {
+function AssessmentProgress({ projectId, projectName, variant = 'default', openIssues }) {
   const [assessment, setAssessment] = useState(null)
   const [phases, setPhases] = useState([])
   const [loading, setLoading] = useState(false)
@@ -1231,9 +1231,155 @@ function AssessmentProgress({ projectId, projectName }) {
   const technicalActive = technicalQueued + technicalRunning
   const batchDocumentRunning = ['queued', 'pending', 'running'].includes(batchDocumentRun?.status)
   const completionState = COMPLETION_STATE_CONFIG[completionSummary?.completion_state] || COMPLETION_STATE_CONFIG.needs_remediation
+  const cockpitTracks = {
+    gap_analysis: ['文档合规检查', '基础技术检测', '差距结果汇总'],
+    field_assessment: ['全资产技术检测', '专项安全检测', '现场结果归集'],
+    remediation_verification: ['文档整改复测', '技术问题复测', '问题处置确认'],
+    report: ['报告数据固化', 'HTML 报告生成'],
+    report_generation: ['报告数据固化', 'HTML 报告生成'],
+  }
+  const totalTasks = phases.reduce((sum, phase) => sum + Number(phase.total_tasks || 0), 0)
+  const completedTasks = phases.reduce((sum, phase) => sum + Number(phase.completed_tasks || 0), 0)
 
   return (
     <>
+      {variant === 'cockpit' ? (
+        <div className="assessment-progress-container cockpit-assessment">
+          <div className="cockpit-phase-list">
+            {phases.map((phase, index) => {
+              const isActive = phase.status === 'active'
+              const isCompleted = phase.status === 'completed'
+              const phaseStatus = phase.phase_id === 'remediation_verification' && isCompleted
+                ? { color: '#10b981', text: '本轮已完成', className: 'completed' }
+                : PHASE_STATUS_CONFIG[phase.status] || PHASE_STATUS_CONFIG.pending
+              const isSelected = selectedPhase?.id === phase.id
+              const isExpanded = isSelected || (!selectedPhase && (
+                isActive || (assessment.status === 'completed' && index === phases.length - 1)
+              ))
+              const tracks = cockpitTracks[phase.phase_id] || [phase.description || '阶段任务']
+              const phaseProgress = isCompleted ? 100 : Number(phase.progress || 0)
+
+              return (
+                <section
+                  key={phase.id}
+                  className={`cockpit-phase ${phase.status} ${isSelected ? 'selected' : ''} ${isExpanded ? 'expanded' : ''}`}
+                  onClick={() => handlePhaseClick(phase)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      handlePhaseClick(phase)
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${phase.name}，${phaseStatus.text}，点击查看与执行`}
+                >
+                  <div className="cockpit-phase-rail">
+                    <i>{isCompleted ? <CheckCircleFilled /> : index + 1}</i>
+                    {index < phases.length - 1 && <span />}
+                  </div>
+                  <div className="cockpit-phase-content">
+                    <div className="cockpit-phase-title">
+                      <div>
+                        <strong>{phase.name}</strong>
+                        <small>
+                          任务 {phase.completed_tasks || 0}/{phase.total_tasks || 0}
+                          {' · '}{phase.phase_id === 'remediation_verification' && Number.isFinite(openIssues)
+                            ? `待处理 ${openIssues}`
+                            : `${tracks.length} 个步骤`}
+                        </small>
+                      </div>
+                      <em>{`${Math.round(phaseProgress)}% · ${phaseStatus.text}`}</em>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="cockpit-phase-detail">
+                        {tracks.map((label, trackIndex) => {
+                          const trackProgress = Math.max(0, Math.min(100, phaseProgress * tracks.length - trackIndex * 100))
+                          const trackDone = trackProgress >= 100
+                          const trackActive = isActive && !trackDone && trackIndex === Math.floor((phaseProgress / 100) * tracks.length)
+                          return (
+                            <div className={trackDone ? 'done' : trackActive ? 'running' : 'pending'} key={label}>
+                              <span>{trackDone ? <CheckCircleFilled /> : TASK_TYPE_ICONS[trackIndex === 0 ? 'doc_review' : trackIndex === 1 ? 'config_check' : 'retest']}</span>
+                              <strong>{label}</strong>
+                              <small>{trackDone ? '100% · 完成' : trackActive ? `${Math.round(trackProgress)}% · 执行中` : '0% · 等待'}</small>
+                            </div>
+                          )
+                        })}
+                        <div className="cockpit-phase-actions">
+                          <Button
+                            type="primary"
+                            size="small"
+                            icon={<PlayCircleFilled />}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handlePhaseClick(phase)
+                            }}
+                          >
+                            查看与执行
+                          </Button>
+                          <Tooltip title="重置本阶段">
+                            <Button
+                              size="small"
+                              icon={<ReloadOutlined />}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                handleRestartPhase(phase.id, 'reset')
+                              }}
+                              aria-label={`重置${phase.name}`}
+                            />
+                          </Tooltip>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )
+            })}
+          </div>
+
+          <div className="cockpit-flow-summary">
+            <div>
+              <span>流程总览</span>
+              <strong>完成度 {Math.round(assessment.progress)}%</strong>
+            </div>
+            <Progress percent={Math.round(assessment.progress)} showInfo={false} />
+            <dl>
+              <div><dt>总任务</dt><dd>{totalTasks}</dd></div>
+              <div><dt>已完成</dt><dd>{completedTasks}</dd></div>
+              <div><dt>待处理</dt><dd>{Math.max(totalTasks - completedTasks, 0)}</dd></div>
+            </dl>
+          </div>
+
+          {assessment.status === 'not_started' && (
+            <Button type="primary" block icon={<PlayCircleFilled />} onClick={handleStartAssessment}>
+              开始测评
+            </Button>
+          )}
+          {assessment.status === 'completed' && (
+            <Button
+              type="primary"
+              block
+              icon={<CheckCircleFilled />}
+              onClick={async () => {
+                if (!completionSummary && assessment?.id) await fetchCompletionSummary(assessment.id)
+                setShowCompletionView(true)
+              }}
+            >
+              查看测评结果
+            </Button>
+          )}
+          <Button
+            block
+            danger
+            icon={<ReloadOutlined />}
+            onClick={() => handleRestartAssessment('reset')}
+            className="cockpit-full-reset"
+          >
+            完全重置测评
+          </Button>
+        </div>
+      ) : (
       <div className="assessment-progress-container">
         {/* Header */}
         <div className="assessment-header">
@@ -1384,6 +1530,7 @@ function AssessmentProgress({ projectId, projectName }) {
           完全重置测评
         </Button>
       </div>
+      )}
 
       {/* Completion View Modal */}
       <Modal

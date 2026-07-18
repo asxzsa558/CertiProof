@@ -84,7 +84,15 @@ const buildAssetSummary = (assetData, capability) => {
       icon: <KeyOutlined />,
     })
   }
-  if (capability === 'scan_vulnerabilities' && findings.length === 0) items.push({ label: '漏洞', value: '0 个', color: '#10b981', icon: <BugOutlined /> })
+  if (capability === 'scan_vulnerabilities' && findings.length === 0) {
+    const vulnVerified = result.scan_completed !== false && result.reachable === true
+    items.push({
+      label: '漏洞',
+      value: vulnVerified ? '0 个' : '无法判定',
+      color: vulnVerified ? '#10b981' : '#f59e0b',
+      icon: <BugOutlined />,
+    })
+  }
   if (capability === 'scan_ssl') {
     const sslDone = result.scan_completed !== false && result.reachable !== false
     items.push({ label: 'SSL 状态', value: sslDone ? '已完成' : '未完成', color: sslDone ? '#10b981' : '#f59e0b', icon: <SafetyCertificateOutlined /> })
@@ -326,11 +334,11 @@ const buildAssetDetails = (assetData, capability) => {
 
   if (capability === 'scan_vulnerabilities') {
     const durationMs = result.metadata?.duration_ms
-    const vulnDone = result.scan_completed !== false
+    const vulnDone = result.scan_completed !== false && (result.reachable === true || findings.length > 0)
     sections.push(
       <div key="nuclei-summary" className={`result-details-section ${!vulnDone || findings.length ? 'weak-password-section' : 'success-section'}`}>
         <div className={`section-title ${!vulnDone || findings.length ? 'danger' : 'success'}`}>
-          漏洞扫描：{!vulnDone ? '未完成' : findings.length ? `发现 ${findings.length} 个漏洞/发现项` : '未发现漏洞'}
+          漏洞扫描：{!vulnDone ? '无法验证目标，未形成漏洞结论' : findings.length ? `发现 ${findings.length} 个漏洞/发现项` : '未发现漏洞'}
         </div>
         <div className="baseline-target-item">
           <span>扫描目标</span>

@@ -171,6 +171,49 @@ def test_top_level_timeout_is_warning_not_clean_success(monkeypatch):
     assert scan_results["asset_results"]["192.0.2.10"]["error"] == "Web 漏洞扫描在 120 秒后超时"
 
 
+def test_list_assets_returns_deterministic_summary_and_query_result():
+    execution = {
+        "results": [{
+            "capability": "list_assets",
+            "status": "success",
+            "result": {
+                "message": "项目共有 2 个资产",
+                "assets": [
+                    {
+                        "id": 1,
+                        "name": "业务入口",
+                        "type": "domain",
+                        "value": "example.test",
+                        "verification_status": "verified",
+                    },
+                    {
+                        "id": 2,
+                        "name": "",
+                        "type": "ip",
+                        "value": "192.0.2.10",
+                        "verification_status": "pending",
+                    },
+                ],
+            },
+        }],
+        "success_count": 1,
+        "warning_count": 0,
+        "failed_count": 0,
+    }
+    orchestrator = Orchestrator()
+
+    description = orchestrator._generate_fallback_description(execution)
+    scan_results = orchestrator._extract_scan_results_from_execution(execution)
+
+    assert "当前项目共有 2 个资产" in description
+    assert "业务入口（域名）：example.test，已验证" in description
+    assert "未命名资产（IP）：192.0.2.10，待验证" in description
+    assert scan_results["query_result"]["capability"] == "list_assets"
+    assert len(scan_results["query_result"]["assets"]) == 2
+    assert scan_results["asset_results"] == {}
+    assert scan_results["quality"]["total_assets"] == 2
+
+
 def test_web_tool_timeout_contract_is_warning():
     path = Path(__file__).resolve().parents[1] / "mcp-servers" / "web-tools" / "server.py"
     spec = importlib.util.spec_from_file_location("certiproof_web_tools_timeout", path)
@@ -180,6 +223,57 @@ def test_web_tool_timeout_contract_is_warning():
 
     assert result["status"] == "warning"
     assert result["data"]["scan_completed"] is False
+
+
+def test_nuclei_unreachable_target_is_warning_before_scan(monkeypatch):
+    path = Path(__file__).resolve().parents[1] / "mcp-servers" / "security-tools" / "server.py"
+    spec = importlib.util.spec_from_file_location("certiproof_security_tools_unreachable", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    async def no_open_ports(*_args, **_kwargs):
+        return []
+
+    async def must_not_start(*_args, **_kwargs):
+        raise AssertionError("nuclei must not start for an unreachable target")
+
+    monkeypatch.setattr(module, "verify_tcp_open_ports", no_open_ports)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", must_not_start)
+    result = asyncio.run(module.nuclei_scan({"target": "203.0.113.10"}))
+
+    assert result["status"] == "warning"
+    assert result["data"]["reachable"] is False
+    assert result["data"]["scan_completed"] is False
+    assert "无法验证" in result["data"]["tool_error"]
+
+
+def test_nuclei_reachable_target_can_complete_with_no_findings(monkeypatch):
+    path = Path(__file__).resolve().parents[1] / "mcp-servers" / "security-tools" / "server.py"
+    spec = importlib.util.spec_from_file_location("certiproof_security_tools_reachable", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    class Process:
+        returncode = 0
+        pid = 1
+
+        async def communicate(self):
+            return b"", b""
+
+    async def open_port(*_args, **_kwargs):
+        return [{"port": 443, "protocol": "tcp", "state": "open"}]
+
+    async def create_process(*_args, **_kwargs):
+        return Process()
+
+    monkeypatch.setattr(module, "verify_tcp_open_ports", open_port)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", create_process)
+    result = asyncio.run(module.nuclei_scan({"target": "https://example.test"}))
+
+    assert result["status"] == "success"
+    assert result["data"]["reachable"] is True
+    assert result["data"]["scan_completed"] is True
+    assert result["data"]["findings"] == []
 
 
 def test_snmp_no_response_is_failed_and_hides_library_setup_noise(monkeypatch):

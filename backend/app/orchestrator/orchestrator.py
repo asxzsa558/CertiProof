@@ -1261,7 +1261,6 @@ class Orchestrator:
             "ssh_config_check": "SSH 配置检查",
             "ping_asset": "Ping 检测",
             "view_open_ports": "查看开放端口",
-            "view_scan_results": "查看扫描结果",
             "view_vulnerabilities": "查看漏洞",
             "view_findings": "查看合规发现",
             "view_compliance_score": "查看合规评分",
@@ -1604,7 +1603,10 @@ class Orchestrator:
     ) -> str:
         """用 AI 根据执行结果生成自然语言描述"""
         try:
-            if self._has_security_tool_result(execution_result):
+            if self._has_security_tool_result(execution_result) or any(
+                result.get("capability") == "list_assets"
+                for result in self._iter_execution_results(execution_result)
+            ):
                 return self._generate_fallback_description(execution_result)
 
             # 获取对话历史
@@ -1726,6 +1728,32 @@ class Orchestrator:
         if data.get("scan_completed") is False or data.get("success") is False or data.get("reachable") is False:
             reason = data.get("tool_error") or data.get("connection_error") or detail or "工具未完成执行"
             return f"{label}{target_str}: 未完成/无法判定 - {reason}"
+
+        if capability == "list_assets":
+            assets = data.get("assets") or []
+            if not assets:
+                return "资产清单: 当前项目暂无资产"
+            asset_lines = []
+            status_labels = {
+                "verified": "已验证",
+                "pending": "待验证",
+                "failed": "验证失败",
+            }
+            type_labels = {
+                "ip": "IP",
+                "domain": "域名",
+                "cloud_resource": "云资源",
+            }
+            for asset in assets:
+                name = (asset.get("name") or "").strip()
+                value = asset.get("value") or "未填写"
+                asset_type = type_labels.get(asset.get("type"), asset.get("type") or "资产")
+                verification = status_labels.get(
+                    asset.get("verification_status"),
+                    asset.get("verification_status") or "状态未知",
+                )
+                asset_lines.append(f"{name or '未命名资产'}（{asset_type}）：{value}，{verification}")
+            return f"资产清单: 当前项目共有 {len(assets)} 个资产：\n- " + "\n- ".join(asset_lines)
 
         if capability in ("scan_ports", "masscan_scan"):
             open_ports = data.get("open_ports", [])
@@ -2062,6 +2090,7 @@ class Orchestrator:
             "port_results": {},              # 每个资产的端口快照输入
             "compliance_score": None,
             "asset_results": {},  # 按资产分组的结果
+            "query_result": None,
         }
 
         for result in self._iter_execution_results(execution_result):
@@ -2074,6 +2103,20 @@ class Orchestrator:
             if not error_detail and isinstance(data, dict):
                 error_detail = data.get("error_detail")
             is_sub_result = bool(result.get("label"))
+
+            if capability == "list_assets":
+                display_status = "success" if status in ("success", "completed") else (
+                    "warning" if status == "warning" else "failed"
+                )
+                results["query_result"] = {
+                    "capability": capability,
+                    "status": status,
+                    "display_status": display_status,
+                    "message": data.get("message") or "",
+                    "assets": data.get("assets") or [],
+                    "error": error,
+                }
+                continue
 
             if capability in ("scan_ports", "nmap_scan", "masscan_scan"):
                 results["port_results"][target] = {
@@ -2284,9 +2327,10 @@ class Orchestrator:
                     results["asset_results"][target]["error_detail"] = error_detail
 
         asset_values = list(results["asset_results"].values())
-        success_count = sum(1 for item in asset_values if item.get("display_status") == "success")
-        warning_count = sum(1 for item in asset_values if item.get("display_status") == "warning")
-        failed_count = sum(1 for item in asset_values if item.get("display_status") == "failed")
+        quality_values = asset_values or ([results["query_result"]] if results["query_result"] else [])
+        success_count = sum(1 for item in quality_values if item.get("display_status") == "success")
+        warning_count = sum(1 for item in quality_values if item.get("display_status") == "warning")
+        failed_count = sum(1 for item in quality_values if item.get("display_status") == "failed")
         incomplete_targets = [
             target
             for target, item in results["asset_results"].items()
@@ -2304,7 +2348,7 @@ class Orchestrator:
 
         results["quality"] = {
             "verdict": verdict,
-            "total_assets": len(asset_values),
+            "total_assets": len(results["query_result"]["assets"]) if results["query_result"] else len(asset_values),
             "success": success_count,
             "warning": warning_count,
             "failed": failed_count,

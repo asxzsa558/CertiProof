@@ -1,16 +1,15 @@
 import { useState, useRef, useEffect } from 'react'
-import { Input, Button, Avatar, Spin, Empty, Typography, Tag, message, Modal, Checkbox, Dropdown, Popconfirm, Form } from 'antd'
+import { Input, Button, Avatar, Spin, Empty, Typography, Tag, message, Modal, Checkbox, Dropdown, Popconfirm, Form, Tooltip } from 'antd'
 import {
   SendOutlined,
   UserOutlined,
-  RobotOutlined,
   CheckCircleOutlined,
   HistoryOutlined,
   SwapOutlined,
   DeleteOutlined,
   FolderOutlined,
   FileTextOutlined,
-  DownOutlined,
+  PaperClipOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import VeriSureLogo from './VeriSureLogo'
@@ -24,8 +23,6 @@ import {
   SYSTEM_COMMANDS,
   TOOL_BY_COMMAND,
   COMMAND_TO_CAPABILITY,
-  SUGGESTIONS,
-  MORE_SUGGESTIONS,
   SLASH_COMMANDS,
   normalizeScanPortRange,
   buildToolActionText,
@@ -49,7 +46,7 @@ const dedupeAssets = (assets = []) => {
   })
 }
 
-function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
+function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpenResults }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [activeRequests, setActiveRequests] = useState(0)
@@ -87,7 +84,6 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
   const [currentThreadId, setCurrentThreadId] = useState(null)
   const [showArchivePanel, setShowArchivePanel] = useState(false)
   const [showThreadPanel, setShowThreadPanel] = useState(false)
-  const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const wsRefsRef = useRef(new Map())
   const pollRefsRef = useRef(new Map())
@@ -109,7 +105,8 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
   }
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = messagesContainerRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }
 
   const updateStickToBottom = () => {
@@ -948,6 +945,14 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
     }
   }
 
+  const openSlashPalette = () => {
+    setInput('/')
+    setCommandFilter('')
+    setSelectedCommandIndex(0)
+    setShowCommandPalette(true)
+    window.requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
   const handleClearHistory = async () => {
     try {
       if (projectId) {
@@ -1307,38 +1312,52 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
   messages.forEach((messageItem, messageIndex) => {
     if (messageItem.isResult) resultOrderByMessageIndex.set(messageIndex, resultOrderByMessageIndex.size)
   })
-  const compactResultBefore = Math.max(0, resultOrderByMessageIndex.size - 5)
+  const compactResultBefore = Math.max(0, resultOrderByMessageIndex.size - 1)
+  const isLongAssistantMessage = (item) => item.role === 'assistant'
+    && !item.isResult
+    && ((item.content || '').length > 240 || (item.content || '').split('\n').length > 4)
+  const messageSummary = (content = '') => {
+    const firstLine = content.split('\n').find(line => line.trim()) || content
+    return firstLine.length > 72 ? `${firstLine.slice(0, 72)}...` : firstLine
+  }
 
   return (
     <div className="chat-workspace">
-      {/* 浮动操作按钮 - 归档/线程管理 */}
-      <div className="floating-actions">
-        <Dropdown
-          menu={{
-            items: [
-              { key: 'archive', icon: <FolderOutlined />, label: '归档当前对话' },
-              { key: 'view-archives', icon: <HistoryOutlined />, label: '查看归档' },
-              { type: 'divider' },
-              { key: 'new-thread', icon: <SwapOutlined />, label: '新建线程' },
-              { key: 'view-threads', icon: <SwapOutlined />, label: '切换线程' },
-            ],
-            onClick: ({ key }) => {
-              if (key === 'archive') handleCreateArchive()
-              else if (key === 'view-archives') { loadArchives(); setShowArchivePanel(true) }
-              else if (key === 'new-thread') handleCreateThread()
-              else if (key === 'view-threads') { loadThreads(); setShowThreadPanel(true) }
-            }
-          }}
-          trigger={['click']}
-          placement="topRight"
-        >
-          <Button 
-            type="text" 
-            icon={<HistoryOutlined />} 
-            className="floating-action-btn"
-            title="对话管理"
-          />
-        </Dropdown>
+      <div className="workspace-brand-watermark" aria-hidden="true">
+        <VeriSureLogo size={92} />
+        <span>CertiProof</span>
+      </div>
+      <div className="cockpit-chat-toolbar">
+        <div className="cockpit-chat-tabs">
+          <button type="button" className="active">对话</button>
+          <button type="button" onClick={onOpenResults}>执行日志</button>
+        </div>
+        <div className="cockpit-chat-actions">
+          <Popconfirm title="清空当前对话？" description="扫描任务和检测结果不会删除。" onConfirm={handleClearHistory} okText="清空" cancelText="取消">
+            <Button type="text" icon={<DeleteOutlined />}>清空对话</Button>
+          </Popconfirm>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'archive', icon: <FolderOutlined />, label: '归档当前对话' },
+                { key: 'view-archives', icon: <HistoryOutlined />, label: '查看归档' },
+                { type: 'divider' },
+                { key: 'new-thread', icon: <SwapOutlined />, label: '新建线程' },
+                { key: 'view-threads', icon: <SwapOutlined />, label: '切换线程' },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'archive') handleCreateArchive()
+                else if (key === 'view-archives') { loadArchives(); setShowArchivePanel(true) }
+                else if (key === 'new-thread') handleCreateThread()
+                else if (key === 'view-threads') { loadThreads(); setShowThreadPanel(true) }
+              }
+            }}
+            trigger={['click']}
+            placement="bottomRight"
+          >
+            <Button type="text" icon={<HistoryOutlined />} aria-label="对话归档与线程" />
+          </Dropdown>
+        </div>
       </div>
 
       {/* Archive Panel Modal */}
@@ -1485,11 +1504,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
               {msg.role === 'user' ? (
                 <Avatar size={32} style={{ background: 'rgba(255,255,255,0.1)' }} icon={<UserOutlined />} />
               ) : (
-                <Avatar
-                  size={32}
-                  style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
-                  icon={<RobotOutlined />}
-                />
+                <VeriSureLogo size={32} className="chat-avatar-logo" />
               )}
             </div>
             <div className="message-body">
@@ -1498,22 +1513,35 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
                 <DiagnosticResultCard data={msg.diagnosticData} />
               ) : msg.isResult ? (
                 <ResultMessageRenderer msg={msg} compact={resultOrderByMessageIndex.get(index) < compactResultBefore} />
-              ) : (
+              ) : msg.taskId ? (
                 <>
-                  <div className={`message-bubble ${msg.role} ${msg.isError ? 'error' : ''}`}>
-                    {msg.content}
-                  </div>
+                  <TaskStatusCard
+                    msg={msg}
+                    onPause={handlePauseTask}
+                    onStop={handleStopTask}
+                    onResume={handleResumeTask}
+                  />
                   {msg.dataReset && (
                     <div className="message-data-reset">相关测评数据已被完全重置，原结果不再可用</div>
                   )}
-                  {/* 任务状态指示器 */}
-                  {msg.taskId && (
-                    <TaskStatusCard
-                      msg={msg}
-                      onPause={handlePauseTask}
-                      onStop={handleStopTask}
-                      onResume={handleResumeTask}
-                    />
+                </>
+              ) : (
+                <>
+                  {isLongAssistantMessage(msg) ? (
+                    <details className={`message-bubble ${msg.role} message-transcript ${msg.isError ? 'error' : ''}`}>
+                      <summary>
+                        <span>执行摘要</span>
+                        <strong>{messageSummary(msg.content)}</strong>
+                      </summary>
+                      <pre>{msg.content}</pre>
+                    </details>
+                  ) : (
+                    <div className={`message-bubble ${msg.role} ${msg.isError ? 'error' : ''}`}>
+                      {msg.content}
+                    </div>
+                  )}
+                  {msg.dataReset && (
+                    <div className="message-data-reset">相关测评数据已被完全重置，原结果不再可用</div>
                   )}
                 </>
               )}
@@ -1523,11 +1551,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         {loading && (
           <div className="workspace-message assistant">
             <div className="message-avatar">
-              <Avatar
-                size={32}
-                style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
-                icon={<RobotOutlined />}
-              />
+              <VeriSureLogo size={32} className="chat-avatar-logo" />
             </div>
             <div className="message-body">
               <div className="message-bubble assistant loading">
@@ -1542,11 +1566,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         {compressionStatus === 'started' && (
           <div className="workspace-message assistant">
             <div className="message-avatar">
-              <Avatar
-                size={32}
-                style={{ background: 'linear-gradient(135deg, #f59e0b, #ef4444)' }}
-                icon={<RobotOutlined />}
-              />
+              <VeriSureLogo size={32} className="chat-avatar-logo" />
             </div>
             <div className="message-body">
               <div className="message-bubble assistant compression-indicator">
@@ -1560,11 +1580,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
         {compressionStatus === 'completed' && compressionInfo && (
           <div className="workspace-message assistant">
             <div className="message-avatar">
-              <Avatar
-                size={32}
-                style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}
-                icon={<CheckCircleOutlined />}
-              />
+              <Avatar size={32} style={{ background: 'rgba(16, 185, 129, .18)', color: '#34d399' }} icon={<CheckCircleOutlined />} />
             </div>
             <div className="message-body">
               <div className="message-bubble assistant compression-completed">
@@ -1576,51 +1592,10 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
           </div>
         )}
         
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
       <div className="workspace-input-area">
-        {/* Suggestions - always visible */}
-        <div className="workspace-suggestions">
-          <div className="suggestions-row">
-            {SUGGESTIONS.map((s, i) => (
-              <button
-                key={i}
-                className="suggestion-btn"
-                onClick={() => s.action === 'assessment' ? handleAssessmentAction() : handleSend(s.text)}
-                style={{ '--accent': s.color }}
-              >
-                <span className="suggestion-icon">{s.icon}</span>
-                <span className="suggestion-text">{s.title}</span>
-              </button>
-            ))}
-            {/* 更多检测下拉 */}
-            <Dropdown
-              menu={{ items: MORE_SUGGESTIONS.map((s, i) => ({
-                key: `more-${i}`,
-                label: (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: s.color, fontSize: 14 }}>{s.icon}</span>
-                    <span>{s.title}</span>
-                  </span>
-                ),
-                onClick: () => s.isText ? handleSend(s.text) : handleSend(s.text),
-              })) }}
-              placement="bottomRight"
-              trigger={['click']}
-            >
-              <button
-                className="suggestion-btn more-btn"
-                style={{ '--accent': '#94a3b8' }}
-              >
-                <span className="suggestion-icon"><DownOutlined /></span>
-                <span className="suggestion-text">更多检测</span>
-              </button>
-            </Dropdown>
-          </div>
-        </div>
-        
         {/* Command Palette */}
         {showCommandPalette && filteredCommands.length > 0 && (
           <div className="command-palette">
@@ -1638,7 +1613,15 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
             ))}
           </div>
         )}
-        <div className="input-row">
+        <div className="input-row cockpit-input-row">
+          <div className="cockpit-composer-tools">
+            <Tooltip title="上传测评材料">
+              <Button type="text" icon={<PaperClipOutlined />} onClick={handleAssessmentAction} aria-label="上传测评材料" />
+            </Tooltip>
+            <Tooltip title="输入快捷命令">
+              <Button type="text" onClick={openSlashPalette} aria-label="输入快捷命令">/</Button>
+            </Tooltip>
+          </div>
           <TextArea
             ref={inputRef}
             value={input}
@@ -1648,15 +1631,15 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand }) {
             autoSize={{ minRows: 1, maxRows: 4 }}
             className="workspace-input"
           />
+          <span className="cockpit-input-hint">Enter 发送 · Shift + Enter 换行</span>
           <Button
             type="primary"
             icon={<SendOutlined />}
             onClick={() => handleSend()}
             disabled={!input.trim()}
             className="workspace-send-btn"
-          >
-            发送
-          </Button>
+            aria-label="发送"
+          />
         </div>
       </div>
 

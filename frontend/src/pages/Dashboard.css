@@ -98,6 +98,8 @@
 
 .org-nav button .anticon { color: rgba(114, 209, 232, 0.82); font-size: 16px; }
 .org-nav button:hover { color: #f5fbff; border-color: rgba(83, 222, 241, 0.16); background: rgba(83, 222, 241, 0.055); }
+.org-nav button.upcoming { color: rgba(207, 224, 237, 0.48); }
+.org-nav button.upcoming .anticon { color: rgba(114, 209, 232, 0.46); }
 .org-nav button.active { color: #f7fcff; border-color: rgba(83, 222, 241, 0.28); background: linear-gradient(90deg, rgba(32, 160, 189, 0.2), rgba(10, 52, 74, 0.18)); }
 .org-nav button.active::before { content: ''; position: absolute; left: -12px; width: 3px; height: 23px; background: var(--cyan); box-shadow: 0 0 13px rgba(83, 222, 241, 0.85); }
 

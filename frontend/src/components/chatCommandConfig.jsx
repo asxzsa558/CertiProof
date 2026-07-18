@@ -1,6 +1,5 @@
 import {
   ThunderboltOutlined,
-  FileSearchOutlined,
   SafetyCertificateOutlined,
   MonitorOutlined,
   ApiOutlined,
@@ -9,11 +8,9 @@ import {
   ClusterOutlined,
   CloudServerOutlined,
   BugOutlined,
-  FileTextOutlined,
   WindowsOutlined,
   LockOutlined,
   FolderOpenOutlined,
-  RocketOutlined,
   WifiOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
@@ -55,22 +52,6 @@ const SYSTEM_COMMANDS = [
 
 const TOOL_BY_COMMAND = Object.fromEntries(TOOL_CATALOG.map(tool => [tool.command, tool]))
 const COMMAND_TO_CAPABILITY = Object.fromEntries(TOOL_CATALOG.map(tool => [tool.command, tool.capability]))
-const PRIMARY_SUGGESTIONS = TOOL_CATALOG
-  .filter(tool => tool.primary)
-  .map(tool => ({ icon: tool.icon, title: tool.name, text: `${tool.command} `, color: tool.color }))
-
-const MORE_SUGGESTIONS = [
-  ...TOOL_CATALOG
-    .filter(tool => tool.more)
-    .map(tool => ({ icon: tool.icon, title: tool.name, text: `${tool.command} `, color: tool.color })),
-  { icon: <ApiOutlined />, title: '连通测试', text: '/diagnose', color: '#64748b' },
-  { icon: <FileTextOutlined />, title: '查看结果', text: '查看扫描结果', color: '#ec4899', isText: true },
-]
-
-const SUGGESTIONS = [
-  ...PRIMARY_SUGGESTIONS,
-  { icon: <RocketOutlined />, title: '等保测评', text: '', color: '#f59e0b', action: 'assessment' },
-]
 
 const SLASH_COMMANDS = [
   ...TOOL_CATALOG.map(tool => ({
@@ -117,9 +98,6 @@ export {
   SYSTEM_COMMANDS,
   TOOL_BY_COMMAND,
   COMMAND_TO_CAPABILITY,
-  PRIMARY_SUGGESTIONS,
-  MORE_SUGGESTIONS,
-  SUGGESTIONS,
   SLASH_COMMANDS,
   normalizeScanPortRange,
   buildScanText,

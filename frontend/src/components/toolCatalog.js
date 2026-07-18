@@ -99,6 +99,13 @@ export function scanTaskSource(task = {}) {
 export function scanTaskConclusion(task = {}) {
   const summary = task.result_summary || {}
   const executions = summary.results || []
+  const scanAssets = Object.values(summary.scan_results?.asset_results || {})
+  const hasUnverifiedVulnerabilityScan = scanAssets.some(item => {
+    const result = item?.result || {}
+    return item?.capability === 'scan_vulnerabilities'
+      && result.reachable !== true
+      && !(result.findings || []).length
+  })
   const allSkipped = executions.length > 0 && executions.every(item => {
     const result = item?.result || {}
     const totals = result.summary || {}
@@ -107,7 +114,12 @@ export function scanTaskConclusion(task = {}) {
   if (task.status === 'failed' || task.status === 'cancelled' || task.error_message) return { key: 'failed', label: '无法完成' }
   if (task.status === 'running' || task.status === 'pending') return { key: 'running', label: '执行中' }
   if (summary.outcome === 'not_applicable' || allSkipped) return { key: 'skipped', label: '不适用' }
-  if ((summary.failed || []).length || (summary.warnings || []).length || summary.status === 'partial') return { key: 'warning', label: '部分未完成' }
+  if (
+    (summary.failed || []).length ||
+    (summary.warnings || []).length ||
+    summary.status === 'partial' ||
+    hasUnverifiedVulnerabilityScan
+  ) return { key: 'warning', label: '部分未完成' }
   if (task.findings_count > 0) return { key: 'risk', label: `发现 ${task.findings_count} 项问题` }
   return { key: 'clean', label: '未发现问题' }
 }

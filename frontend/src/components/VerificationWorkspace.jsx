@@ -110,7 +110,7 @@ function FindingRow({ finding }) {
   )
 }
 
-function VerificationWorkspace({ projectId, onChanged, onContinue, refreshKey }) {
+function VerificationWorkspace({ projectId, onChanged, onContinue, refreshKey, initialFilter = null }) {
   const [workspace, setWorkspace] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(null)
@@ -125,7 +125,7 @@ function VerificationWorkspace({ projectId, onChanged, onContinue, refreshKey })
   const [notes, setNotes] = useState('')
   const [username, setUsername] = useState('root')
   const [password, setPassword] = useState('')
-  const [filter, setFilter] = useState(null)
+  const [filter, setFilter] = useState(initialFilter)
   const refreshKeyRef = useRef(refreshKey)
 
   const fetchWorkspace = useCallback(async (silent = false) => {
@@ -145,6 +145,10 @@ function VerificationWorkspace({ projectId, onChanged, onContinue, refreshKey })
   useEffect(() => {
     fetchWorkspace()
   }, [fetchWorkspace])
+
+  useEffect(() => {
+    setFilter(initialFilter)
+  }, [initialFilter])
 
   useEffect(() => {
     if (refreshKeyRef.current === refreshKey) return
@@ -322,7 +326,7 @@ function VerificationWorkspace({ projectId, onChanged, onContinue, refreshKey })
   const filterOptions = [
     { label: `待处理 ${filterCounts.open}`, value: 'open' },
     { label: `已修复 ${filterCounts.fixed}`, value: 'fixed' },
-    { label: `无法验证 ${filterCounts.unable}`, value: 'unable' },
+    { label: `无法完成 ${filterCounts.unable}`, value: 'unable' },
     { label: `全部 ${filterCounts.all}`, value: 'all' },
   ]
   const terminalRuns = (workspace?.runs || []).filter(run => !['queued', 'running'].includes(run.status))
@@ -344,10 +348,10 @@ function VerificationWorkspace({ projectId, onChanged, onContinue, refreshKey })
         <div><strong>{nextStep.title}</strong><p>{nextStep.detail}</p></div>
       </div>
       <div className="verification-summary">
-        <div><strong>{filterCounts.all}</strong><span>问题总数</span></div>
+        <div><strong>{filterCounts.all}</strong><span>全部</span></div>
         <div className="warning"><strong>{filterCounts.open}</strong><span>待处理</span></div>
         <div className="success"><strong>{filterCounts.fixed}</strong><span>已修复</span></div>
-        <div className="danger"><strong>{filterCounts.unable}</strong><span>无法验证</span></div>
+        <div className="danger"><strong>{filterCounts.unable}</strong><span>无法完成</span></div>
       </div>
 
       {(workspace?.execution_blockers || []).length > 0 && (
@@ -397,7 +401,7 @@ function VerificationWorkspace({ projectId, onChanged, onContinue, refreshKey })
             : activeFilter === 'fixed'
               ? { color: 'success', text: `已修复 ${displayFindings.length}` }
               : activeFilter === 'unable'
-                ? { color: 'error', text: `无法验证 ${displayFindings.length}` }
+                ? { color: 'error', text: `无法完成 ${displayFindings.length}` }
                 : open
                   ? { color: analysisUnable ? 'error' : 'warning', text: analysisUnable ? (document ? '需重新分析' : '需重新检测') : `待处理 ${open}` }
                   : fixed === group.findings.length
@@ -488,7 +492,7 @@ function VerificationWorkspace({ projectId, onChanged, onContinue, refreshKey })
                   <strong>{run.source_type === 'document' ? '文档重新检查' : '技术重新检测'} #{run.id} · {run.status === 'completed' ? '已完成' : run.status === 'partial' ? '部分完成' : run.status === 'cancelled' ? '已停止' : '失败'}</strong>
                   <span>已修复 {run.summary?.fixed || 0} · 仍存在 {run.summary?.still_present || 0} · 新增 {run.summary?.new || 0} · 无法验证 {run.summary?.unable || 0}</span>
                 </div>
-                <span>{expandedRuns[run.id] ? '收起' : '查看结果'}</span>
+                <span>{expandedRuns[run.id] ? '收起明细' : '展开明细'}</span>
               </button>
               {expandedRuns[run.id] && <RunItems run={run} />}
               {['partial', 'failed', 'cancelled'].includes(run.status) && <div className="verification-run-retry"><Button size="small" icon={<ReloadOutlined />} loading={busy === `run-${run.id}`} onClick={() => resumeRun(run)}>继续未完成项</Button></div>}

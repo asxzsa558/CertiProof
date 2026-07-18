@@ -27,6 +27,11 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
     const warningCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'warning').length
     const failedCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'failed').length
     const skippedCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'skipped').length
+    const effectiveQualityVerdict = failedCount > 0
+      ? 'partial'
+      : warningCount > 0
+        ? 'conditional'
+        : quality.verdict
     const capabilitySet = Array.from(new Set(Object.values(assetResults).map(r => r.capability).filter(Boolean)))
     const mainCapability = capabilitySet.length === 1 ? capabilitySet[0] : 'full_compliance_scan'
     const mainTool = mainCapability
@@ -37,7 +42,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
 
     const assetStatusConfig = {
       success: { color: 'success', text: '成功', icon: <CheckCircleFilled /> },
-      warning: { color: 'warning', text: '未完成/无法判定', icon: <ExclamationCircleFilled /> },
+      warning: { color: 'warning', text: '无法判定', icon: <ExclamationCircleFilled /> },
       failed: { color: 'error', text: '失败', icon: <CloseCircleFilled /> },
       skipped: { color: 'default', text: '已跳过', icon: <ExclamationCircleFilled /> },
     }
@@ -48,7 +53,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
     const auditFilters = [
       { key: 'all', label: '全部', count: totalAssets },
       { key: 'success', label: '成功', count: successCount },
-      { key: 'warning', label: '未完成/无法判定', count: warningCount },
+      { key: 'warning', label: '无法判定', count: warningCount },
       { key: 'failed', label: '失败', count: failedCount },
       { key: 'skipped', label: '跳过', count: skippedCount },
     ]
@@ -76,7 +81,12 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
           ? 'SSL/TLS 未完成'
           : `SSL 问题 ${result.issues?.length || 0}，漏洞 ${result.vulnerabilities?.length || 0}`
       }
-      if (capability === 'scan_vulnerabilities') return `漏洞 ${result.total_findings ?? result.findings?.length ?? 0}`
+      if (capability === 'scan_vulnerabilities') {
+        if (result.scan_completed === false || (result.reachable !== true && !(result.findings || []).length)) {
+          return '目标不可达或未验证，无法判断漏洞'
+        }
+        return `漏洞 ${result.total_findings ?? result.findings?.length ?? 0}`
+      }
       if (capability === 'scan_weak_passwords') return `弱口令 ${result.found?.length || 0}`
       if (capability === 'database_security_scan') {
         const summary = result.summary || {}
@@ -98,10 +108,10 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       if (msg.content) lines.push(msg.content)
       lines.push(`总资产数: ${totalAssets}`)
       lines.push(`成功: ${successCount}`)
-      if (warningCount) lines.push(`未完成/无法判定: ${warningCount}`)
+      if (warningCount) lines.push(`无法判定: ${warningCount}`)
       if (failedCount) lines.push(`失败: ${failedCount}`)
       if (skippedCount) lines.push(`跳过: ${skippedCount}`)
-      if (quality.verdict) lines.push(`结果可信度: ${quality.verdict} - ${quality.note || ''}`)
+      if (effectiveQualityVerdict) lines.push(`结果可信度: ${effectiveQualityVerdict} - ${quality.note || ''}`)
       lines.push(`检测工具: ${capabilitySet.map(c => CAPABILITY_NAMES[c] || c).join('、') || '安全检测'}`)
       lines.push('')
 
@@ -135,14 +145,14 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       <div className="scan-animation-fade-in">
         {/* 统计摘要 */}
         <div className="result-summary multi-asset-summary">
-          {quality.verdict && (
+          {effectiveQualityVerdict && (
             <div className="summary-item">
-              <div className="summary-icon" style={{ background: quality.verdict === 'complete' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)' }}>
-                <InfoCircleFilled style={{ color: quality.verdict === 'complete' ? '#10b981' : '#f59e0b' }} />
+              <div className="summary-icon" style={{ background: effectiveQualityVerdict === 'complete' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)' }}>
+                <InfoCircleFilled style={{ color: effectiveQualityVerdict === 'complete' ? '#10b981' : '#f59e0b' }} />
               </div>
               <div className="summary-content">
                 <div className="summary-title">结果可信度</div>
-                <div className="summary-value">{quality.verdict === 'complete' ? '完整' : quality.verdict === 'partial' ? '部分失败' : '有条件'}</div>
+                <div className="summary-value">{effectiveQualityVerdict === 'complete' ? '完整' : effectiveQualityVerdict === 'partial' ? '部分失败' : '有条件'}</div>
               </div>
             </div>
           )}
@@ -277,7 +287,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
                       <div className="asset-collapse-label">
                         <span className="asset-collapse-target">{target}</span>
                         <Tag color={currentStatus.color} icon={currentStatus.icon}>{currentStatus.text}</Tag>
-                        <span className={`risk-pill ${risk.className}`}>风险 {risk.label}</span>
+                        <span className={`risk-pill ${risk.className}`}>{risk.label}风险</span>
                         <span className="asset-collapse-metric">{metricText(assetData)}</span>
                       </div>
                     ),

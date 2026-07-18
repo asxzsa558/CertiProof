@@ -1,19 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Tag } from 'antd'
+import { Button, Drawer, message, Progress, Tag, Tooltip } from 'antd'
 import {
+  BarChartOutlined,
   BugOutlined,
+  CloseOutlined,
   DatabaseOutlined,
+  DownloadOutlined,
   ExclamationCircleFilled,
+  EyeOutlined,
   FileProtectOutlined,
   FileSearchOutlined,
   GlobalOutlined,
+  HistoryOutlined,
   KeyOutlined,
   LockOutlined,
   RadarChartOutlined,
+  RightOutlined,
+  SwapOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import ChatWorkspace from './ChatWorkspace'
+import MiniLineChart from './MiniLineChart'
+import VerificationWorkspace from './VerificationWorkspace'
 import { severityLabel } from './resultRendererUtils'
 import { scanTaskCapabilities, scanTaskConclusion } from './toolCatalog'
 import './ProjectCommandCenter.css'
@@ -44,6 +53,10 @@ const flattenIssues = (workspace) => [
   ...(workspace?.technical_groups || []).flatMap(group => group.findings.map(finding => ({ ...finding, group: group.target || group.title }))),
 ]
 
+const findingIsUnable = finding => finding.status === 'open' && (
+  finding.judgment === 'not_tested' || finding.latest_verification?.outcome === 'unable'
+)
+
 const executionHasRisk = (result = {}) => {
   const values = ['findings', 'vulnerabilities', 'issues', 'found', 'credentials', 'found_credentials', 'injection_points', 'failed_checks']
   return values.some(key => Array.isArray(result[key]) && result[key].length > 0)
@@ -52,11 +65,18 @@ const executionHasRisk = (result = {}) => {
     || Number(result.summary?.non_compliant || 0) > 0
 }
 
-function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId, onOpenResults }) {
+function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId, onOpenResults, onWorkspaceSummary }) {
   const [scanTasks, setScanTasks] = useState([])
   const [assessment, setAssessment] = useState(null)
   const [verification, setVerification] = useState(null)
   const [detectedChanges, setDetectedChanges] = useState([])
+  const [scoreSummary, setScoreSummary] = useState(null)
+  const [reportHistory, setReportHistory] = useState([])
+  const [reportComparison, setReportComparison] = useState(null)
+  const [detailTab, setDetailTab] = useState('history')
+  const [detailCollapsed, setDetailCollapsed] = useState(false)
+  const [verificationVisible, setVerificationVisible] = useState(false)
+  const [verificationFilter, setVerificationFilter] = useState('all')
   const [workspaceLoading, setWorkspaceLoading] = useState(true)
 
   useEffect(() => {
@@ -69,18 +89,31 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
     setWorkspaceLoading(true)
     const fetchWorkspace = async () => {
       if (!project?.id) return
-      const [scansResult, assessmentResult, verificationResult, changesResult] = await Promise.allSettled([
+      const [scansResult, assessmentResult, verificationResult, changesResult, reportsResult] = await Promise.allSettled([
         api.get(`/results/projects/${project.id}/scans`),
         api.get(`/assessments/projects/${project.id}`),
         api.get(`/projects/${project.id}/verification/workspace`),
         api.get(`/projects/${project.id}/monitoring/changes`, { params: { reassessment_only: true } }),
+        api.get(`/projects/${project.id}/reports`),
       ])
       if (!mounted) return
       setScanTasks(scansResult.status === 'fulfilled' ? scansResult.value.data || [] : [])
       const assessments = assessmentResult.status === 'fulfilled' ? assessmentResult.value.data : null
-      setAssessment(Array.isArray(assessments) ? assessments[0] || null : assessments)
+      const latestAssessment = Array.isArray(assessments) ? assessments[0] || null : assessments
+      setAssessment(latestAssessment)
       setVerification(verificationResult.status === 'fulfilled' ? verificationResult.value.data : null)
       setDetectedChanges(changesResult.status === 'fulfilled' ? changesResult.value.data || [] : [])
+      setReportHistory(reportsResult.status === 'fulfilled' ? reportsResult.value.data || [] : [])
+      if (latestAssessment?.id) {
+        try {
+          const summaryResult = await api.get(`/assessments/${latestAssessment.id}/summary`)
+          if (mounted) setScoreSummary(summaryResult.data)
+        } catch {
+          if (mounted) setScoreSummary(null)
+        }
+      } else {
+        setScoreSummary(null)
+      }
       setWorkspaceLoading(false)
     }
     fetchWorkspace()
@@ -97,9 +130,42 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
   }, [project?.id])
 
   const issues = useMemo(() => flattenIssues(verification), [verification])
-  const openIssues = issues.filter(item => item.status === 'open')
-  const summary = verification?.summary || {}
+  const issueCounts = useMemo(() => ({
+    all: issues.length,
+    open: issues.filter(item => item.status === 'open' && !findingIsUnable(item)).length,
+    fixed: issues.filter(item => item.status === 'fixed').length,
+    unable: issues.filter(findingIsUnable).length,
+  }), [issues])
+  const openIssues = issues.filter(item => item.status === 'open' && !findingIsUnable(item))
   const assessmentProgress = Math.round(assessment?.progress || 0)
+  const scoreMetrics = scoreSummary?.score_metrics || {}
+  const currentScore = scoreSummary?.project?.score
+  const scoreTrend = useMemo(() => [...reportHistory]
+    .reverse()
+    .filter(item => Number.isFinite(item.score))
+    .map(item => ({
+      version: `V${item.version}`,
+      score: item.score,
+      date: item.generated_at
+        ? new Date(item.generated_at).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+        : '',
+    })), [reportHistory])
+  const visibleScoreTrend = scoreTrend.length
+    ? scoreTrend
+    : Number.isFinite(currentScore)
+      ? [{ version: '当前', score: currentScore, date: '' }]
+      : []
+
+  useEffect(() => {
+    onWorkspaceSummary?.({
+      progress: assessmentProgress,
+      score: currentScore,
+      coverage: scoreMetrics.coverage,
+      open: issueCounts.open,
+      unable: issueCounts.unable,
+      fixed: issueCounts.fixed,
+    })
+  }, [assessmentProgress, currentScore, scoreMetrics.coverage, issueCounts.open, issueCounts.unable, issueCounts.fixed, onWorkspaceSummary])
 
   const toolStatus = key => {
     if (workspaceLoading) return { state: 'idle', label: '加载中' }
@@ -116,6 +182,9 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
       }
       if (execution.status === 'failed') return { state: 'failed', label: '失败' }
       if (execution.status === 'warning' || result.scan_completed === false) return { state: 'warning', label: '未完整' }
+      if (key === 'scan_vulnerabilities' && result.reachable !== true && !(result.findings || []).length) {
+        return { state: 'warning', label: '无法验证目标' }
+      }
       if (executionHasRisk(result)) return { state: 'warning', label: '发现风险' }
       return { state: 'success', label: '正常' }
     }
@@ -132,80 +201,230 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
     setDetectedChanges(items => items.filter(item => item.id !== changeId))
   }
 
+  const openReportVersion = async (version, download = false) => {
+    try {
+      const response = await api.get(`/projects/${project.id}/reports/${version}`, {
+        params: { download },
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(new Blob([response.data], { type: 'text/html' }))
+      if (download) {
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `certiproof-report-${project.id}-v${version}.html`
+        link.click()
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch (error) {
+      message.error(error.response?.data?.detail || '报告版本读取失败')
+    }
+  }
+
+  const applicable = Number(scoreMetrics.reliable || 0) + Number(scoreMetrics.unable || 0)
+  const unablePercent = applicable ? Math.round(Number(scoreMetrics.unable || 0) / applicable * 100) : 0
+  const openVerification = (filter = 'all') => {
+    setVerificationFilter(filter)
+    setVerificationVisible(true)
+  }
+
   return (
     <div className="command-center-shell">
-      <div className="command-center-topbar">
-        <div className="project-identity">
-          <h1>{project?.name || '未选择项目'}</h1>
-          <div className="identity-meta">
-            <Tag color="cyan">{project?.compliance_level || '等保未配置'}</Tag>
-            <Tag color={workspaceLoading ? 'processing' : assessment?.status === 'completed' ? 'green' : assessment?.status === 'in_progress' ? 'blue' : 'default'}>
-              {workspaceLoading ? '数据加载中' : assessment?.status === 'completed' ? '测评完成' : assessment?.status === 'in_progress' ? '测评中' : assessment ? '待推进' : '未创建测评'}
-            </Tag>
-            <span>{assetsLoading ? '资产加载中' : `${assets.length} 个资产`}</span>
-            {detectedChanges.length > 0 && (
-              <span className="reassessment-alert">
-                <ExclamationCircleFilled /> {detectedChanges.length} 项变化需重新评估
-                <Button size="small" type="link" onClick={() => acknowledgeChange(detectedChanges[0].id)}>知晓</Button>
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="posture-strip">
-          <div className="posture-tile primary"><span>测评进度</span><strong>{workspaceLoading ? '—' : `${assessmentProgress}%`}</strong></div>
-          <div className="posture-tile danger"><span>待处理问题</span><strong>{workspaceLoading ? '—' : summary.open || 0}</strong></div>
-          <div className="posture-tile warning"><span>无法验证</span><strong>{workspaceLoading ? '—' : summary.unable || 0}</strong></div>
-          <div className="posture-tile"><span>已修复</span><strong>{workspaceLoading ? '—' : summary.fixed || 0}</strong></div>
-        </div>
-      </div>
-
-      <div className="command-center-grid">
+      <div className={`command-center-grid ${detailCollapsed ? 'detail-collapsed' : ''}`}>
         <main className="ai-command-core">
+          {detectedChanges.length > 0 && (
+            <div className="reassessment-banner">
+              <span><ExclamationCircleFilled /> {detectedChanges.length} 项资产或端口变化需要重新评估</span>
+              <Button size="small" type="text" onClick={() => acknowledgeChange(detectedChanges[0].id)}>知晓</Button>
+            </div>
+          )}
           <div className="chat-glass-frame">
-            <ChatWorkspace key={project?.id || 'default'} projectId={project?.id} projectName={project?.name} modelId={modelId} />
+            <ChatWorkspace
+              key={project?.id || 'default'}
+              projectId={project?.id}
+              projectName={project?.name}
+              modelId={modelId}
+              onOpenResults={onOpenResults}
+            />
           </div>
+          {detailCollapsed && (
+            <Tooltip title="展开测评详情">
+              <Button className="detail-reopen-button" type="text" icon={<RightOutlined />} onClick={() => setDetailCollapsed(false)} aria-label="展开测评详情">
+                <span>测评详情</span>
+              </Button>
+            </Tooltip>
+          )}
         </main>
-        <aside className="intel-rail right">
-          <section className="intel-panel tool-panel">
-            <div className="panel-heading"><span><ThunderboltOutlined /> 工具遥测</span><small>{workspaceLoading ? '加载中' : scanTasks.length ? '最近结果' : '等待检测'}</small></div>
-            <div className="tool-grid">
-              {TOOL_GROUPS.map(tool => {
-                const status = toolStatus(tool.key)
-                return <div key={tool.key} className={`tool-cell ${status.state}`}><span>{tool.icon}</span><strong>{tool.label}</strong><i>{status.label}</i></div>
-              })}
+        {!detailCollapsed && <aside className="detail-workbench">
+          <div className="detail-workbench-header">
+            <div><strong>测评详情</strong><span>{workspaceLoading ? '数据同步中' : assessment?.status === 'completed' ? '本轮测评已结束' : '实时同步'}</span></div>
+            <div className="detail-workbench-actions">
+              <Tooltip title="检测记录">
+                <Button size="small" type="text" aria-label="检测记录" icon={<FileSearchOutlined />} onClick={onOpenResults} />
+              </Tooltip>
+              <Tooltip title="收起测评详情">
+                <Button size="small" type="text" aria-label="收起测评详情" icon={<CloseOutlined />} onClick={() => setDetailCollapsed(true)} />
+              </Tooltip>
             </div>
-          </section>
-          <section className="intel-panel evidence-panel">
-            <div className="panel-heading">
-              <span><FileSearchOutlined /> 整改与复测</span>
-              <Button size="small" type="text" onClick={onOpenResults}>检测记录</Button>
-            </div>
-            <div className="remediation-summary">
-              <div><strong>{summary.open || 0}</strong><span>待处理</span></div>
-              <div><strong>{summary.fixed || 0}</strong><span>已修复</span></div>
-              <div><strong>{summary.unable || 0}</strong><span>无法完成</span></div>
-              <div><strong>{summary.total || 0}</strong><span>问题总数</span></div>
-            </div>
-            <div className="remediation-board">
-              {workspaceLoading ? (
-                <div className="remediation-empty"><FileProtectOutlined /><strong>正在加载项目数据</strong><span>检测结果与整改状态加载完成后显示。</span></div>
-              ) : openIssues.length ? openIssues.slice(0, 12).map(item => (
-                <article className={`remediation-card ${item.severity || 'medium'} compact`} key={item.id}>
-                  <div className="remediation-card-top">
-                    <Tag color={item.source_type === 'document' ? 'cyan' : 'orange'}>{item.source_type === 'document' ? '文档' : '技术'}</Tag>
-                    <Tag color={['critical', 'high'].includes(item.severity) ? 'red' : 'gold'}>{severityLabel(item.severity)}</Tag>
+          </div>
+          <div className="detail-workbench-tabs" role="tablist">
+            {[
+              ['current', '当前结果'],
+              ['score', '评分解释'],
+              ['history', '历史与报告'],
+            ].map(([key, label]) => <button key={key} type="button" className={detailTab === key ? 'active' : ''} onClick={() => setDetailTab(key)}>{label}</button>)}
+          </div>
+          <div className="detail-workbench-body">
+            {detailTab === 'current' && <>
+              <section className="detail-section tool-section">
+                <div className="detail-section-heading"><span><ThunderboltOutlined /> 工具状态</span><small>{scanTasks.length ? `${scanTasks.length} 条记录` : '等待检测'}</small></div>
+                <div className="tool-grid">
+                  {TOOL_GROUPS.map(tool => {
+                    const status = toolStatus(tool.key)
+                    return <div key={tool.key} className={`tool-cell ${status.state}`}><span>{tool.icon}</span><strong>{tool.label}</strong><i>{status.label}</i></div>
+                  })}
+                </div>
+              </section>
+              <section className="detail-section issue-section">
+                <button type="button" className="detail-section-heading issue-detail-trigger" onClick={() => openVerification('all')}>
+                  <span><FileSearchOutlined /> 问题与复测</span><small>查看全部 {issueCounts.all} 项</small>
+                </button>
+                <div className="remediation-summary">
+                  <button type="button" onClick={() => openVerification('all')}><strong>{issueCounts.all}</strong><span>全部</span></button>
+                  <button type="button" onClick={() => openVerification('open')}><strong>{issueCounts.open}</strong><span>待处理</span></button>
+                  <button type="button" onClick={() => openVerification('fixed')}><strong>{issueCounts.fixed}</strong><span>已修复</span></button>
+                  <button type="button" onClick={() => openVerification('unable')}><strong>{issueCounts.unable}</strong><span>无法完成</span></button>
+                </div>
+                <div className="remediation-board">
+                  {workspaceLoading ? (
+                    <div className="remediation-empty"><FileProtectOutlined /><strong>正在加载项目数据</strong><span>检测结果与整改状态加载完成后显示。</span></div>
+                  ) : openIssues.length ? openIssues.map(item => (
+                    <article className={`remediation-card ${item.severity || 'medium'} compact`} key={item.id}>
+                      <div className="remediation-card-top">
+                        <Tag color={item.source_type === 'document' ? 'cyan' : 'orange'}>{item.source_type === 'document' ? '文档' : '技术'}</Tag>
+                        <Tag color={['critical', 'high'].includes(item.severity) ? 'red' : 'gold'}>{severityLabel(item.severity)}</Tag>
+                      </div>
+                      <strong>{item.clause_name || item.group || item.clause_id}</strong>
+                      <p>{item.description || '待补充问题说明'}</p>
+                      {item.latest_verification?.outcome === 'unable' && <span className="remediation-waiting">{item.latest_verification.error}</span>}
+                    </article>
+                  )) : (
+                    <div className="remediation-empty"><FileProtectOutlined /><strong>当前没有待处理问题</strong><span>已修复问题和复测记录仍保留在检测记录与正式报告中。</span></div>
+                  )}
+                </div>
+              </section>
+            </>}
+
+            {detailTab === 'score' && <div className="score-explainer">
+              <section className="score-hero">
+                <div><span>当前合规分</span><strong>{currentScore ?? '—'}</strong><small>{scoreSummary?.project?.grade || '尚未形成结论'}</small></div>
+                <Progress type="circle" size={108} percent={currentScore || 0} strokeColor={currentScore >= 75 ? '#10b981' : '#f59e0b'} format={() => `${scoreMetrics.coverage ?? 0}%`} />
+              </section>
+              <section className="score-metric-grid">
+                <div><strong>{scoreMetrics.reliable ?? 0}</strong><span>可靠判定</span></div>
+                <div><strong>{scoreMetrics.unable ?? 0}</strong><span>失败/无法验证</span></div>
+                <div><strong>{scoreMetrics.not_applicable ?? 0}</strong><span>不适用</span></div>
+                <div><strong>{assessmentProgress}%</strong><span>流程进度</span></div>
+              </section>
+              <section className="score-rule-list">
+                <h3><BarChartOutlined /> 评分构成</h3>
+                <div><i className="pass" /><span><b>符合或真实复测修复</b><small>计满分</small></span></div>
+                <div><i className="partial" /><span><b>部分符合</b><small>计半分</small></span></div>
+                <div><i className="failed" /><span><b>不符合、失败或无法验证</b><small>计 0 分，进入分母</small></span></div>
+                <div><i className="na" /><span><b>明确不适用</b><small>排除评分</small></span></div>
+              </section>
+              {unablePercent > 0 && <div className="score-warning">当前有 {scoreMetrics.unable} 项失败或无法验证，约占适用检查的 {unablePercent}%，已经按 0 分扣分。</div>}
+            </div>}
+
+            {detailTab === 'history' && <div className="report-history">
+              <section className="history-trend-panel">
+                <div className="history-trend-heading">
+                  <span>合规分趋势</span>
+                  <strong>{Number.isFinite(currentScore) ? currentScore : '—'}</strong>
+                </div>
+                {visibleScoreTrend.length ? (
+                  <div className="history-trend-chart">
+                    <div className="history-trend-scale"><span>100</span><span>50</span><span>0</span></div>
+                    <div className="history-trend-plot">
+                      <MiniLineChart data={visibleScoreTrend.map(item => item.score)} height={112} />
+                      <div className="history-trend-labels">
+                        {visibleScoreTrend.map(item => <span key={item.version}>{item.version}</span>)}
+                      </div>
+                    </div>
                   </div>
-                  <strong>{item.clause_name || item.group || item.clause_id}</strong>
-                  <p>{item.description || '待补充问题说明'}</p>
-                  {item.latest_verification?.outcome === 'unable' && <span className="remediation-waiting">{item.latest_verification.error}</span>}
+                ) : (
+                  <div className="history-trend-empty">生成至少两个报告版本后显示评分趋势</div>
+                )}
+              </section>
+              <section className="history-heading">
+                <div><HistoryOutlined /><span><strong>评分与报告版本</strong><small>每份报告使用生成时的不可变数据快照</small></span></div>
+                <b>{reportHistory.length} 个版本</b>
+              </section>
+              {reportComparison && <section className="report-comparison-strip">
+                <span>V{reportComparison.previous.version}</span>
+                <SwapOutlined />
+                <span>V{reportComparison.current.version}</span>
+                <strong>{reportComparison.delta >= 0 ? '+' : ''}{reportComparison.delta} 分</strong>
+                <small>未解决问题 {reportComparison.previous.open_findings ?? 0} → {reportComparison.current.open_findings ?? 0}</small>
+                <Button type="text" size="small" onClick={() => setReportComparison(null)}>关闭</Button>
+              </section>}
+              {reportHistory.length ? reportHistory.map((item, index) => {
+                const older = reportHistory[index + 1]
+                const delta = Number.isFinite(item.score) && Number.isFinite(older?.score) ? Number((item.score - older.score).toFixed(1)) : null
+                return <article className={`report-version-row ${item.stale ? 'stale' : 'current'}`} key={item.id}>
+                  <div className="report-version-state"><span>{item.stale ? '已过期' : '当前'}</span><strong>V{item.version}</strong></div>
+                  <div className="report-version-score"><strong>{item.score ?? '未出具'}</strong>{delta !== null && <small className={delta >= 0 ? 'up' : 'down'}>{delta >= 0 ? '+' : ''}{delta}</small>}</div>
+                  <dl>
+                    <div><dt>生成时间</dt><dd>{item.generated_at ? new Date(item.generated_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</dd></div>
+                    <div><dt>覆盖率</dt><dd>{item.coverage == null ? '-' : `${item.coverage}%`}</dd></div>
+                    <div><dt>未解决</dt><dd>{item.open_findings ?? 0}</dd></div>
+                  </dl>
+                  <div className="report-version-actions">
+                    <Tooltip title="预览"><Button type="text" icon={<EyeOutlined />} onClick={() => openReportVersion(item.version)} aria-label={`预览报告 V${item.version}`} /></Tooltip>
+                    <Tooltip title="下载"><Button type="text" icon={<DownloadOutlined />} onClick={() => openReportVersion(item.version, true)} aria-label={`下载报告 V${item.version}`} /></Tooltip>
+                    <Tooltip title={older ? `与 V${older.version} 对比` : '没有更早版本'}><Button type="text" disabled={!older || delta === null} icon={<SwapOutlined />} onClick={() => setReportComparison({ current: item, previous: older, delta })} aria-label={`对比报告 V${item.version}`} /></Tooltip>
+                  </div>
+                  {item.stale && item.stale_reason && <p>{item.stale_reason}</p>}
                 </article>
-              )) : (
-                <div className="remediation-empty"><FileProtectOutlined /><strong>当前没有待处理问题</strong><span>已修复问题和复测记录仍保留在测评结果与 HTML 报告中。</span></div>
-              )}
-            </div>
-          </section>
-        </aside>
+              }) : <div className="remediation-empty"><HistoryOutlined /><strong>尚未生成正式报告</strong><span>完成前置阶段并生成报告后，这里会形成可追溯的评分版本。</span></div>}
+              <section className="history-score-rules">
+                <div className="history-score-ring" style={{ '--score': Number(currentScore || 0) }}>
+                  <span><strong>{currentScore ?? '—'}</strong><small>当前合规分</small></span>
+                </div>
+                <div className="history-score-copy">
+                  <div className="history-score-copy-heading">
+                    <span><strong>评分构成说明</strong><small>当前版本的自动评分口径</small></span>
+                    <em>可靠 {scoreMetrics.reliable ?? 0} · 无法验证 {scoreMetrics.unable ?? 0}</em>
+                  </div>
+                  <dl>
+                    <div><dt className="pass" /> <dd><b>符合 / 已修复</b><small>计满分</small></dd></div>
+                    <div><dt className="partial" /> <dd><b>部分符合</b><small>计半分</small></dd></div>
+                    <div><dt className="failed" /> <dd><b>不符合 / 无法验证</b><small>计 0 分</small></dd></div>
+                    <div><dt className="na" /> <dd><b>明确不适用</b><small>排除评分</small></dd></div>
+                  </dl>
+                </div>
+              </section>
+              {reportHistory.some(item => item.stale) && <div className="stale-report-warning"><ExclamationCircleFilled /> 过期报告只用于追溯，不能作为当前测评结论。</div>}
+            </div>}
+          </div>
+        </aside>}
       </div>
+      <Drawer
+        title="问题与复测"
+        placement="right"
+        width="min(960px, 96vw)"
+        open={verificationVisible}
+        onClose={() => setVerificationVisible(false)}
+        destroyOnClose
+        rootClassName="verification-detail-drawer"
+      >
+        <VerificationWorkspace
+          key={`${project?.id || 'project'}-${verificationFilter}`}
+          projectId={project?.id}
+          initialFilter={verificationFilter}
+        />
+      </Drawer>
     </div>
   )
 }

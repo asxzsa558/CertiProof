@@ -9,7 +9,7 @@
   width: 100%;
   height: 100%;
   transform-style: preserve-3d;
-  animation: logo-spin 8s linear infinite;
+  animation: logo-flip 5s ease-in-out infinite alternate;
   transition: transform 0.3s ease;
 }
 
@@ -53,7 +53,13 @@
 .coin-edge-3 { transform: translateZ(1.5px); }
 .coin-edge-4 { transform: translateZ(0); }
 
-@keyframes logo-spin {
-  from { transform: rotateY(0deg); }
-  to { transform: rotateY(360deg); }
+@keyframes logo-flip {
+  from { transform: rotateY(-24deg); }
+  to { transform: rotateY(204deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logo-coin {
+    animation: none;
+  }
 }

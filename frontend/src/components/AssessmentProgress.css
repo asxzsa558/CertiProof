@@ -1476,3 +1476,562 @@
     width: 100%;
   }
 }
+
+/* Project workspace compact intelligence skin */
+.phase-detail-drawer .ant-drawer-content {
+  background: #07111a;
+  border-left: 1px solid rgba(99, 183, 213, 0.2);
+}
+
+.phase-detail-drawer .ant-drawer-header {
+  padding: 13px 16px;
+  background: #091721;
+  border-bottom: 1px solid rgba(99, 183, 213, 0.18);
+}
+
+.phase-detail-drawer .ant-drawer-title,
+.phase-detail-drawer .ant-drawer-close {
+  color: rgba(229, 246, 252, 0.9);
+}
+
+.phase-detail-drawer .ant-drawer-body {
+  padding: 14px;
+  background:
+    linear-gradient(rgba(99, 183, 213, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 183, 213, 0.03) 1px, transparent 1px),
+    #07111a;
+  background-size: 28px 28px;
+}
+
+.drawer-title span {
+  color: #e8f7ff;
+  font-size: 14px;
+}
+
+.phase-info-card,
+.gap-track,
+.task-item,
+.document-analysis,
+.document-control,
+.phase-remediation-detail,
+.completion-time,
+.phase-timeline-tasks {
+  border-radius: 6px;
+  background: rgba(4, 12, 20, 0.66);
+  border-color: rgba(99, 183, 213, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.phase-info-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px;
+}
+
+.phase-info-card .info-row {
+  display: grid;
+  gap: 3px;
+  padding: 7px 8px;
+  border: 1px solid rgba(99, 183, 213, 0.12);
+  border-radius: 4px;
+  background: rgba(3, 10, 17, 0.42);
+}
+
+.phase-info-card .info-label,
+.phase-info-card .info-value {
+  text-align: left;
+}
+
+.phase-info-card .info-value {
+  color: rgba(235, 248, 253, 0.88);
+}
+
+.gap-analysis-tracks {
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.gap-track {
+  min-height: 210px;
+  padding: 13px;
+}
+
+.gap-track.technical-track {
+  background: rgba(3, 18, 18, 0.58);
+  border-color: rgba(52, 211, 153, 0.18);
+}
+
+.gap-track-header strong,
+.tasks-section h4 {
+  color: #eaf8fc;
+  font-size: 13px;
+}
+
+.gap-track-header p {
+  color: rgba(176, 204, 218, 0.58);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.gap-track-stats span {
+  padding: 6px 7px;
+  border: 1px solid rgba(99, 183, 213, 0.12);
+  border-left: 2px solid rgba(34, 211, 238, 0.34);
+  border-radius: 4px;
+  background: rgba(3, 10, 17, 0.42);
+}
+
+.task-item {
+  padding: 10px;
+}
+
+.task-item.in-progress {
+  border-color: rgba(34, 211, 238, 0.3);
+  background: rgba(8, 145, 178, 0.08);
+}
+
+.task-icon {
+  border-radius: 6px;
+}
+
+.task-name,
+.document-control-title strong,
+.document-control-point-title span {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.task-actions .ant-btn,
+.gap-track > .ant-btn,
+.completion-actions .ant-btn {
+  border-radius: 4px;
+}
+
+.document-analysis {
+  padding: 10px;
+}
+
+.document-analysis-details > summary,
+.document-control-evidence {
+  color: rgba(125, 211, 252, 0.88);
+}
+
+.phase-remediation-detail {
+  margin-left: 0;
+  border-left-color: rgba(34, 211, 238, 0.34);
+}
+
+.phase-verification-runs {
+  max-height: 240px;
+  padding-right: 4px;
+}
+
+.phase-verification-run {
+  border-top-color: rgba(99, 183, 213, 0.14);
+}
+
+@media (max-width: 760px) {
+  .phase-info-card,
+  .gap-analysis-tracks {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Project cockpit assessment rail */
+.cockpit-assessment {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: #dff7ff;
+}
+
+.cockpit-assessment-heading,
+.cockpit-assessment-heading > div,
+.cockpit-phase-title,
+.cockpit-phase-title > div,
+.cockpit-flow-summary > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cockpit-assessment-heading {
+  min-height: 32px;
+  padding: 0 2px 8px;
+  border-bottom: 1px solid rgba(82, 172, 209, 0.18);
+}
+
+.cockpit-assessment-heading > div {
+  gap: 10px;
+}
+
+.cockpit-assessment-heading span {
+  color: rgba(213, 237, 247, 0.8);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cockpit-assessment-heading strong {
+  color: #36d9ff;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.cockpit-assessment-heading .ant-tag {
+  margin: 0;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.cockpit-phase-list {
+  display: grid;
+  gap: 0;
+}
+
+.cockpit-phase {
+  display: grid;
+  grid-template-columns: 27px minmax(0, 1fr);
+  min-width: 0;
+  cursor: pointer;
+}
+
+.cockpit-phase:focus-visible {
+  outline: 1px solid rgba(79, 201, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.cockpit-phase-rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.cockpit-phase-rail > i {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  margin-top: 12px;
+  color: #7891a0;
+  border: 1px solid rgba(123, 162, 181, 0.44);
+  border-radius: 50%;
+  background: #08131c;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.cockpit-phase-rail > span {
+  position: absolute;
+  top: 31px;
+  bottom: -1px;
+  width: 1px;
+  background: rgba(81, 130, 153, 0.38);
+}
+
+.cockpit-phase.completed .cockpit-phase-rail > i {
+  color: #052017;
+  border-color: #34d399;
+  background: #34d399;
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.35);
+}
+
+.cockpit-phase.completed .cockpit-phase-rail > span {
+  background: linear-gradient(#34d399, rgba(52, 211, 153, 0.28));
+}
+
+.cockpit-phase.active .cockpit-phase-rail > i {
+  color: #dffaff;
+  border-color: #2aa7ff;
+  background: #1265b0;
+  box-shadow: 0 0 14px rgba(42, 167, 255, 0.48);
+}
+
+.cockpit-phase-content {
+  min-width: 0;
+  padding: 10px 6px 13px 5px;
+}
+
+.cockpit-phase-title {
+  gap: 8px;
+  min-height: 28px;
+}
+
+.cockpit-phase-title > div {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cockpit-phase-title strong {
+  overflow: hidden;
+  max-width: 188px;
+  color: #e9f8fd;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cockpit-phase-title small {
+  color: rgba(158, 190, 205, 0.56);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.cockpit-phase-title em {
+  flex: 0 0 auto;
+  color: rgba(158, 190, 205, 0.66);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.cockpit-phase.completed .cockpit-phase-title em {
+  color: #38e498;
+}
+
+.cockpit-phase.active .cockpit-phase-title em {
+  color: #46c7ff;
+}
+
+.cockpit-phase.expanded .cockpit-phase-content {
+  margin: 4px 0 8px;
+  padding: 11px 10px 10px;
+  border: 1px solid rgba(42, 167, 255, 0.56);
+  border-radius: 5px;
+  background:
+    linear-gradient(90deg, rgba(21, 97, 148, 0.18), transparent),
+    rgba(6, 20, 31, 0.92);
+  box-shadow: inset 0 0 24px rgba(30, 126, 192, 0.1), 0 0 22px rgba(34, 211, 238, 0.08);
+}
+
+.cockpit-phase.selected .cockpit-phase-content {
+  border-color: rgba(101, 225, 245, 0.72);
+}
+
+.cockpit-phase-detail {
+  display: grid;
+  gap: 1px;
+  margin-top: 9px;
+  border-top: 1px solid rgba(82, 172, 209, 0.15);
+}
+
+.cockpit-phase-detail > div:not(.cockpit-phase-actions) {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 34px;
+  padding: 4px 2px;
+  border-bottom: 1px solid rgba(82, 172, 209, 0.11);
+}
+
+.cockpit-phase-detail > div > span {
+  color: #3aaeff;
+  font-size: 12px;
+}
+
+.cockpit-phase-detail > div.done > span {
+  color: #34d399;
+}
+
+.cockpit-phase-detail > div > strong {
+  overflow: hidden;
+  color: rgba(223, 241, 248, 0.84);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cockpit-phase-detail > div > small {
+  color: rgba(152, 184, 200, 0.54);
+  font-size: 9px;
+}
+
+.cockpit-phase-detail > div.running > small {
+  color: #4fc9ff;
+}
+
+.cockpit-phase-detail > div.done > small {
+  color: #34d399;
+}
+
+.cockpit-phase-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cockpit-phase-actions .ant-btn {
+  height: 30px;
+  padding-inline: 9px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.cockpit-phase-actions .ant-btn-primary {
+  border-color: #258ee8;
+  background: linear-gradient(135deg, #1da7ee, #235fda);
+  box-shadow: 0 0 14px rgba(35, 151, 255, 0.22);
+}
+
+.cockpit-flow-summary {
+  padding: 12px;
+  border: 1px solid rgba(82, 172, 209, 0.2);
+  border-radius: 5px;
+  background: rgba(3, 12, 19, 0.7);
+}
+
+.cockpit-flow-summary > div:first-child span {
+  color: #e5f6fc;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cockpit-flow-summary > div:first-child strong {
+  color: #fbbf24;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.cockpit-flow-summary .ant-progress {
+  margin: 8px 0 9px;
+}
+
+.cockpit-flow-summary .ant-progress-bg {
+  background: linear-gradient(90deg, #278cff, #22d3ee) !important;
+}
+
+.cockpit-flow-summary dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.cockpit-flow-summary dl > div {
+  min-width: 0;
+  padding: 0 7px;
+  border-left: 1px solid rgba(82, 172, 209, 0.16);
+  text-align: center;
+}
+
+.cockpit-flow-summary dl > div:first-child {
+  border-left: 0;
+}
+
+.cockpit-flow-summary dt {
+  color: rgba(158, 190, 205, 0.54);
+  font-size: 9px;
+}
+
+.cockpit-flow-summary dd {
+  margin: 2px 0 0;
+  color: #e8f8fd;
+  font-family: var(--font-mono);
+  font-size: 15px;
+}
+
+.cockpit-full-reset.ant-btn {
+  height: 32px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+/* Final visual calibration against the cockpit reference */
+.cockpit-assessment {
+  gap: 12px;
+  min-height: 100%;
+}
+
+.cockpit-phase {
+  grid-template-columns: 30px minmax(0, 1fr);
+}
+
+.cockpit-phase-rail > i {
+  width: 21px;
+  height: 21px;
+  font-size: 11px;
+}
+
+.cockpit-phase-rail > span {
+  top: 33px;
+}
+
+.cockpit-phase-content {
+  padding: 11px 7px 15px 6px;
+}
+
+.cockpit-phase-title strong {
+  max-width: 205px;
+  font-size: 14px;
+}
+
+.cockpit-phase-title small {
+  font-size: 11px;
+}
+
+.cockpit-phase-title em {
+  font-size: 12px;
+}
+
+.cockpit-phase.expanded .cockpit-phase-content {
+  padding: 12px 11px 11px;
+  border-color: rgba(42, 167, 255, 0.68);
+  background:
+    linear-gradient(90deg, rgba(21, 97, 148, 0.24), transparent),
+    #0a1d2a;
+}
+
+.cockpit-phase-detail > div:not(.cockpit-phase-actions) {
+  min-height: 38px;
+}
+
+.cockpit-phase-detail > div > strong {
+  font-size: 12px;
+}
+
+.cockpit-phase-detail > div > small {
+  font-size: 10px;
+}
+
+.cockpit-phase-actions .ant-btn {
+  height: 34px;
+  font-size: 12px;
+}
+
+.cockpit-flow-summary {
+  margin-top: auto;
+  padding: 14px;
+  border-color: rgba(82, 166, 199, 0.28);
+  background: rgba(4, 14, 22, 0.78);
+}
+
+.cockpit-flow-summary > div:first-child span {
+  font-size: 13px;
+}
+
+.cockpit-flow-summary > div:first-child strong {
+  font-size: 12px;
+}
+
+.cockpit-flow-summary dt {
+  font-size: 10px;
+}
+
+.cockpit-flow-summary dd {
+  font-size: 17px;
+}
+
+.cockpit-full-reset.ant-btn {
+  height: 36px;
+  font-size: 12px;
+}

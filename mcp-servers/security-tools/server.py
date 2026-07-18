@@ -15,6 +15,7 @@ import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+from urllib.parse import urlsplit
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -56,6 +57,7 @@ DEFAULT_TCP_VERIFY_PORTS = [
     21, 22, 23, 25, 53, 80, 110, 139, 143, 443, 445, 993, 995,
     1521, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 8888, 27017,
 ]
+NUCLEI_PROBE_PORTS = [80, 443, 8080, 8443, 8000, 8888, 3000, 5000, 22]
 HIGH_RISK_PORT_RANGE = ",".join(str(port) for port in DEFAULT_TCP_VERIFY_PORTS)
 MAX_NMAP_HOST_TIMEOUT = 180
 MAX_COMMAND_TIMEOUT = 300
@@ -144,6 +146,20 @@ async def verify_tcp_open_ports(target: str, ports: List[int], timeout: float = 
 
     results = await asyncio.gather(*(probe(port) for port in ports))
     return [result for result in results if result]
+
+
+def nuclei_probe_endpoint(target: str) -> tuple[str, List[int]]:
+    """Resolve the host and useful probe ports without changing the nuclei target."""
+    value = str(target or "").strip()
+    parsed = urlsplit(value if "://" in value else f"//{value}")
+    host = parsed.hostname or value
+    if parsed.port:
+        return host, [parsed.port]
+    if parsed.scheme == "https":
+        return host, [443]
+    if parsed.scheme == "http":
+        return host, [80]
+    return host, NUCLEI_PROBE_PORTS
 
 
 def parse_ignored_filtered_count(output: str) -> int:
@@ -608,6 +624,44 @@ async def nuclei_scan(params: Dict[str, Any], process_callback: Optional[callabl
     
     templates = params.get("templates")
     severity = params.get("severity")
+    probe_host, probe_ports = nuclei_probe_endpoint(target)
+    reachable_ports = await verify_tcp_open_ports(
+        probe_host,
+        probe_ports,
+        timeout=max(0.2, min(float(params.get("preflight_timeout", 1.5)), 3.0)),
+    )
+    probe_metadata = {
+        "host": probe_host,
+        "attempted_ports": probe_ports,
+        "reachable_ports": [item["port"] for item in reachable_ports],
+    }
+    if not reachable_ports:
+        reason = (
+            "目标未在可扫描服务端口建立 TCP 连接，漏洞扫描无法验证。"
+            "这可能表示目标不存在、网络不可达、端口关闭或被防火墙过滤。"
+        )
+        return {
+            "tool": "nuclei_scan",
+            "version": "1.0",
+            "status": "warning",
+            "error": reason,
+            "data": {
+                "target": target,
+                "findings": [],
+                "total_findings": 0,
+                "reachable": False,
+                "scan_completed": False,
+                "templates": templates,
+                "severity_filter": severity,
+                "tool_error": reason,
+                "probe": probe_metadata,
+            },
+            "metadata": {
+                "duration_ms": 0,
+                "scan_time": datetime.utcnow().isoformat(),
+                "preflight": probe_metadata,
+            },
+        }
     
     cmd = ["nuclei", "-target", target, "-t", "/root/nuclei-templates", "-jsonl", "-silent"]
     
@@ -663,30 +717,44 @@ async def nuclei_scan(params: Dict[str, Any], process_callback: Optional[callabl
         
         duration_ms = int((time.time() - start_time) * 1000)
         scan_completed = process.returncode == 0
-        tool_error = stderr_text or None
+        tool_error = None if scan_completed else (stderr_text or f"nuclei exited with code {process.returncode}")
         if "no templates provided" in stderr_text.lower():
             scan_completed = False
             tool_error = "nuclei 模板缺失，漏洞扫描未实际执行；请更新 nuclei templates"
         elif "could not run nuclei" in stderr_text.lower():
             scan_completed = False
+            tool_error = stderr_text
+        elif not findings and any(marker in stderr_text.lower() for marker in (
+            "could not resolve",
+            "no such host",
+            "network is unreachable",
+            "connection refused",
+            "i/o timeout",
+        )):
+            scan_completed = False
+            tool_error = stderr_text
         
         return {
             "tool": "nuclei_scan",
             "version": "1.0",
-            "status": "success",
+            "status": "success" if scan_completed else "warning",
+            "error": tool_error,
             "data": {
                 "target": target,
                 "findings": findings,
                 "total_findings": len(findings),
+                "reachable": True,
                 "scan_completed": scan_completed,
                 "templates": templates,
                 "severity_filter": severity,
                 "tool_error": tool_error,
+                "probe": probe_metadata,
             },
             "metadata": {
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
                 "returncode": process.returncode,
+                "preflight": probe_metadata,
             },
         }
     except asyncio.TimeoutError:
@@ -703,10 +771,12 @@ async def nuclei_scan(params: Dict[str, Any], process_callback: Optional[callabl
                 "target": target,
                 "findings": [],
                 "total_findings": 0,
+                "reachable": True,
                 "scan_completed": False,
                 "templates": templates,
                 "severity_filter": severity,
                 "tool_error": "nuclei scan timeout",
+                "probe": probe_metadata,
             },
             "metadata": {
                 "duration_ms": duration_ms,

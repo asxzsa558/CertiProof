@@ -16,7 +16,7 @@ const hexToRgba = (hex, alpha = 0.2) => {
 
 const RESULT_STATES = {
   success: { key: 'success', label: '成功', color: 'success', risk: 'low' },
-  warning: { key: 'warning', label: '未完成/无法判定', color: 'warning', risk: 'medium' },
+  warning: { key: 'warning', label: '无法判定', color: 'warning', risk: 'medium' },
   failed: { key: 'failed', label: '失败', color: 'error', risk: 'high' },
   skipped: { key: 'skipped', label: '已跳过', color: 'default', risk: 'medium' },
 }
@@ -33,6 +33,7 @@ const severityLabel = (value, fallback = '提示') => SEVERITY_LABELS[String(val
 
 const inferResultState = (assetData = {}) => {
   const result = assetData.result || assetData.data || assetData
+  const capability = assetData.capability || result.capability
   const explicit = String(assetData.display_status || assetData.status || result.status || '').toLowerCase()
   if (['failed', 'failure', 'error'].includes(explicit)) return RESULT_STATES.failed
   if (['skipped', 'cancelled', 'canceled'].includes(explicit) || result.skipped) return RESULT_STATES.skipped
@@ -41,6 +42,13 @@ const inferResultState = (assetData = {}) => {
     result.scan_completed === false ||
     result.reachable === false ||
     result.success === false
+  ) {
+    return RESULT_STATES.warning
+  }
+  if (
+    capability === 'scan_vulnerabilities' &&
+    result.reachable !== true &&
+    !(result.findings || []).length
   ) {
     return RESULT_STATES.warning
   }

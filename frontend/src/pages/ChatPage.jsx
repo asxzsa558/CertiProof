@@ -7,7 +7,6 @@ import {
   UserOutlined,
   SettingOutlined,
   BellOutlined,
-  HistoryOutlined,
   PlusOutlined,
   SafetyCertificateOutlined,
   FileSearchOutlined,
@@ -15,10 +14,12 @@ import {
   DeleteOutlined,
   EditOutlined,
   ArrowLeftOutlined,
-  AppstoreOutlined,
-  UpOutlined,
-  DownOutlined,
   DashboardOutlined,
+  ApartmentOutlined,
+  ControlOutlined,
+  FileTextOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../store/authStore'
 import SystemConfig from '../components/SystemConfig'
@@ -36,7 +37,7 @@ function ChatPage() {
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
   const currentOrgId = useAuthStore((state) => state.currentOrgId)
-  const [projects, setProjects] = useState([])
+  const organizations = useAuthStore((state) => state.organizations)
   const [selectedProject, setSelectedProject] = useState(null)
   const [selectedModel, setSelectedModel] = useState(null)
   const [siderCollapsed, setSiderCollapsed] = useState(false)
@@ -50,7 +51,8 @@ function ChatPage() {
   const [assetForm] = Form.useForm()
   const [managerAssets, setManagerAssets] = useState([])
   const [batchAssets, setBatchAssets] = useState('')
-  const [assetsExpanded, setAssetsExpanded] = useState(true)
+  const [workspaceSummary, setWorkspaceSummary] = useState({})
+  const [profileVisible, setProfileVisible] = useState(false)
 
   useEffect(() => {
     fetchProjects()
@@ -58,6 +60,7 @@ function ChatPage() {
 
   useEffect(() => {
     if (selectedProject) {
+      localStorage.setItem('lastProjectId', String(selectedProject.id))
       fetchAssets(selectedProject.id)
     } else {
       setAssets([])
@@ -76,8 +79,6 @@ function ChatPage() {
       const response = await api.get('/projects/', {
         params: currentOrgId ? { organization_id: currentOrgId } : undefined,
       })
-      setProjects(response.data)
-      
       // 如果 URL 中有 projectId，优先选择该项目
       if (urlProjectId) {
         const urlProject = response.data.find(p => p.id === parseInt(urlProjectId))
@@ -93,6 +94,7 @@ function ChatPage() {
         const lastProject = response.data.find(p => p.id === parseInt(lastProjectId))
         if (lastProject) {
           setSelectedProject(lastProject)
+          if (urlProjectId) navigate(`/projects/${lastProject.id}`, { replace: true })
           return
         }
       }
@@ -100,6 +102,10 @@ function ChatPage() {
       // 否则选择第一个项目
       if (response.data.length > 0 && !selectedProject) {
         setSelectedProject(response.data[0])
+        if (urlProjectId) navigate(`/projects/${response.data[0].id}`, { replace: true })
+      } else if (response.data.length === 0) {
+        setSelectedProject(null)
+        navigate('/projects', { replace: true })
       }
     } catch (error) {
       console.error('Failed to fetch projects:', error)
@@ -235,12 +241,10 @@ function ChatPage() {
     navigate('/login')
   }
 
-  const handleSelectProject = (project) => {
-    setSelectedProject(project)
-    // 保存项目 ID 到 localStorage
-    if (project && project.id) {
-      localStorage.setItem('lastProjectId', project.id.toString())
-    }
+  const handleUserMenu = ({ key }) => {
+    if (key === 'profile') setProfileVisible(true)
+    if (key === 'settings') navigate('/settings/models')
+    if (key === 'logout') handleLogout()
   }
 
   const handleEditProject = (project) => {
@@ -317,7 +321,7 @@ function ChatPage() {
 
   const managerAssetColumns = [
     {
-      title: '类型',
+      title: '资产类型',
       dataIndex: 'asset_type',
       key: 'asset_type',
       width: 80,
@@ -337,6 +341,12 @@ function ChatPage() {
       dataIndex: 'name',
       key: 'name',
       render: (name) => name || '-',
+    },
+    {
+      title: '所属项目',
+      key: 'project',
+      width: 150,
+      render: () => managerProject?.name || selectedProject?.name || '-',
     },
     {
       title: '验证状态',
@@ -366,167 +376,48 @@ function ChatPage() {
     },
   ]
 
+  const navItems = [
+    { key: 'dashboard', title: '态势总览', label: '总览', icon: <DashboardOutlined />, action: () => navigate('/dashboard') },
+    { key: 'projects', title: '项目与资产', label: '项目', icon: <ProjectOutlined />, action: () => navigate('/projects') },
+    { key: 'assets', title: '资产清单', label: '资产', icon: <CloudServerOutlined />, action: () => navigate('/projects?view=assets') },
+    { key: 'assessment', title: '等保测评', label: '测评', icon: <SafetyCertificateOutlined />, active: true, action: () => setSiderCollapsed(false) },
+    { key: 'results', title: '检测结果', label: '结果', icon: <FileSearchOutlined />, action: () => selectedProject && navigate(`/projects/${selectedProject.id}/results`) },
+    { key: 'reports', title: '报告中心', label: '报告', icon: <FileTextOutlined />, action: () => navigate('/reports') },
+  ]
+
   return (
-    <Layout className="chat-page-layout">
-      {/* Left Sidebar */}
-      <Sider
-        width={280}
-        collapsed={siderCollapsed}
-        collapsedWidth={0}
-        trigger={null}
-        className="chat-sider"
-      >
-        <div className="sider-header">
-          <div className="sider-logo">
-            <VeriSureLogo size={56} />
-            <span className="logo-text">CertiProof</span>
-          </div>
+    <Layout className="chat-page-layout workspace-page-layout">
+      <Header className="chat-page-header workspace-global-header">
+        <div className="workspace-global-brand">
+          <VeriSureLogo size={38} className="workspace-flat-logo" />
+          <strong>CertiProof</strong>
         </div>
-
-        <div className="sider-actions">
-          <Button
-            icon={<DashboardOutlined />}
-            onClick={() => navigate('/dashboard')}
-            block
-            className="dashboard-btn"
-          >
-            态势总览
-          </Button>
-        </div>
-
-        <div className="sider-section">
-          <div className="section-title">
-            <ProjectOutlined style={{ marginRight: 8 }} />
-            当前项目
-          </div>
-          {selectedProject && (
-            <div className="current-project-info">
-              <div className="project-item active">
-                <div className="project-item-info">
-                  <div className="project-item-name">{selectedProject.name}</div>
-                  <div className="project-item-meta">
-                    <span className="project-level">
-                      {selectedProject.compliance_level}
-                    </span>
-                    {selectedProject.compliance_score !== null && selectedProject.compliance_score !== undefined ? (
-                      <span className="project-score" style={{ color: getScoreColor(selectedProject.compliance_score) }}>
-                        合规 {selectedProject.compliance_score} 分
-                      </span>
-                    ) : (
-                      <span className="project-score-unchecked">合规未判定</span>
-                    )}
-                  </div>
-                </div>
-                <Space size={0}>
-                  <Tooltip title="查看扫描结果">
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<FileSearchOutlined />}
-                      onClick={() => navigate(`/projects/${selectedProject.id}/results`)}
-                      className="project-results-btn"
-                    />
-                  </Tooltip>
-                </Space>
-              </div>
-              <div className="inline-assets">
-                <div className="inline-assets-header">
-                  <CloudServerOutlined style={{ marginRight: 4 }} />
-                  <span>资产</span>
-                  <Badge count={assets.length} size="small" style={{ backgroundColor: '#6366f1', marginLeft: 4 }} />
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<PlusOutlined />}
-                    onClick={handleNewAsset}
-                    className="add-asset-btn"
-                  />
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={assetsExpanded ? <UpOutlined /> : <DownOutlined />}
-                    onClick={() => setAssetsExpanded(!assetsExpanded)}
-                    className="toggle-assets-btn"
-                  />
-                </div>
-                {assetsExpanded && (
-                  <>
-                    {assetsLoading ? (
-                      <div className="empty-assets-inline">资产加载中...</div>
-                    ) : assets.length === 0 ? (
-                      <div className="empty-assets-inline">
-                        <Button type="link" size="small" onClick={handleNewAsset}>
-                          + 添加资产
-                        </Button>
-                      </div>
-                    ) : (
-                      assets.slice(0, 5).map((asset) => (
-                        <div key={asset.id} className="asset-item-inline">
-                          <Tag color={asset.asset_type === 'ip' ? 'blue' : asset.asset_type === 'domain' ? 'green' : 'purple'} className="asset-type-tag">
-                            {asset.asset_type === 'ip' ? 'IP' : asset.asset_type === 'domain' ? '域名' : '云'}
-                          </Tag>
-                          <span className="asset-value">{asset.value}</span>
-                          <Popconfirm
-                            title="确定删除？"
-                            onConfirm={() => handleDeleteAsset(asset.id)}
-                            okText="删除"
-                            cancelText="取消"
-                          >
-                            <Button type="text" size="small" icon={<DeleteOutlined />} className="delete-asset-btn" />
-                          </Popconfirm>
-                        </div>
-                      ))
-                    )}
-                  </>
-                )}
-              </div>
+        <div className="header-left">
+          {showManager ? (
+            <div className="current-project">
+              <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleCloseManager} className="back-to-chat-btn">
+                返回项目对话
+              </Button>
+              <span className="current-project-name">{managerProject?.name} - 项目管理</span>
             </div>
-          )}
-          
-          {/* Assessment Progress - 显示在侧边栏底部 */}
-          {selectedProject && (
-            <div className="sider-assessment-section">
-              <AssessmentProgress 
-                projectId={selectedProject.id} 
-                projectName={selectedProject.name} 
-              />
+          ) : selectedProject && (
+            <div className="workspace-breadcrumb">
+              <span>项目</span><i>/</i><strong>{selectedProject.name}</strong>
             </div>
           )}
         </div>
-      </Sider>
-
-      {/* Main Content */}
-      <Layout className="chat-main-layout">
-        {/* Top Header */}
-        <Header className="chat-page-header">
-          <div className="header-left">
-            <Button
-              type="text"
-              icon={<ProjectOutlined />}
-              onClick={() => setSiderCollapsed(!siderCollapsed)}
-              className="sider-toggle-btn"
-            />
-            {showManager ? (
-              <div className="current-project">
-                <Button
-                  type="text"
-                  icon={<ArrowLeftOutlined />}
-                  onClick={handleCloseManager}
-                  className="back-to-chat-btn"
-                >
-                  返回对话
-                </Button>
-                <span className="current-project-name">{managerProject?.name} - 项目管理</span>
-              </div>
-            ) : selectedProject && (
-              <div className="current-project">
-                <span className="current-project-name">{selectedProject.name}</span>
-                <span className="current-project-level">{selectedProject.compliance_level}</span>
-              </div>
-            )}
-          </div>
-          {!showManager && (
-            <Space size="middle">
+        {!showManager && (
+          <>
+            <div className="workspace-header-metrics">
+              <div className="workspace-online"><i />在线</div>
+              <div><span>合规分</span><strong style={{ color: getScoreColor(workspaceSummary.score ?? selectedProject?.compliance_score ?? 0) }}>{workspaceSummary.score ?? selectedProject?.compliance_score ?? '—'}</strong></div>
+              <div><span>可靠覆盖率</span><strong className="good">{Number.isFinite(workspaceSummary.coverage) ? `${workspaceSummary.coverage}%` : '—'}</strong></div>
+              <div><span>待处理</span><strong className="danger">{workspaceSummary.open ?? '—'}</strong></div>
+            </div>
+            <Space size="small" className="workspace-header-actions">
+              <Tooltip title="检测记录">
+                <Button icon={<FileSearchOutlined />} type="text" className="header-icon-btn" onClick={() => selectedProject && navigate(`/projects/${selectedProject.id}/results`)} />
+              </Tooltip>
               <SystemConfig
                 value={selectedModel}
                 onChange={setSelectedModel}
@@ -540,27 +431,118 @@ function ChatPage() {
               <Dropdown
                 menu={{
                   items: userMenuItems,
-                  onClick: ({ key }) => key === 'logout' && handleLogout(),
+                  onClick: handleUserMenu,
                 }}
                 placement="bottomRight"
               >
-                <Space className="user-menu-trigger">
-                  <Avatar
-                    size={32}
-                    style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
-                    icon={<UserOutlined />}
-                  />
+                <Space className="user-menu-trigger" role="button" tabIndex={0} aria-label="打开账户菜单">
+                  <Avatar size={32} style={{ background: '#153249' }} icon={<UserOutlined />} />
                   <span className="user-name">{user?.username}</span>
                 </Space>
               </Dropdown>
             </Space>
-          )}
-        </Header>
+          </>
+        )}
+      </Header>
 
-        {/* Content */}
+      <Layout className="workspace-body-layout">
+      <Sider width={84} trigger={null} className="workspace-nav-rail">
+        <nav className="workspace-rail-nav" aria-label="项目工作台导航">
+          {navItems.map(item => (
+            <Tooltip key={item.key} title={item.title} placement="right">
+              <Button
+                type="text"
+                icon={item.icon}
+                onClick={item.action}
+                className={`workspace-rail-button ${item.active ? 'active' : ''}`}
+                aria-label={item.title}
+              >
+                <span>{item.label || item.title.replace('（待完善）', '')}</span>
+              </Button>
+            </Tooltip>
+          ))}
+        </nav>
+        <div className="workspace-rail-footer">
+          <Tooltip title="项目设置" placement="right">
+            <Button
+              type="text"
+              icon={<ControlOutlined />}
+              onClick={() => selectedProject && handleOpenManager(selectedProject)}
+              className={`workspace-rail-button ${showManager ? 'active' : ''}`}
+              aria-label="项目设置"
+            >
+              <span>设置</span>
+            </Button>
+          </Tooltip>
+          <Tooltip title="组织与权限" placement="right">
+            <Button
+              type="text"
+              icon={<ApartmentOutlined />}
+              onClick={() => navigate('/settings/organization')}
+              className="workspace-rail-button"
+              aria-label="组织与权限"
+            >
+              <span>权限</span>
+            </Button>
+          </Tooltip>
+        </div>
+      </Sider>
+
+      {siderCollapsed && (
+        <div className="assessment-reopen-rail">
+          <Tooltip title="展开等保自查流程" placement="right">
+            <Button
+              type="text"
+              icon={<MenuUnfoldOutlined />}
+              onClick={() => setSiderCollapsed(false)}
+              aria-label="展开等保自查流程"
+            >
+              <span>等保流程</span>
+            </Button>
+          </Tooltip>
+        </div>
+      )}
+
+      <Sider
+        width={360}
+        collapsed={siderCollapsed}
+        collapsedWidth={0}
+        trigger={null}
+        className="workspace-assessment-sider"
+      >
+        <div className="assessment-drawer-header">
+          <strong className="assessment-drawer-kicker">等保自查流程</strong>
+          <Tooltip title="收起测评栏">
+            <Button type="text" icon={<MenuFoldOutlined />} onClick={() => setSiderCollapsed(true)} aria-label="收起测评栏" />
+          </Tooltip>
+        </div>
+        <div className="assessment-drawer-scroll">
+          {selectedProject && (
+            <div className="assessment-drawer-flow">
+              <AssessmentProgress
+                projectId={selectedProject.id}
+                projectName={selectedProject.name}
+                variant="cockpit"
+                openIssues={workspaceSummary.open}
+              />
+            </div>
+          )}
+        </div>
+      </Sider>
+
+      <Layout className="chat-main-layout">
         <Content className="chat-page-content">
           {showManager ? (
             <div className="project-manager">
+              <div className="project-manager-toolbar">
+                <Button type="primary" icon={<ArrowLeftOutlined />} onClick={handleCloseManager}>
+                  返回项目对话
+                </Button>
+                <div>
+                  <strong>项目设置</strong>
+                  <span>{managerProject?.name} · {managerProject?.compliance_level || '未设置等级'} · {managerAssets.length} 个资产</span>
+                </div>
+              </div>
               <div className="manager-section">
                 <div className="manager-section-header">
                   <h3>项目信息</h3>
@@ -608,11 +590,14 @@ function ChatPage() {
 
               <div className="manager-section">
                 <div className="manager-section-header">
-                  <h3>
-                    <CloudServerOutlined style={{ marginRight: 8 }} />
-                    资产管理
-                    <Badge count={managerAssets.length} size="small" style={{ backgroundColor: '#6366f1', marginLeft: 8 }} />
-                  </h3>
+                  <div>
+                    <h3>
+                      <CloudServerOutlined style={{ marginRight: 8 }} />
+                      项目资产
+                      <Badge count={managerAssets.length} size="small" style={{ backgroundColor: '#6366f1', marginLeft: 8 }} />
+                    </h3>
+                    <p className="manager-section-context">所属项目：{managerProject?.name || '-'}</p>
+                  </div>
                   <Button type="primary" icon={<PlusOutlined />} onClick={handleNewAsset}>
                     添加资产
                   </Button>
@@ -622,6 +607,7 @@ function ChatPage() {
                   dataSource={managerAssets}
                   rowKey="id"
                   pagination={false}
+                  scroll={{ x: 720 }}
                   size="small"
                   className="manager-table"
                   locale={{ emptyText: '暂无资产，点击上方按钮添加' }}
@@ -635,9 +621,11 @@ function ChatPage() {
               assetsLoading={assetsLoading}
               modelId={selectedModel}
               onOpenResults={() => selectedProject && navigate(`/projects/${selectedProject.id}/results`)}
+              onWorkspaceSummary={setWorkspaceSummary}
             />
           )}
         </Content>
+      </Layout>
       </Layout>
 
       {/* Project settings belong to the current project; creation lives in 项目工作台. */}
@@ -663,6 +651,36 @@ function ChatPage() {
             </Select>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="个人资料"
+        open={profileVisible}
+        onCancel={() => setProfileVisible(false)}
+        footer={[
+          <Button key="permissions" onClick={() => { setProfileVisible(false); navigate('/settings/organization') }}>
+            查看权限
+          </Button>,
+          <Button key="close" type="primary" onClick={() => setProfileVisible(false)}>
+            完成
+          </Button>,
+        ]}
+        width={460}
+        className="workspace-profile-modal"
+      >
+        <div className="workspace-profile-hero">
+          <Avatar size={58} style={{ background: '#123a52' }} icon={<UserOutlined />} />
+          <div>
+            <strong>{user?.full_name || user?.username || '当前用户'}</strong>
+            <span>{user?.email || '未设置邮箱'}</span>
+          </div>
+        </div>
+        <dl className="workspace-profile-grid">
+          <div><dt>用户名</dt><dd>{user?.username || '—'}</dd></div>
+          <div><dt>账户角色</dt><dd>{user?.role || '组织成员'}</dd></div>
+          <div><dt>当前组织</dt><dd>{organizations.find(org => org.id === currentOrgId)?.name || '—'}</dd></div>
+          <div><dt>账户状态</dt><dd className="profile-active"><i />正常</dd></div>
+        </dl>
       </Modal>
 
       {/* Asset Modal */}

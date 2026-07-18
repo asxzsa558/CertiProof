@@ -26,7 +26,9 @@ from app.models.context import (
 )
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse
 from app.services.report_service import (
+    get_report_artifact_version,
     get_latest_report_artifact,
+    list_report_artifacts,
     read_report_artifact_html,
     report_artifact_payload,
 )
@@ -278,6 +280,45 @@ async def list_projects(
             .order_by(Project.created_at.desc())
         )
     return result.scalars().all()
+
+
+@router.get("/{project_id}/reports")
+async def list_report_history(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await get_project_for_user(db, project_id, current_user.id, "report:export")
+    return [report_artifact_payload(item) for item in await list_report_artifacts(db, project_id)]
+
+
+@router.get("/{project_id}/reports/{version}")
+async def get_report_version(
+    project_id: int,
+    version: int,
+    download: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await get_project_for_user(db, project_id, current_user.id, "report:export")
+    artifact = await get_report_artifact_version(db, project_id, version)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="报告版本不存在")
+    try:
+        return Response(
+            content=await read_report_artifact_html(artifact),
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Content-Disposition": (
+                    f"attachment; filename=certiproof-report-{project_id}-v{version}.html"
+                    if download else "inline"
+                ),
+                "X-Report-Version": str(artifact.version),
+                "X-Report-Status": artifact.status,
+            },
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail=str(exc)) from exc
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

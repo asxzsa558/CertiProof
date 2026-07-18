@@ -17,7 +17,6 @@ import {
   LockOutlined,
   LogoutOutlined,
   ProjectOutlined,
-  RadarChartOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
@@ -37,7 +36,7 @@ const NAV_ITEMS = [
   { key: 'projects', group: '项目执行', label: '项目工作台', icon: <ProjectOutlined />, path: '/projects' },
   { key: 'assets', group: '项目执行', label: '资产矩阵', icon: <DatabaseOutlined />, path: '/projects?view=assets' },
   { key: 'assessment', group: '测评中心', label: '等保测评', icon: <SafetyCertificateOutlined />, path: '/projects' },
-  { key: 'results', group: '测评中心', label: '检测结果', icon: <RadarChartOutlined />, path: '/projects' },
+  { key: 'password-assessment', group: '测评中心', label: '密码测评', icon: <LockOutlined />, upcoming: true },
   { key: 'reports', group: '治理中心', label: '报告中心', icon: <FileTextOutlined />, path: '/reports' },
   { key: 'roles', group: '治理中心', label: '角色权限', icon: <TeamOutlined />, path: '/settings/organization' },
   { key: 'settings', group: '系统', label: '系统设置', icon: <SettingOutlined />, path: '/settings/models' },
@@ -252,8 +251,14 @@ function Dashboard() {
               {items.map((item) => (
                 <button
                   key={item.key}
-                  className={item.key === 'overview' ? 'active' : ''}
-                  onClick={() => navigate(item.path)}
+                  className={`${item.key === 'overview' ? 'active' : ''}${item.upcoming ? ' upcoming' : ''}`}
+                  onClick={() => {
+                    if (item.upcoming) {
+                      message.info('下个版本更新，暂未开启')
+                      return
+                    }
+                    navigate(item.path)
+                  }}
                 >
                   {item.icon}
                   <span>{item.label}</span>

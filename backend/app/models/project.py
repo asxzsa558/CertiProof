@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum as SQLEnum, Text
+from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Enum as SQLEnum, Text
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
@@ -33,7 +33,7 @@ class Project(Base):
     status = Column(SQLEnum(ProjectStatus), default=ProjectStatus.ACTIVE, nullable=False)
     
     # Compliance score
-    compliance_score = Column(Integer, nullable=True)  # 0-100
+    compliance_score = Column(Float, nullable=True)  # 0-100
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

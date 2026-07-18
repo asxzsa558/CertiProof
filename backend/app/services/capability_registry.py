@@ -651,20 +651,6 @@ class CapabilityRegistry:
         # ========== 数据查询类能力 ==========
         
         self.register(Capability(
-            name="view_scan_results",
-            description="查看之前的扫描结果，包括开放的端口、发现的漏洞、SSL问题等。如果不指定参数，返回最近的扫描结果。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "查询内容，如'开放端口'、'安全问题'、'所有结果'"},
-                    "target": {"type": "string", "description": "指定目标的扫描结果"},
-                },
-                "required": []
-            },
-            category="query"
-        ))
-        
-        self.register(Capability(
             name="view_open_ports",
             description="查看开放端口列表，显示哪些端口是开放的，运行什么服务。",
             parameters={

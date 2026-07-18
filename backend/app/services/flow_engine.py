@@ -532,10 +532,15 @@ class FlowEngine:
         return repaired
     
     async def _sync_project_assessment(self, assessment):
-        """同步 ProjectAssessment 状态和分数"""
+        """同步最新一次测评的 ProjectAssessment 状态和分数。"""
         from app.models.assessment_type import ProjectAssessment, AssessmentType
         from app.models.project import Project
-        from sqlalchemy import select
+
+        latest_assessment_id = await self.db.scalar(
+            select(func.max(Assessment.id)).where(Assessment.project_id == assessment.project_id)
+        )
+        if assessment.id != latest_assessment_id:
+            return
         
         # 获取项目
         result = await self.db.execute(
@@ -601,7 +606,7 @@ class FlowEngine:
         tasks = [task for phase in measured_phases for task in await self.get_tasks(phase.id, official_only=True)]
         if not tasks:
             return {"score": None, "coverage": 0.0, "reliable": 0, "unable": 0, "not_applicable": 0}
-        score_ready = not any(task.status in {"todo", "in_progress", "failed"} for task in tasks)
+        score_ready = not any(task.status in {"todo", "in_progress"} for task in tasks)
 
         findings = list((await self.db.execute(select(Finding).where(
             Finding.project_id == assessment.project_id,
@@ -655,15 +660,26 @@ class FlowEngine:
                     ids.update(scan_task_ids(item))
             return ids
 
+        def is_not_applicable(value: Any) -> bool:
+            if not isinstance(value, dict):
+                return False
+            if value.get("outcome") == "not_applicable":
+                return True
+            if str(value.get("skip_reason") or "").startswith("不适用："):
+                return True
+            asset_results = value.get("asset_results")
+            return bool(asset_results) and all(is_not_applicable(item) for item in asset_results.values())
+
+        control_task_ids = {row.task_id for row in latest_controls.values()}
+        for task in (task for task in tasks if task.task_type == "doc_review"):
+            if task.status in {"completed", "cancelled"} and is_not_applicable(task.result or {}):
+                not_applicable += 1
+            elif task.status in {"failed", "cancelled"} and task.id not in control_task_ids:
+                unable += 1
+
         technical_findings = [finding for finding in findings if finding.source_type == "technical"]
         consumed_findings: set[int] = set()
         for task in (task for task in tasks if task.task_type != "doc_review"):
-            if task.status == "cancelled":
-                not_applicable += 1
-                continue
-            if task.status != "completed":
-                unable += 1
-                continue
             mapping = TASK_CAPABILITY_MAP.get(task.task_type) or {}
             capabilities = set(mapping.get("capabilities") or [])
             ids = scan_task_ids(task.result or {})
@@ -674,7 +690,16 @@ class FlowEngine:
                     or (not ids and finding.source_key in capabilities)
                 )
             ]
+            if task.status in {"completed", "cancelled"} and is_not_applicable(task.result or {}):
+                not_applicable += 1
+                consumed_findings.update(finding.id for finding in related)
+                continue
+            if task.status in {"todo", "in_progress"}:
+                continue
             if not related:
+                if task.status in {"failed", "cancelled"}:
+                    unable += 1
+                    continue
                 reliable += 1
                 points += 1.0
                 continue
@@ -697,8 +722,8 @@ class FlowEngine:
             if finding.status == FindingStatus.FIXED:
                 points += 1.0
 
-        score = round(points / reliable * 100, 1) if reliable and score_ready else None
         coverage_denominator = reliable + unable
+        score = round(points / coverage_denominator * 100, 1) if coverage_denominator and score_ready else None
         coverage = round(reliable / coverage_denominator * 100, 1) if coverage_denominator else 0.0
         return {
             "score": score,

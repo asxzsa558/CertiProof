@@ -27,6 +27,19 @@
   border-bottom: 1px solid rgba(0, 212, 255, 0.1);
 }
 
+.tool-card-header.expandable {
+  cursor: pointer;
+}
+
+.tool-card-header.expandable:hover {
+  background: linear-gradient(90deg, rgba(0, 212, 255, 0.12), rgba(99, 102, 241, 0.07), transparent);
+}
+
+.tool-card-header.expandable:focus-visible {
+  outline: 1px solid rgba(0, 212, 255, 0.72);
+  outline-offset: -2px;
+}
+
 /* 工具信息 */
 .tool-info {
   display: flex;

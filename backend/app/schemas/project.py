@@ -40,7 +40,7 @@ class ProjectResponse(ProjectBase):
     owner_id: Optional[int]
     system_name: Optional[str]
     status: ProjectStatus
-    compliance_score: Optional[int] = None
+    compliance_score: Optional[float] = None
     assessment_types: List[ProjectAssessmentResponse] = []
     created_at: datetime
     updated_at: datetime
@@ -55,7 +55,7 @@ class ProjectListResponse(BaseModel):
     system_name: Optional[str] = None
     compliance_level: Optional[ComplianceLevel] = None
     status: ProjectStatus
-    compliance_score: Optional[int] = None
+    compliance_score: Optional[float] = None
     organization_id: Optional[int] = None
     assessment_types: List[ProjectAssessmentResponse] = []
     created_at: datetime
