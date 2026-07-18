@@ -147,7 +147,7 @@ class ContextManager:
             result = await self.db.execute(
                 select(Assessment)
                 .where(Assessment.project_id == self.project_id)
-                .order_by(Assessment.created_at.desc())
+                .order_by(Assessment.created_at.desc(), Assessment.id.desc())
                 .limit(1)
             )
             assessment = result.scalar_one_or_none()

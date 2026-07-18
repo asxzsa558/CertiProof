@@ -1890,7 +1890,7 @@ class ExecutionEngine:
                 return {"message": "项目不存在或无权生成报告"}
             assessment = (await db.execute(select(Assessment).where(
                 Assessment.project_id == pid
-            ).order_by(Assessment.created_at.desc()).limit(1))).scalar_one_or_none()
+            ).order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1))).scalar_one_or_none()
             if not assessment:
                 return {"message": "当前项目尚未创建等保测评"}
             phase = (await db.execute(select(PhaseInstance).where(

@@ -243,7 +243,7 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
     result = await db.execute(
         select(Assessment)
         .where(Assessment.project_id == project_id)
-        .order_by(Assessment.created_at.desc())
+        .order_by(Assessment.created_at.desc(), Assessment.id.desc())
         .limit(1)
     )
     assessment = result.scalar_one_or_none()
@@ -694,7 +694,7 @@ async def invalidate_report_artifacts(
 
     assessment = (await db.execute(select(Assessment).where(
         Assessment.project_id == project_id
-    ).order_by(Assessment.created_at.desc()).limit(1))).scalar_one_or_none()
+    ).order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1))).scalar_one_or_none()
     if assessment:
         phase = (await db.execute(select(PhaseInstance).where(
             PhaseInstance.assessment_id == assessment.id,
@@ -773,7 +773,7 @@ async def ensure_report_generation_ready(
     if assessment_id is not None:
         assessment_query = assessment_query.where(Assessment.id == assessment_id)
     assessment = (await db.execute(
-        assessment_query.order_by(Assessment.created_at.desc()).limit(1)
+        assessment_query.order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1)
     )).scalar_one_or_none()
     if not assessment:
         raise ValueError("当前项目尚未创建可生成报告的等保测评")

@@ -109,7 +109,8 @@ async def reset_verification_data(db: AsyncSession, project_id: int) -> None:
 
 async def latest_assessment_and_phase(db: AsyncSession, project_id: int) -> tuple[Assessment, PhaseInstance]:
     assessment = (await db.execute(
-        select(Assessment).where(Assessment.project_id == project_id).order_by(Assessment.created_at.desc()).limit(1)
+        select(Assessment).where(Assessment.project_id == project_id)
+        .order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1)
     )).scalar_one_or_none()
     if not assessment:
         raise ValueError("当前项目尚未创建等保测评")
@@ -314,7 +315,8 @@ async def reopen_finding(db: AsyncSession, finding: Finding, actor_id: int) -> N
 
 async def reconcile_verification_phase(db: AsyncSession, project_id: int) -> None:
     assessment = (await db.execute(
-        select(Assessment).where(Assessment.project_id == project_id).order_by(Assessment.created_at.desc()).limit(1)
+        select(Assessment).where(Assessment.project_id == project_id)
+        .order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1)
     )).scalar_one_or_none()
     if not assessment:
         return

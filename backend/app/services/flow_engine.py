@@ -145,6 +145,23 @@ class FlowEngine:
         owner_id: int = None
     ) -> Assessment:
         """创建测评实例"""
+        from app.models.project import Project
+
+        project = (await self.db.execute(
+            select(Project).where(Project.id == project_id).with_for_update()
+        )).scalar_one_or_none()
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+
+        existing = (await self.db.execute(
+            select(Assessment)
+            .where(Assessment.project_id == project_id)
+            .order_by(Assessment.created_at.desc(), Assessment.id.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if existing:
+            return existing
+
         # 加载流程模板
         template = await self.get_template(template_id)
         if not template:
@@ -207,7 +224,7 @@ class FlowEngine:
         query = select(Assessment)
         if project_id:
             query = query.where(Assessment.project_id == project_id)
-        result = await self.db.execute(query.order_by(Assessment.created_at.desc()))
+        result = await self.db.execute(query.order_by(Assessment.created_at.desc(), Assessment.id.desc()))
         return result.scalars().all()
 
     async def start_assessment(self, assessment_id: int) -> Assessment:

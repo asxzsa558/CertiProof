@@ -204,6 +204,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
   // 轮询相关
   const pollingRef = useRef(null)
   const pollingPhaseIdRef = useRef(null)
+  const openingAssessmentRef = useRef(false)
   const [expandedErrors, setExpandedErrors] = useState({})
 
   // 文档上传弹窗
@@ -468,6 +469,15 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
     }
   }, [projectId])
 
+  const shouldRefreshAssessment = assessment?.status === 'in_progress'
+    || phases.some(phase => phase.status === 'active')
+
+  useEffect(() => {
+    if (!projectId || !shouldRefreshAssessment) return undefined
+    const timer = window.setInterval(() => fetchAssessment({ silent: true }), 5000)
+    return () => window.clearInterval(timer)
+  }, [projectId, shouldRefreshAssessment, fetchAssessment])
+
   const startBatchPolling = (runId, phaseId, notify = false) => {
     if (!runId || !phaseId) return
     if (batchPollingRef.current) clearInterval(batchPollingRef.current)
@@ -535,6 +545,8 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
   }
 
   const handleOpenAssessment = async () => {
+    if (openingAssessmentRef.current) return
+    openingAssessmentRef.current = true
     let current = await fetchAssessment()
     try {
       if (!current) {
@@ -561,6 +573,8 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
     } catch (error) {
       console.error('Failed to open assessment:', error)
       message.error(error.response?.data?.detail || error.message || '打开测评失败')
+    } finally {
+      openingAssessmentRef.current = false
     }
   }
 

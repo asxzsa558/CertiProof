@@ -10,6 +10,17 @@ from app.services.task_executor import TaskExecutor
 from app.orchestrator.orchestrator import Orchestrator
 
 
+def test_gateway_errors_keep_the_original_target_and_reason():
+    path = Path(__file__).resolve().parents[1] / "mcp-servers" / "gateway" / "server.py"
+    spec = importlib.util.spec_from_file_location("certiproof_gateway_server", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    detail = "Timeout: No Response from 192.0.2.10"
+    assert module.friendly_tool_error(detail) == f"工具执行超时：{detail}"
+    assert "document_page_parse" in module.TOOL_ROUTES
+
+
 def test_all_skipped_subtools_are_not_execution_failures():
     result = {
         "sub_results": [

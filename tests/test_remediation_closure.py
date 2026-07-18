@@ -1,6 +1,6 @@
 import asyncio
 
-from sqlalchemy import event, select
+from sqlalchemy import event, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401
@@ -98,6 +98,40 @@ def _finding(project_id: int, **overrides) -> Finding:
     }
     values.update(overrides)
     return Finding(**values)
+
+
+def test_assessment_creation_reuses_the_project_workflow():
+    async def run():
+        engine, session_factory = await _database()
+        async with session_factory() as db:
+            user = User(email="single@example.test", username="single", hashed_password="test")
+            organization = Organization(name="Single", code="single")
+            db.add_all([user, organization])
+            await db.flush()
+            project = Project(user_id=user.id, organization_id=organization.id, name="Single")
+            template = FlowTemplate(
+                name="Single",
+                compliance_level=3,
+                phases_config=[{
+                    "id": "gap_analysis",
+                    "name": "差距分析",
+                    "order": 1,
+                    "default_tasks": [],
+                }],
+            )
+            db.add_all([project, template])
+            await db.flush()
+
+            flow = FlowEngine(db)
+            first = await flow.create_assessment(project.id, template.id, "First", user.id)
+            second = await flow.create_assessment(project.id, template.id, "Second", user.id)
+
+            assert first.id == second.id
+            assert await db.scalar(select(func.count(Assessment.id))) == 1
+
+        await engine.dispose()
+
+    asyncio.run(run())
 
 
 def test_reliable_verification_is_the_only_path_that_closes_a_finding():

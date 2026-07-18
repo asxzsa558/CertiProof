@@ -2367,7 +2367,7 @@ class Orchestrator:
             assessment = (await db.execute(
                 select(Assessment)
                 .where(Assessment.project_id == project_id)
-                .order_by(Assessment.created_at.desc())
+                .order_by(Assessment.created_at.desc(), Assessment.id.desc())
                 .limit(1)
             )).scalar_one_or_none()
             if not assessment:

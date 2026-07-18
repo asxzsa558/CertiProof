@@ -80,6 +80,7 @@ TOOL_ROUTES = {
     # OCR 相关
     "ocr_analyze": "http://ocr-server:8005",
     "screenshot_analyze": "http://ocr-server:8005",
+    "document_page_parse": "http://ocr-server:8005",
 }
 
 TOOL_ALIASES = {
@@ -117,6 +118,22 @@ TOOL_ALIASES = {
 
 def canonical_tool_name(tool_name: str) -> str:
     return TOOL_ALIASES.get(tool_name, tool_name)
+
+
+def friendly_tool_error(error_detail: str) -> str:
+    detail = str(error_detail or "未知错误").strip()[:2000]
+    lowered = detail.lower()
+    if "timeout" in lowered or "timed out" in lowered:
+        return f"工具执行超时：{detail}"
+    if "not installed" in lowered:
+        return f"工具未安装：{detail}"
+    if "missing required parameter" in lowered:
+        return f"缺少必要参数：{detail}"
+    if "connection" in lowered or "unreachable" in lowered:
+        return f"无法连接到目标：{detail}"
+    if "permission" in lowered or "authentication" in lowered:
+        return f"认证或权限失败：{detail}"
+    return f"工具执行失败：{detail}"
 
 # 工具到 Tool Server 的映射（用于健康检查）
 SERVER_ROUTES = {
@@ -259,23 +276,9 @@ async def call_tool(request: ToolCallRequest):
         except:
             pass
         
-        # 根据错误类型返回友好的错误信息
-        if "timeout" in error_detail.lower():
-            friendly_error = f"工具执行超时，目标可能不可达或响应过慢"
-        elif "not installed" in error_detail.lower():
-            friendly_error = f"工具未安装，请联系管理员"
-        elif "missing required parameter" in error_detail.lower():
-            friendly_error = f"缺少必要参数，请检查输入"
-        elif "connection" in error_detail.lower() or "unreachable" in error_detail.lower():
-            friendly_error = f"无法连接到目标，请检查目标地址是否正确"
-        elif "permission" in error_detail.lower() or "auth" in error_detail.lower():
-            friendly_error = f"认证失败，请检查用户名和密码"
-        else:
-            friendly_error = f"工具执行失败: {error_detail}"
-        
         raise HTTPException(
             status_code=e.response.status_code,
-            detail=friendly_error
+            detail=friendly_tool_error(error_detail),
         )
     except httpx.RequestError as e:
         raise HTTPException(

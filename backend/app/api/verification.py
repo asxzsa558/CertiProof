@@ -25,7 +25,6 @@ from app.services.upload_validation import read_limited_upload
 from app.services.verification_service import (
     create_verification_run,
     queue_document_task_verification,
-    reconcile_verification_phase,
     reopen_finding,
 )
 
@@ -125,12 +124,10 @@ async def verification_workspace(
     current_user: User = Depends(get_current_user),
 ):
     await _require_project(db, project_id, current_user, "assessment:read")
-    await reconcile_verification_phase(db, project_id)
-    await db.commit()
     findings = await _findings(db, project_id)
     assessment = (await db.execute(select(Assessment).where(
         Assessment.project_id == project_id,
-    ).order_by(Assessment.created_at.desc()).limit(1))).scalar_one_or_none()
+    ).order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1))).scalar_one_or_none()
     blocker_rows = (await db.execute(
         select(TaskInstance, PhaseInstance)
         .join(PhaseInstance, PhaseInstance.id == TaskInstance.phase_id)
