@@ -21,6 +21,20 @@ import { createPortColumns } from './resultColumns'
 const portColumns = createPortColumns()
 const assetTypeLabels = { ip: 'IP', domain: '域名', cloud_resource: '云资源' }
 const verificationLabels = { verified: '已验证', pending: '待验证', failed: '验证失败' }
+const compactDateTime = (value) => {
+  if (!value) return ''
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+const scanConclusionColor = (status) => ({
+  clean: 'green',
+  issues: 'red',
+  incomplete: 'orange',
+  failed: 'red',
+  cancelled: 'default',
+  running: 'blue',
+  pending: 'blue',
+}[status] || 'default')
 const assetColumns = [
   {
     title: '资产名称',
@@ -72,6 +86,10 @@ const renderResultMessage = (msg, options = {}) => {
   const webDiscoveries = scanResults.web_discoveries || []
   const databaseIssues = scanResults.database_issues || []
   const databaseResults = scanResults.database_results || {}
+  const databaseResultStates = Object.values(databaseResults)
+    .flatMap(tools => Object.values(tools || {}))
+    .map(item => inferResultState(item?.result ? item : { result: item }).key)
+  const databaseIncomplete = databaseResultStates.some(state => ['warning', 'failed'].includes(state))
   const snmpResults = scanResults.snmp_results || {}
   const windowsResults = scanResults.windows_results || {}
   const compositeResults = scanResults.composite_results || []
@@ -390,8 +408,16 @@ const renderResultMessage = (msg, options = {}) => {
           <div className="section-title">最近检测</div>
           {scanHistory.map(item => (
             <div className="query-history-row" key={item.id}>
-              <div><strong>{item.name || '安全检测'}</strong><small>{item.targets?.length ? item.targets.join('、') : '当前项目范围'}</small></div>
-              <div><Tag color={item.status === 'completed' ? 'green' : item.status === 'failed' ? 'red' : 'blue'}>{item.status_label}</Tag><small>{item.quality_label} · 问题 {item.findings_count || 0} 项</small></div>
+              <div>
+                <strong>#{item.id} {item.name || '安全检测'}</strong>
+                <small>{item.targets?.length ? item.targets.join('、') : '当前项目范围'} · {item.source_label || '历史记录'}{item.created_at ? ` · ${compactDateTime(item.created_at)}` : ''}</small>
+              </div>
+              <div>
+                <Tag color={scanConclusionColor(item.conclusion_status)}>{item.conclusion_label || '历史记录'}</Tag>
+                <small>{item.confirmed_count == null
+                  ? '旧统计口径 · 重新查询获取准确结果'
+                  : <>{item.conclusion_summary} · 确认问题 {item.confirmed_count || 0}{item.unverified_count ? ` · 无法验证 ${item.unverified_count}` : ''}{item.incomplete_checks_count ? ` · 未完成检查 ${item.incomplete_checks_count}` : ''}</>}</small>
+              </div>
             </div>
           ))}
         </div>
@@ -435,7 +461,7 @@ const renderResultMessage = (msg, options = {}) => {
           <div className="baseline-target-item">
             <span>资产状态</span>
             <span className="text-muted">
-              成功 {displayQuality.success || 0}，无法判定 {displayQuality.warning || 0}，失败 {displayQuality.failed || 0}
+              检测完成 {displayQuality.success || 0}，检测不完整 {displayQuality.warning || 0}，执行失败 {displayQuality.failed || 0}
             </span>
           </div>
           <div className="baseline-target-item">
@@ -466,7 +492,7 @@ const renderResultMessage = (msg, options = {}) => {
       {weakPasswords.length > 0 && (
         <div className="result-details-section weak-password-section">
           <div className="section-title danger">
-            ⚠ 发现 {weakPasswords.length} 个弱口令！
+            发现问题：发现 {weakPasswords.length} 个弱口令
           </div>
           {Object.entries(weakPasswordStats).map(([target, stats]) => {
             const targetPasswords = weakPasswords.filter(p => p.target === target)
@@ -495,7 +521,7 @@ const renderResultMessage = (msg, options = {}) => {
                 )}
                 {targetPasswords.length === 0 && (
                   <div className={`password-list ${stats.scan_completed === false ? 'warning' : 'success'}`}>
-                    <Tag color={stats.scan_completed === false ? 'orange' : 'green'}>{stats.scan_completed === false ? '未完成' : '✓ 安全'}</Tag>
+                    <Tag color={stats.scan_completed === false ? 'orange' : 'green'}>{stats.scan_completed === false ? '检测不完整' : '检测完成'}</Tag>
                     <span>{stats.scan_completed === false ? (stats.tool_error || '无法判定是否存在弱口令') : '未发现弱口令'}</span>
                   </div>
                 )}
@@ -509,7 +535,7 @@ const renderResultMessage = (msg, options = {}) => {
       {weakPasswords.length === 0 && Object.keys(weakPasswordStats).length > 0 && (
         <div className={`result-details-section ${weakPasswordIncompleteTargets.length ? 'warning-section' : 'success-section'}`}>
           <div className={`section-title ${weakPasswordIncompleteTargets.length ? 'warning' : 'success'}`}>
-            {weakPasswordIncompleteTargets.length ? '⚠ 弱口令检测未完成，无法判定' : '✓ 弱口令检测完成，未发现弱口令'}
+            {weakPasswordIncompleteTargets.length ? '检测不完整：无法判断是否存在弱口令' : '检测完成：本次未发现弱口令'}
           </div>
           {Object.entries(weakPasswordStats).map(([target, stats]) => (
             <div key={target} className="baseline-target-item">
@@ -528,14 +554,14 @@ const renderResultMessage = (msg, options = {}) => {
       {isVulnerabilityScan && webVulnerabilities.length === 0 && vulnerabilities.length === 0 && (
         <div className={`result-details-section ${vulnerabilityScanIncomplete ? 'warning-section' : 'success-section'}`}>
           <div className={`section-title ${vulnerabilityScanIncomplete ? 'warning' : 'success'}`}>
-            {vulnerabilityScanIncomplete ? '漏洞扫描未完成，无法判断是否存在漏洞' : '漏洞扫描完成，本次未发现漏洞'}
+            {vulnerabilityScanIncomplete ? '检测不完整：无法判断是否存在漏洞' : '检测完成：本次未发现漏洞'}
           </div>
           {vulnerabilityScanIncomplete && <div className="error-message">{firstResult.tool_error || error || '工具未返回完整结果'}</div>}
         </div>
       )}
       {webVulnerabilities.length > 0 && (
         <div className="result-details-section">
-          <div className="section-title">Web 漏洞列表</div>
+          <div className="section-title danger">发现问题：Web 漏洞列表</div>
           {webVulnerabilities.map((vuln, idx) => (
             <div key={idx} className="vulnerability-item">
               <Tag color="red">{severityLabel(vuln.severity, '未知')}</Tag>
@@ -564,7 +590,7 @@ const renderResultMessage = (msg, options = {}) => {
 
       {databaseIssues.length > 0 && (
         <div className="result-details-section">
-          <div className="section-title danger">数据库风险项</div>
+          <div className="section-title danger">发现问题：数据库风险项</div>
           {databaseIssues.map((issue, idx) => (
             <div key={idx} className="vulnerability-item">
               <Tag color="red">{issue.tool}</Tag>
@@ -578,8 +604,10 @@ const renderResultMessage = (msg, options = {}) => {
       )}
 
       {Object.keys(databaseResults).length > 0 && databaseIssues.length === 0 && (
-        <div className="result-details-section success-section">
-          <div className="section-title success">数据库检测完成，未发现明显风险</div>
+        <div className={`result-details-section ${databaseIncomplete ? 'warning-section' : 'success-section'}`}>
+          <div className={`section-title ${databaseIncomplete ? 'warning' : 'success'}`}>
+            {databaseIncomplete ? '检测不完整：部分数据库检查未完成，不能判断不存在风险' : '检测完成：本次未发现明确数据库风险'}
+          </div>
           {Object.entries(databaseResults).map(([target, tools]) => (
             <div key={target} className="baseline-target-item">
               <span>{target}</span>
@@ -648,13 +676,16 @@ const renderResultMessage = (msg, options = {}) => {
                     成功 {group.summary?.success || 0}，失败 {group.summary?.failed || 0}，跳过 {group.summary?.skipped || 0}
                   </span>
                 </div>
-                {(group.sub_results || []).map((sub, idx) => (
-                  <div key={idx} className="baseline-target-item">
-                    <span>{sub.label || sub.capability}</span>
-                    <Tag color={sub.status === 'success' ? 'green' : sub.status === 'skipped' ? 'gold' : 'red'}>{sub.status}</Tag>
-                    <span className="text-muted">{describeSubResult(sub)}</span>
-                  </div>
-                ))}
+                {(group.sub_results || []).map((sub, idx) => {
+                  const subState = inferResultState({ capability: sub.capability, status: sub.status, result: sub.data || sub.result || {} })
+                  return (
+                    <div key={idx} className="baseline-target-item">
+                      <span>{sub.label || sub.capability}</span>
+                      <Tag color={subState.color}>{subState.label}</Tag>
+                      <span className="text-muted">{describeSubResult(sub)}</span>
+                    </div>
+                  )
+                })}
               </div>
             ))
           })()}

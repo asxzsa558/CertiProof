@@ -154,6 +154,14 @@ function ResultDetailPage() {
   }
 
   const conclusion = scanTaskConclusion(summary.scan_task)
+  const conclusionColors = { failed: 'error', warning: 'warning', risk: 'error', clean: 'success', running: 'processing' }
+  const executionProgress = {
+    completed: { color: 'processing', label: '进程结束' },
+    failed: { color: 'error', label: '异常结束' },
+    cancelled: { color: 'default', label: '已取消' },
+    pending: { color: 'default', label: '等待中' },
+    running: { color: 'processing', label: '运行中' },
+  }[summary.scan_task.status] || { color: 'default', label: summary.scan_task.status }
   const executionIssues = [
     ...(summary.scan_task.result_summary?.warnings || []),
     ...(summary.scan_task.result_summary?.failed || []),
@@ -185,10 +193,12 @@ function ResultDetailPage() {
               <Descriptions.Item label="检测内容">
                 {scanTaskName(summary.scan_task)}
               </Descriptions.Item>
-              <Descriptions.Item label="状态">
-                <Tag color={summary.scan_task.status === 'completed' ? 'success' : 'processing'}>
-                  {summary.scan_task.status === 'completed' ? '已完成' : '运行中'}
-                </Tag>
+              <Descriptions.Item label="执行进度">
+                <Tag color={executionProgress.color}>{executionProgress.label}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="检测结论">
+                <Tag color={conclusionColors[conclusion.key]}>{conclusion.label}</Tag>
+                {conclusion.detail ? <span>{conclusion.detail}</span> : null}
               </Descriptions.Item>
               <Descriptions.Item label="目标资产">
                 {scanTaskTarget(summary.scan_task)}
@@ -245,7 +255,7 @@ function ResultDetailPage() {
           {/* 发现列表 */}
           <Card title="发现详情">
             {summary.findings.length === 0 ? (
-              <Empty description={conclusion.key === 'warning' ? '本次未形成风险发现，但存在未完成检测，请查看上方说明' : conclusion.key === 'skipped' ? '目标未启用该类服务，本项不适用' : '本次未发现安全问题'} />
+              <Empty description={conclusion.key === 'warning' ? '检测不完整，不能据此判断目标安全，请查看上方原因' : conclusion.key === 'failed' ? '执行失败，未形成可用检测结果' : '检测完成，本次未发现明确安全问题'} />
             ) : (
               <Table
                 columns={findingColumns}

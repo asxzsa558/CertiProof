@@ -57,10 +57,11 @@ function ResultsPage() {
 
   const getStatusTag = (status) => {
     const statusMap = {
-      completed: { color: 'success', icon: <CheckCircleOutlined />, text: '已完成' },
+      completed: { color: 'processing', icon: <CheckCircleOutlined />, text: '进程结束' },
       running: { color: 'processing', icon: <ScanOutlined spin />, text: '运行中' },
       pending: { color: 'default', icon: <ClockCircleOutlined />, text: '等待中' },
-      failed: { color: 'error', icon: <CloseCircleOutlined />, text: '失败' },
+      failed: { color: 'error', icon: <CloseCircleOutlined />, text: '异常结束' },
+      cancelled: { color: 'default', icon: <CloseCircleOutlined />, text: '已取消' },
     }
     const config = statusMap[status] || statusMap.pending
     return (
@@ -73,6 +74,11 @@ function ResultsPage() {
   const filteredTasks = statusFilter === 'all' 
     ? scanTasks 
     : scanTasks.filter(t => t.status === statusFilter)
+  const conclusionCounts = scanTasks.reduce((counts, task) => {
+    const key = scanTaskConclusion(task).key
+    if (Object.hasOwn(counts, key)) counts[key] += 1
+    return counts
+  }, { clean: 0, risk: 0, warning: 0, failed: 0 })
 
   const handleDeleteScan = async (scanTaskId) => {
     try {
@@ -126,7 +132,7 @@ function ResultsPage() {
       render: (_, record) => <Tag>{scanTaskSource(record)}</Tag>,
     },
     {
-      title: '状态',
+      title: '执行进度',
       dataIndex: 'status',
       key: 'status',
       render: (status) => getStatusTag(status),
@@ -222,18 +228,20 @@ function ResultsPage() {
         {scanTasks.length > 0 && (
           <div className="results-summary">
             <Card size="small" className="summary-card">
-              <div className="summary-label">执行记录</div>
-              <div className="summary-value">{scanTasks.length}</div>
+              <div className="summary-label">检测完成</div>
+              <div className="summary-value" style={{ color: '#52c41a' }}>{conclusionCounts.clean}</div>
             </Card>
             <Card size="small" className="summary-card">
-              <div className="summary-label">已完成</div>
-              <div className="summary-value" style={{ color: '#52c41a' }}>{scanTasks.filter(t => t.status === 'completed').length}</div>
+              <div className="summary-label">发现问题</div>
+              <div className="summary-value" style={{ color: '#ff4d4f' }}>{conclusionCounts.risk}</div>
             </Card>
             <Card size="small" className="summary-card">
-              <div className="summary-label">风险命中</div>
-              <div className="summary-value" style={{ color: scanTasks.reduce((a, t) => a + t.high_severity_count, 0) > 0 ? '#ff4d4f' : '#52c41a' }}>
-                {scanTasks.reduce((a, t) => a + t.findings_count, 0)}
-              </div>
+              <div className="summary-label">检测不完整</div>
+              <div className="summary-value" style={{ color: '#faad14' }}>{conclusionCounts.warning}</div>
+            </Card>
+            <Card size="small" className="summary-card">
+              <div className="summary-label">执行失败</div>
+              <div className="summary-value" style={{ color: '#ff4d4f' }}>{conclusionCounts.failed}</div>
             </Card>
           </div>
         )}
@@ -247,10 +255,10 @@ function ResultsPage() {
                 onChange={setStatusFilter}
                 style={{ width: 120 }}
                 options={[
-                  { value: 'completed', label: '已完成' },
+                  { value: 'completed', label: '进程结束' },
                   { value: 'all', label: '全部' },
                   { value: 'running', label: '运行中' },
-                  { value: 'failed', label: '失败' },
+                  { value: 'failed', label: '异常结束' },
                 ]}
               />
               <Popconfirm
@@ -288,7 +296,7 @@ function ResultsPage() {
           }
         >
           {filteredTasks.length === 0 ? (
-            <Empty description={statusFilter === 'completed' ? '暂无已完成的检测记录' : '暂无检测记录'}>
+            <Empty description={statusFilter === 'completed' ? '暂无进程已结束的检测记录' : '暂无检测记录'}>
               <Button type="primary" onClick={() => navigate(`/projects/${projectId}`)}>
                 执行检测
               </Button>

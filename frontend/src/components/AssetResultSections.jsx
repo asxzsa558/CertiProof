@@ -17,7 +17,7 @@ import {
   SearchOutlined,
   RadarChartOutlined,
 } from '@ant-design/icons'
-import { hexToRgba, readableFindingText, severityLabel } from './resultRendererUtils'
+import { hexToRgba, inferResultState, readableFindingText, severityLabel } from './resultRendererUtils'
 import { createPortColumns } from './resultColumns'
 
 const portColumns = createPortColumns()
@@ -572,13 +572,16 @@ const buildAssetDetails = (assetData, capability) => {
                 成功 {group.summary?.success || 0}，失败 {group.summary?.failed || 0}，跳过 {group.summary?.skipped || 0}
               </span>
             </div>
-            {(group.sub_results || []).map((sub, idx) => (
-              <div key={idx} className="baseline-target-item">
-                <span>{sub.label || sub.capability}</span>
-                <Tag color={sub.status === 'success' ? 'green' : sub.status === 'skipped' ? 'gold' : 'red'}>{sub.status}</Tag>
-                <span className="text-muted">{describeSubResult(sub)}</span>
-              </div>
-            ))}
+            {(group.sub_results || []).map((sub, idx) => {
+              const subState = inferResultState({ capability: sub.capability, status: sub.status, result: sub.data || sub.result || {} })
+              return (
+                <div key={idx} className="baseline-target-item">
+                  <span>{sub.label || sub.capability}</span>
+                  <Tag color={subState.color}>{subState.label}</Tag>
+                  <span className="text-muted">{describeSubResult(sub)}</span>
+                </div>
+              )
+            })}
           </div>
         ))}
       </div>

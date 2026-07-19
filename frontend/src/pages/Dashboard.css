@@ -63,7 +63,7 @@
   place-items: center;
   width: 52px;
   height: 52px;
-  border: 1px solid rgba(83, 222, 241, 0.3);
+  border: 0;
   background: rgba(8, 30, 50, 0.5);
   box-shadow: inset 0 0 18px rgba(83, 222, 241, 0.08), 0 0 28px rgba(83, 222, 241, 0.08);
 }

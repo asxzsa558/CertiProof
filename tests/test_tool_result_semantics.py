@@ -399,14 +399,16 @@ def test_scan_history_uses_business_labels_instead_of_internal_enums():
             "scan_history": [{
                 "id": 12, "name": "Web 安全扫描", "targets": ["example.com"],
                 "status": "completed", "status_label": "已完成", "quality_label": "结果完整",
-                "findings_count": 2,
+                "confirmed_count": 2, "unverified_count": 0, "incomplete_checks_count": 0,
+                "conclusion_status": "issues", "conclusion_label": "发现问题",
+                "conclusion_summary": "已发现明确安全问题",
             }],
         }}],
         "success_count": 1, "warning_count": 0, "failed_count": 0,
     }
     description = Orchestrator()._generate_fallback_description(execution)
     assert "Web 安全扫描" in description
-    assert "已完成" in description
+    assert "发现问题" in description
     assert "completed" not in description
 
 
@@ -433,6 +435,81 @@ def test_scan_history_resolves_assessment_and_tool_names_without_leaking_enums()
         result = ExecutionEngine._scan_task_descriptor(Task(internal_name))
         assert result["name"] == display_name
         assert internal_name not in result["name"]
+
+
+def test_scan_history_separates_confirmed_findings_from_incomplete_checks():
+    task = SimpleNamespace(
+        id=44,
+        status="completed",
+        triggered_by="manual",
+        findings_count=99,
+        parameters={"source": "assessment_task", "task_type": "network_device_assessment", "target": "192.0.2.10"},
+        result_summary={
+            "outcome": "partial",
+            "results": [{"status": "warning", "result": {"summary": {"warning": 2, "failed": 0, "skipped": 0}}}],
+        },
+        created_at=None,
+        completed_at=None,
+    )
+    result = ExecutionEngine._scan_task_descriptor(task, {"confirmed": 0, "unverified": 1})
+    assert result["findings_count"] == 0
+    assert result["confirmed_count"] == 0
+    assert result["unverified_count"] == 1
+    assert result["incomplete_checks_count"] == 2
+    assert result["quality_label"] == "结果需复核"
+    assert result["source_label"] == "等保测评"
+    assert result["conclusion_status"] == "incomplete"
+    assert result["conclusion_label"] == "检测不完整"
+    assert "不能判断目标安全" in result["conclusion_summary"]
+
+
+@pytest.mark.parametrize(("status", "summary", "stats", "expected_status", "expected_label"), [
+    ("completed", {"scan_results": {"quality": {"verdict": "complete"}}}, {"confirmed": 0, "unverified": 0}, "clean", "检测完成"),
+    ("completed", {"scan_results": {"quality": {"verdict": "complete"}}}, {"confirmed": 2, "unverified": 0}, "issues", "发现问题"),
+    ("completed", {"scan_results": {"quality": {"verdict": "conditional"}}}, {"confirmed": 0, "unverified": 0}, "incomplete", "检测不完整"),
+    ("failed", {}, {"confirmed": 0, "unverified": 0}, "failed", "执行失败"),
+])
+def test_scan_history_uses_the_four_terminal_business_conclusions(status, summary, stats, expected_status, expected_label):
+    task = SimpleNamespace(
+        id=45,
+        status=status,
+        triggered_by="manual",
+        findings_count=0,
+        parameters={"task_type": "scan_ports", "target": "192.0.2.20"},
+        result_summary=summary,
+        created_at=None,
+        completed_at=None,
+    )
+    result = ExecutionEngine._scan_task_descriptor(task, stats)
+    assert result["conclusion_status"] == expected_status
+    assert result["conclusion_label"] == expected_label
+
+
+def test_scan_history_treats_reachable_host_with_no_open_ports_as_complete():
+    task = SimpleNamespace(
+        id=46,
+        status="completed",
+        triggered_by="manual",
+        findings_count=0,
+        parameters={"plan": [{"capability": "scan_ports", "parameters": {"target": "192.0.2.30"}}]},
+        result_summary={"scan_results": {"quality": {"verdict": "conditional"}, "asset_results": {
+            "192.0.2.30": {"status": "success", "display_status": "warning", "result": {
+                "host_status": "up", "open_ports": [], "filtered_count": 0,
+            }},
+        }}},
+        created_at=None,
+        completed_at=None,
+    )
+    result = ExecutionEngine._scan_task_descriptor(task, {"confirmed": 0, "unverified": 0})
+    assert result["conclusion_status"] == "clean"
+    assert result["conclusion_label"] == "检测完成"
+
+
+def test_scan_history_keeps_unreachable_scan_incomplete():
+    payload = {"status": "warning", "result": {"reachable": False, "scan_completed": False, "findings": []}}
+    assert ExecutionEngine._scan_asset_result_state(payload) == "incomplete"
+    filtered = {"status": "success", "capability": "scan_ports", "result": {"host_status": "up", "filtered_count": 3}}
+    assert ExecutionEngine._scan_asset_result_state(filtered) == "incomplete"
 
 
 def test_scan_change_query_does_not_fall_back_to_history_list():

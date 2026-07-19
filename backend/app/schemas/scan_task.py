@@ -28,6 +28,12 @@ class ScanTaskResponse(ScanTaskBase):
     high_severity_count: int = 0
     medium_severity_count: int = 0
     low_severity_count: int = 0
+    confirmed_count: int = 0
+    unverified_count: int = 0
+    incomplete_checks_count: int = 0
+    conclusion_status: Optional[str] = None
+    conclusion_label: Optional[str] = None
+    conclusion_summary: Optional[str] = None
     error_message: Optional[str] = None
     created_at: datetime
     started_at: Optional[datetime] = None

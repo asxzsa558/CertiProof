@@ -17,6 +17,7 @@ from app.models.change_snapshot import ChangeSnapshot
 from app.services.audit import record_audit_event
 from app.services.file_storage import file_storage
 from app.services.verification_service import delete_verification_data
+from app.services.execution_engine import ExecutionEngine, load_scan_finding_stats
 from app.schemas.result import (
     ScanTaskResponse,
     ScanTaskDetail,
@@ -42,6 +43,17 @@ def _visible_findings(scan_task_id: int):
             Finding.description.like("%检测未完成（不代表通过）%"),
         ),
     )
+
+
+def _scan_task_response(scan_task: ScanTask, finding_stats: dict) -> ScanTaskResponse:
+    descriptor = ExecutionEngine._scan_task_descriptor(scan_task, finding_stats)
+    return ScanTaskResponse.model_validate(scan_task).model_copy(update={
+        key: descriptor[key]
+        for key in (
+            "findings_count", "confirmed_count", "unverified_count", "incomplete_checks_count",
+            "conclusion_status", "conclusion_label", "conclusion_summary",
+        )
+    })
 
 
 async def _delete_scan_records(db: AsyncSession, scan_task_ids: list[int]) -> tuple[list[str], int]:
@@ -87,8 +99,8 @@ async def list_scan_tasks(
         .order_by(ScanTask.created_at.desc())
     )
     scan_tasks = result.scalars().all()
-    
-    return scan_tasks
+    finding_stats = await load_scan_finding_stats(db, scan_tasks)
+    return [_scan_task_response(task, finding_stats[task.id]) for task in scan_tasks]
 
 
 @router.get("/scans/{scan_task_id}", response_model=ScanTaskDetail)
@@ -115,7 +127,8 @@ async def get_scan_task(
     findings = result.scalars().all()
     
     # 构建响应
-    response = ScanTaskResponse.model_validate(scan_task)
+    finding_stats = await load_scan_finding_stats(db, [scan_task])
+    response = _scan_task_response(scan_task, finding_stats[scan_task.id])
     return ScanTaskDetail(
         **response.model_dump(),
         findings=[FindingResponse.model_validate(f) for f in findings],
@@ -151,7 +164,7 @@ async def get_scan_summary(
     partial = sum(1 for f in findings if f.judgment.value == "partial")
     
     return ResultSummary(
-        scan_task=ScanTaskResponse.model_validate(scan_task),
+        scan_task=_scan_task_response(scan_task, (await load_scan_finding_stats(db, [scan_task]))[scan_task.id]),
         findings=[FindingResponse.model_validate(f) for f in findings],
         total_findings=len(findings),
         passed=passed,

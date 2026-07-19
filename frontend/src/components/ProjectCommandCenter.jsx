@@ -37,7 +37,7 @@ const TOOL_GROUPS = [
   { key: 'web_discovery_scan', label: 'Web', icon: <GlobalOutlined /> },
 ]
 
-const statusCopy = { success: '正常', warning: '待判定', failed: '失败', skipped: '不适用', idle: '待执行' }
+const statusCopy = { success: '检测完成', risk: '发现问题', warning: '检测不完整', failed: '执行失败', skipped: '检测不完整', idle: '待执行' }
 const keepIfUnchanged = (previous, next) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next
 
 const normalizeCapability = (capability = '') => {
@@ -67,7 +67,7 @@ const executionHasRisk = (result = {}) => {
     || Number(result.summary?.non_compliant || 0) > 0
 }
 
-function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId, onOpenResults, onWorkspaceSummary }) {
+function ProjectCommandCenter({ project, assets, assetsLoading = false, assessmentCollapsed = false, modelId, onOpenResults, onWorkspaceSummary }) {
   const [scanTasks, setScanTasks] = useState([])
   const [assessment, setAssessment] = useState(null)
   const [verification, setVerification] = useState(null)
@@ -183,22 +183,21 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
       const result = execution.result || {}
       const totals = result.summary || {}
       if (result.skipped === true || (totals.total > 0 && totals.skipped === totals.total)) {
-        return { state: 'skipped', label: key === 'database_security_scan' ? '未发现数据库服务' : '不适用' }
+        return { state: 'warning', label: '检测不完整' }
       }
-      if (execution.status === 'failed') return { state: 'failed', label: '失败' }
-      if (execution.status === 'warning' || result.scan_completed === false) return { state: 'warning', label: '未完整' }
+      if (execution.status === 'failed') return { state: 'failed', label: '执行失败' }
+      if (execution.status === 'warning' || result.scan_completed === false) return { state: 'warning', label: '检测不完整' }
       if (key === 'scan_vulnerabilities' && result.reachable !== true && !(result.findings || []).length) {
-        return { state: 'warning', label: '无法验证目标' }
+        return { state: 'warning', label: '检测不完整' }
       }
-      if (executionHasRisk(result)) return { state: 'warning', label: '发现风险' }
-      return { state: 'success', label: '正常' }
+      if (executionHasRisk(result)) return { state: 'risk', label: '发现问题' }
+      return { state: 'success', label: '检测完成' }
     }
     const conclusion = scanTaskConclusion(latest)
-    if (conclusion.key === 'failed') return { state: 'failed', label: '失败' }
-    if (conclusion.key === 'skipped') return { state: 'skipped', label: key === 'database_security_scan' ? '未发现数据库服务' : '不适用' }
-    if (conclusion.key === 'risk') return { state: 'warning', label: '发现风险' }
+    if (conclusion.key === 'failed') return { state: 'failed', label: '执行失败' }
+    if (conclusion.key === 'risk') return { state: 'risk', label: '发现问题' }
     if (conclusion.key === 'warning' || conclusion.key === 'running') return { state: 'warning', label: conclusion.label }
-    return { state: 'success', label: '正常' }
+    return { state: 'success', label: '检测完成' }
   }
 
   const acknowledgeChange = async changeId => {
@@ -262,7 +261,7 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
   }
 
   return (
-    <div className="command-center-shell">
+    <div className={`command-center-shell ${assessmentCollapsed ? 'assessment-panel-collapsed' : ''} ${detailCollapsed ? 'detail-panel-collapsed' : ''}`}>
       <div className={`command-center-grid ${detailCollapsed ? 'detail-collapsed' : ''}`}>
         <main className="ai-command-core">
           {detectedChanges.length > 0 && (

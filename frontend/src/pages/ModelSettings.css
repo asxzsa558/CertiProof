@@ -150,3 +150,25 @@
 .model-settings-content .ant-btn-primary:hover {
   background: linear-gradient(135deg, #818cf8, #a78bfa) !important;
 }
+
+.model-settings-content .provider-add-button.ant-btn-primary {
+  color: #03171d !important;
+  border: 1px solid rgba(103, 232, 249, 0.72) !important;
+  background: #67e8f9 !important;
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.2);
+  font-weight: 600;
+}
+
+.model-settings-content .provider-add-button.ant-btn-primary:hover:not(:disabled) {
+  color: #021114 !important;
+  border-color: #a5f3fc !important;
+  background: #a5f3fc !important;
+}
+
+.model-settings-content .provider-add-button.ant-btn-primary:disabled {
+  color: rgba(189, 219, 228, 0.46) !important;
+  border-color: rgba(91, 158, 184, 0.2) !important;
+  background: rgba(16, 43, 56, 0.72) !important;
+  box-shadow: none;
+  opacity: 1;
+}

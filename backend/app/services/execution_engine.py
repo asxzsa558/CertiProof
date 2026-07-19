@@ -6,8 +6,10 @@
 
 import asyncio
 import logging
+from collections import defaultdict
 from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.capability_registry import CapabilityRegistry, capability_registry
@@ -18,6 +20,32 @@ from app.services.display_names import scan_display_name
 from app.services.execution_policy import NETWORK_CAPABILITIES, validate_execution_parameters
 
 logger = logging.getLogger(__name__)
+
+
+async def load_scan_finding_stats(db: AsyncSession, tasks) -> Dict[int, Dict[str, int]]:
+    """Load authoritative terminal finding counts for scan result surfaces."""
+    from app.models.finding import Finding
+
+    stats = defaultdict(lambda: {"confirmed": 0, "unverified": 0})
+    task_ids = [task.id for task in tasks]
+    if not task_ids:
+        return stats
+    rows = await db.execute(
+        select(Finding.scan_task_id, Finding.judgment).where(
+            Finding.scan_task_id.in_(task_ids),
+            ~and_(
+                Finding.clause_name == "自动化技术检测",
+                Finding.description.like("%检测未完成（不代表通过）%"),
+            ),
+        )
+    )
+    for scan_task_id, judgment in rows:
+        value = getattr(judgment, "value", judgment)
+        if value in {"fail", "partial"}:
+            stats[scan_task_id]["confirmed"] += 1
+        elif value == "not_tested":
+            stats[scan_task_id]["unverified"] += 1
+    return stats
 
 
 class ExecutionEngine:
@@ -1871,7 +1899,6 @@ class ExecutionEngine:
     async def _view_scan_history(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """Return readable detection history without leaking internal enum values."""
         from app.models.scan_task import ScanTask
-        from sqlalchemy import select
 
         if not await self._project_for_user_id(db, project_id, user_id, "scan:read"):
             return {"scan_history": [], "total": 0, "message": "项目不存在或无权查看检测历史"}
@@ -1887,13 +1914,69 @@ class ExecutionEngine:
         )
         tasks = result.scalars().all()
 
+        finding_stats = await load_scan_finding_stats(db, tasks)
+
         return {
-            "scan_history": [self._scan_task_descriptor(t) for t in tasks],
+            "scan_history": [self._scan_task_descriptor(t, finding_stats[t.id]) for t in tasks],
             "total": len(tasks),
         }
 
     @staticmethod
-    def _scan_task_descriptor(task) -> Dict:
+    def _scan_asset_result_state(payload: Dict) -> str:
+        if not isinstance(payload, dict):
+            return "incomplete"
+        status = str(payload.get("status") or "").lower()
+        result = payload.get("result") or {}
+        if status in {"failed", "failure", "error"}:
+            return "failed"
+        if status in {"warning", "skipped", "cancelled", "canceled"}:
+            return "incomplete"
+        if isinstance(result, dict):
+            counts = result.get("summary") or {}
+            if any(int(counts.get(key) or 0) for key in ("failed", "warning", "skipped")):
+                return "incomplete"
+            if result.get("scan_completed") is False or result.get("success") is False or result.get("reachable") is False or result.get("skipped") is True:
+                return "incomplete"
+            if payload.get("capability") in {"scan_ports", "nmap_scan", "masscan_scan"}:
+                filtered_count = int(result.get("filtered_count") or len(result.get("filtered_ports") or []))
+                if filtered_count or (result.get("host_status") != "up" and not result.get("open_ports")):
+                    return "incomplete"
+        return "complete"
+
+    @staticmethod
+    def _scan_incomplete_checks(summary: Dict) -> int:
+        """Count tool checks that failed, warned, or were skipped in a task result."""
+        if not isinstance(summary, dict):
+            return 0
+        scan_results = summary.get("scan_results") or {}
+        asset_results = scan_results.get("asset_results") if isinstance(scan_results, dict) else None
+        if isinstance(asset_results, dict):
+            count = 0
+            for payload in asset_results.values():
+                result = (payload or {}).get("result") if isinstance(payload, dict) else None
+                counts = (result or {}).get("summary") if isinstance(result, dict) else None
+                if isinstance(counts, dict):
+                    count += sum(int(counts.get(key) or 0) for key in ("failed", "warning", "skipped"))
+                elif ExecutionEngine._scan_asset_result_state(payload) != "complete":
+                    count += 1
+            return count
+
+        count = 0
+        for item in summary.get("results") or []:
+            if not isinstance(item, dict):
+                continue
+            nested = item.get("result") or {}
+            counts = nested.get("summary") if isinstance(nested, dict) else None
+            if isinstance(counts, dict):
+                count += sum(int(counts.get(key) or 0) for key in ("failed", "warning", "skipped"))
+            elif item.get("status") in {"failed", "warning", "skipped"}:
+                count += 1
+        if count:
+            return count
+        return len(summary.get("failed") or []) + len(summary.get("warnings") or [])
+
+    @staticmethod
+    def _scan_task_descriptor(task, finding_stats: Optional[Dict[str, int]] = None) -> Dict:
         status_labels = {
             "pending": "等待执行", "running": "执行中", "completed": "已完成",
             "failed": "执行失败", "cancelled": "已取消",
@@ -1914,7 +1997,56 @@ class ExecutionEngine:
         raw_status = getattr(task.status, "value", task.status) or "pending"
         summary = task.result_summary or {}
         quality = ((summary.get("scan_results") or {}).get("quality") or {}) if isinstance(summary, dict) else {}
-        quality_labels = {"complete": "结果完整", "partial": "部分失败", "conditional": "结果需复核"}
+        quality_verdict = quality.get("verdict")
+        asset_results = ((summary.get("scan_results") or {}).get("asset_results") or {}) if isinstance(summary, dict) else {}
+        if isinstance(asset_results, dict) and asset_results:
+            asset_states = [ExecutionEngine._scan_asset_result_state(payload) for payload in asset_results.values()]
+            quality_verdict = "failed" if all(state == "failed" for state in asset_states) else (
+                "conditional" if any(state != "complete" for state in asset_states) else "complete"
+            )
+        if not quality_verdict:
+            outcome = summary.get("outcome") if isinstance(summary, dict) else None
+            quality_verdict = {"completed": "complete", "partial": "conditional", "failed": "failed"}.get(outcome)
+        if not quality_verdict and raw_status == "failed":
+            quality_verdict = "failed"
+        quality_labels = {
+            "complete": "结果完整", "partial": "部分失败", "conditional": "结果需复核", "failed": "执行失败",
+        }
+        stats = finding_stats or {}
+        confirmed_count = int(stats.get("confirmed", task.findings_count or 0))
+        unverified_count = int(stats.get("unverified", 0))
+        incomplete_checks_count = ExecutionEngine._scan_incomplete_checks(summary)
+        if raw_status in {"pending", "running"}:
+            conclusion_status = raw_status
+        elif raw_status == "failed":
+            conclusion_status = "failed"
+        elif confirmed_count:
+            conclusion_status = "issues"
+        elif raw_status == "cancelled" or unverified_count or incomplete_checks_count or quality_verdict != "complete":
+            conclusion_status = "incomplete"
+        else:
+            conclusion_status = "clean"
+        conclusion_labels = {
+            "pending": "等待执行",
+            "running": "正在检测",
+            "failed": "执行失败",
+            "issues": "发现问题",
+            "incomplete": "检测不完整",
+            "clean": "检测完成",
+        }
+        conclusion_summaries = {
+            "pending": "任务尚未开始",
+            "running": "检测仍在执行",
+            "failed": "任务执行失败，不能形成安全结论",
+            "issues": "已发现明确安全问题" if not (unverified_count or incomplete_checks_count) else "已发现明确安全问题，另有部分检查未完成",
+            "incomplete": "部分检查无法执行或验证，不能判断目标安全",
+            "clean": "检测完整，未发现明确问题",
+        }
+        source = parameters.get("source")
+        triggered_by = getattr(getattr(task, "triggered_by", None), "value", getattr(task, "triggered_by", None))
+        source_label = {
+            "interactive": "项目指令", "assessment_task": "等保测评",
+        }.get(source, "定时检测" if triggered_by == "scheduled" else "手动检测")
         return {
             "id": task.id,
             "name": name,
@@ -1922,9 +2054,16 @@ class ExecutionEngine:
             "targets": targets,
             "status": raw_status,
             "status_label": status_labels.get(raw_status, str(raw_status)),
-            "quality": quality.get("verdict"),
-            "quality_label": quality_labels.get(quality.get("verdict"), "尚未形成结果质量结论"),
-            "findings_count": task.findings_count or 0,
+            "quality": quality_verdict,
+            "quality_label": quality_labels.get(quality_verdict, "结果质量未知"),
+            "findings_count": confirmed_count,
+            "confirmed_count": confirmed_count,
+            "unverified_count": unverified_count,
+            "incomplete_checks_count": incomplete_checks_count,
+            "conclusion_status": conclusion_status,
+            "conclusion_label": conclusion_labels[conclusion_status],
+            "conclusion_summary": conclusion_summaries[conclusion_status],
+            "source_label": source_label,
             "created_at": task.created_at.isoformat() if task.created_at else None,
             "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         }

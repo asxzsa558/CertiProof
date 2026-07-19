@@ -5,7 +5,6 @@ import {
   CheckCircleFilled,
   CloseCircleFilled,
   ExclamationCircleFilled,
-  InfoCircleFilled,
 } from '@ant-design/icons'
 import ToolResultCard from './ToolResultCard'
 import { CAPABILITY_NAMES, TOOL_CATALOG } from './toolCatalog'
@@ -24,27 +23,33 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
     const totalAssets = Object.keys(assetResults).length
     const getDisplayStatus = (assetData) => inferResultState(assetData).key
     const successCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'success').length
+    const riskCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'risk').length
     const warningCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'warning').length
     const failedCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'failed').length
-    const skippedCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'skipped').length
-    const effectiveQualityVerdict = failedCount > 0
-      ? 'partial'
-      : warningCount > 0
-        ? 'conditional'
-        : quality.verdict
+    const effectiveQualityVerdict = failedCount === totalAssets && totalAssets > 0
+      ? 'failed'
+      : failedCount > 0
+        ? 'partial'
+        : warningCount > 0
+          ? 'conditional'
+          : quality.verdict
     const capabilitySet = Array.from(new Set(Object.values(assetResults).map(r => r.capability).filter(Boolean)))
     const mainCapability = capabilitySet.length === 1 ? capabilitySet[0] : 'full_compliance_scan'
     const mainTool = mainCapability
-    const overallStatus = failedCount > 0 ? 'failed' : warningCount > 0 ? 'warning' : 'success'
+    const overallStatus = failedCount === totalAssets && totalAssets > 0
+      ? 'failed'
+      : failedCount > 0 || warningCount > 0
+        ? 'warning'
+        : riskCount > 0 ? 'risk' : 'success'
     const statusTextMap = Object.fromEntries(Object.entries(RESULT_STATES).map(([key, value]) => [key, value.label]))
     const assetResultFilter = assetResultFilters[resultKey] || 'all'
     const setAssetResultFilter = (value) => setAssetResultFilters(prev => ({ ...prev, [resultKey]: value }))
 
     const assetStatusConfig = {
-      success: { color: 'success', text: '成功', icon: <CheckCircleFilled /> },
-      warning: { color: 'warning', text: '无法判定', icon: <ExclamationCircleFilled /> },
-      failed: { color: 'error', text: '失败', icon: <CloseCircleFilled /> },
-      skipped: { color: 'default', text: '已跳过', icon: <ExclamationCircleFilled /> },
+      success: { color: 'success', text: '检测完成', icon: <CheckCircleFilled /> },
+      risk: { color: 'error', text: '发现问题', icon: <CloseCircleFilled /> },
+      warning: { color: 'warning', text: '检测不完整', icon: <ExclamationCircleFilled /> },
+      failed: { color: 'error', text: '执行失败', icon: <CloseCircleFilled /> },
     }
     const assetEntries = Object.entries(assetResults)
     const filteredAssetEntries = assetResultFilter === 'all'
@@ -52,10 +57,10 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       : assetEntries.filter(([, assetData]) => getDisplayStatus(assetData) === assetResultFilter)
     const auditFilters = [
       { key: 'all', label: '全部', count: totalAssets },
-      { key: 'success', label: '成功', count: successCount },
-      { key: 'warning', label: '无法判定', count: warningCount },
-      { key: 'failed', label: '失败', count: failedCount },
-      { key: 'skipped', label: '跳过', count: skippedCount },
+      { key: 'success', label: '检测完成', count: successCount },
+      { key: 'risk', label: '发现问题', count: riskCount },
+      { key: 'warning', label: '检测不完整', count: warningCount },
+      { key: 'failed', label: '执行失败', count: failedCount },
     ]
 
     const riskLevel = (assetData) => {
@@ -65,7 +70,8 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       const state = inferResultState(assetData)
       if (state.key === 'failed') return { label: '高', className: 'high' }
       if (weakPasswords.length || findings.some(item => ['critical', 'high'].includes(item.severity))) return { label: '高', className: 'high' }
-      if (state.key === 'warning' || state.key === 'skipped') return { label: '中', className: 'medium' }
+      if (state.key === 'risk') return { label: '高', className: 'high' }
+      if (state.key === 'warning') return { label: '中', className: 'medium' }
       if ((result.open_ports || []).length || (result.filtered_ports || []).length || findings.length) return { label: '中', className: 'medium' }
       return { label: '低', className: 'low' }
     }
@@ -107,10 +113,10 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       const lines = []
       if (msg.content) lines.push(msg.content)
       lines.push(`总资产数: ${totalAssets}`)
-      lines.push(`成功: ${successCount}`)
-      if (warningCount) lines.push(`无法判定: ${warningCount}`)
-      if (failedCount) lines.push(`失败: ${failedCount}`)
-      if (skippedCount) lines.push(`跳过: ${skippedCount}`)
+      lines.push(`检测完成: ${successCount}`)
+      lines.push(`发现问题: ${riskCount}`)
+      lines.push(`检测不完整: ${warningCount}`)
+      lines.push(`执行失败: ${failedCount}`)
       if (effectiveQualityVerdict) lines.push(`结果可信度: ${effectiveQualityVerdict} - ${quality.note || ''}`)
       lines.push(`检测工具: ${capabilitySet.map(c => CAPABILITY_NAMES[c] || c).join('、') || '安全检测'}`)
       lines.push('')
@@ -145,17 +151,6 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       <div className="scan-animation-fade-in">
         {/* 统计摘要 */}
         <div className="result-summary multi-asset-summary">
-          {effectiveQualityVerdict && (
-            <div className="summary-item">
-              <div className="summary-icon" style={{ background: effectiveQualityVerdict === 'complete' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)' }}>
-                <InfoCircleFilled style={{ color: effectiveQualityVerdict === 'complete' ? '#10b981' : '#f59e0b' }} />
-              </div>
-              <div className="summary-content">
-                <div className="summary-title">结果可信度</div>
-                <div className="summary-value">{effectiveQualityVerdict === 'complete' ? '完整' : effectiveQualityVerdict === 'partial' ? '部分失败' : '有条件'}</div>
-              </div>
-            </div>
-          )}
           <div className="summary-item">
             <div className="summary-icon" style={{ background: 'rgba(99, 102, 241, 0.2)' }}>
               <MonitorOutlined style={{ color: '#6366f1' }} />
@@ -170,43 +165,37 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
               <CheckCircleFilled style={{ color: '#10b981' }} />
             </div>
             <div className="summary-content">
-              <div className="summary-title">成功</div>
+              <div className="summary-title">检测完成</div>
               <div className="summary-value">{successCount}</div>
             </div>
           </div>
-          {warningCount > 0 && (
-            <div className="summary-item">
-              <div className="summary-icon" style={{ background: 'rgba(245, 158, 11, 0.2)' }}>
-                <ExclamationCircleFilled style={{ color: '#f59e0b' }} />
-              </div>
-              <div className="summary-content">
-                <div className="summary-title">警告</div>
-                <div className="summary-value">{warningCount}</div>
-              </div>
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(239, 68, 68, 0.2)' }}>
+              <CloseCircleFilled style={{ color: '#ef4444' }} />
             </div>
-          )}
-          {failedCount > 0 && (
-            <div className="summary-item">
-              <div className="summary-icon" style={{ background: 'rgba(239, 68, 68, 0.2)' }}>
-                <CloseCircleFilled style={{ color: '#ef4444' }} />
-              </div>
-              <div className="summary-content">
-                <div className="summary-title">失败</div>
-                <div className="summary-value">{failedCount}</div>
-              </div>
+            <div className="summary-content">
+              <div className="summary-title">发现问题</div>
+              <div className="summary-value">{riskCount}</div>
             </div>
-          )}
-          {skippedCount > 0 && (
-            <div className="summary-item">
-              <div className="summary-icon" style={{ background: 'rgba(148, 163, 184, 0.18)' }}>
-                <ExclamationCircleFilled style={{ color: '#94a3b8' }} />
-              </div>
-              <div className="summary-content">
-                <div className="summary-title">跳过</div>
-                <div className="summary-value">{skippedCount}</div>
-              </div>
+          </div>
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(245, 158, 11, 0.2)' }}>
+              <ExclamationCircleFilled style={{ color: '#f59e0b' }} />
             </div>
-          )}
+            <div className="summary-content">
+              <div className="summary-title">检测不完整</div>
+              <div className="summary-value">{warningCount}</div>
+            </div>
+          </div>
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(239, 68, 68, 0.2)' }}>
+              <CloseCircleFilled style={{ color: '#ef4444' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">执行失败</div>
+              <div className="summary-value">{failedCount}</div>
+            </div>
+          </div>
         </div>
         
         <ToolResultCard

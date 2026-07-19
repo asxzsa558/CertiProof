@@ -1771,9 +1771,15 @@ class Orchestrator:
             for item in history:
                 targets = item.get("targets") or []
                 scope = f"（{', '.join(targets[:2])}{' 等' if len(targets) > 2 else ''}）" if targets else ""
+                counts = f"确认问题 {item.get('confirmed_count') or 0} 个"
+                if item.get("unverified_count"):
+                    counts += f"，无法验证 {item['unverified_count']} 个"
+                if item.get("incomplete_checks_count"):
+                    counts += f"，未完成检查 {item['incomplete_checks_count']} 项"
                 lines.append(
-                    f"- {item.get('name') or '安全检测'}{scope}：{item.get('status_label') or '状态未知'}，"
-                    f"{item.get('quality_label') or '结果质量未知'}，问题 {item.get('findings_count') or 0} 个"
+                    f"- #{item.get('id')} {item.get('name') or '安全检测'}{scope}："
+                    f"{item.get('conclusion_label') or '检测不完整'}。"
+                    f"{item.get('conclusion_summary') or '不能判断检测结论'}；{counts}"
                 )
             return "\n".join(lines)
 
@@ -2330,12 +2336,16 @@ class Orchestrator:
                     results["asset_results"][target]["error"] = detail.get("error_reason") or data.get("skip_reason") or data.get("tool_error")
                     results["asset_results"][target]["error_detail"] = detail or None
                 elif capability in ("scan_ports", "nmap_scan", "masscan_scan"):
-                    # 端口扫描工具：有开放端口才算 success，无则 warning
                     open_ports = data.get("open_ports", [])
-                    if len(open_ports) > 0:
+                    filtered_count = data.get("filtered_count") or len(data.get("filtered_ports") or [])
+                    if filtered_count:
+                        results["asset_results"][target]["display_status"] = "warning"
+                        results["asset_results"][target]["error"] = f"有 {filtered_count} 个端口被过滤或未确认，端口结论不完整"
+                    elif data.get("host_status") == "up" or open_ports:
                         results["asset_results"][target]["display_status"] = "success"
                     else:
                         results["asset_results"][target]["display_status"] = "warning"
+                        results["asset_results"][target]["error"] = "未确认主机可达，不能据此判断端口均已关闭"
                 elif capability == "scan_ssl":
                     if data.get("scan_completed") is False or data.get("reachable") is False:
                         results["asset_results"][target]["display_status"] = "warning"
@@ -2512,7 +2522,7 @@ class Orchestrator:
         if failed_count:
             verdict = "partial"
             note = "部分资产或工具执行失败，结论只能代表已完成的检测项。"
-        elif warning_count:
+        elif warning_count or incomplete_targets:
             verdict = "conditional"
             note = "部分资产或工具返回不可判定/未完成，需要结合网络连通性、权限和过滤状态复核。"
         else:

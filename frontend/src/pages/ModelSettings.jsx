@@ -304,7 +304,7 @@ function ModelSettings() {
             <Card
               title="模型提供商"
               extra={
-                <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateProvider}>
+                <Button type="primary" className="provider-add-button" icon={<PlusOutlined />} onClick={handleCreateProvider}>
                   添加提供商
                 </Button>
               }

@@ -137,6 +137,15 @@ const TOOL_NAMES = {
   chat: '对话',
 }
 
+const DETECTION_TOOLS = new Set([
+  'scan_ports', 'masscan_scan', 'scan_ssl', 'scan_vulnerabilities', 'scan_weak_passwords',
+  'full_compliance_scan', 'nikto_scan', 'sqlmap_scan', 'gobuster_scan', 'ffuf_scan',
+  'web_discovery_scan', 'baseline_check', 'linux_baseline', 'database_security_scan',
+  'redis_check', 'oracle_check', 'mongodb_check', 'memcached_check', 'mysql_check',
+  'fping_scan', 'snmp_walk', 'snmp_bruteforce', 'snmp_get', 'network_device_scan',
+  'enum4linux_scan', 'crackmapexec_scan', 'smb_enum', 'windows_security_scan', 'ping_host',
+])
+
 const formatCopyPart = (value) => {
   if (value === null || value === undefined || value === false) return ''
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
@@ -158,13 +167,21 @@ const ToolResultCard = ({ tool, status, summary, details, copyText, defaultExpan
   const toolIcon = TOOL_ICONS[tool] || <ToolOutlined />
   const toolName = TOOL_NAMES[tool] || tool
 
-  // 状态配置
-  const statusConfig = {
+  const detectionStatusConfig = {
+    success: { color: 'success', text: '检测完成', icon: <CheckCircleFilled /> },
+    risk: { color: 'error', text: '发现问题', icon: <CloseCircleFilled /> },
+    warning: { color: 'warning', text: '检测不完整', icon: <ExclamationCircleFilled /> },
+    failed: { color: 'error', text: '执行失败', icon: <CloseCircleFilled /> },
+    skipped: { color: 'warning', text: '检测不完整', icon: <ExclamationCircleFilled /> },
+  }
+  const genericStatusConfig = {
     success: { color: 'success', text: '成功', icon: <CheckCircleFilled /> },
-    warning: { color: 'warning', text: '无法判定', icon: <ExclamationCircleFilled /> },
+    risk: { color: 'warning', text: '需关注', icon: <ExclamationCircleFilled /> },
+    warning: { color: 'warning', text: '未完整', icon: <ExclamationCircleFilled /> },
     failed: { color: 'error', text: '失败', icon: <CloseCircleFilled /> },
     skipped: { color: 'default', text: '已跳过', icon: <ExclamationCircleFilled /> },
   }
+  const statusConfig = DETECTION_TOOLS.has(tool) ? detectionStatusConfig : genericStatusConfig
 
   const currentStatus = statusConfig[status] || statusConfig.success
 

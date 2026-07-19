@@ -641,6 +641,7 @@ function ChatPage() {
               project={selectedProject}
               assets={assets}
               assetsLoading={assetsLoading}
+              assessmentCollapsed={siderCollapsed}
               modelId={selectedModel}
               onOpenResults={() => selectedProject && navigate(`/projects/${selectedProject.id}/results`)}
               onWorkspaceSummary={setWorkspaceSummary}

@@ -95,7 +95,15 @@ export function scanTaskName(task = {}) {
 export function scanTaskTarget(task = {}) {
   const parameters = task.parameters || {}
   const summary = task.result_summary || {}
-  const value = parameters.target || parameters.targets || summary.target
+  const plannedTargets = (parameters.plan || []).flatMap(item => {
+    const planned = item?.parameters?.target || item?.parameters?.targets
+    return Array.isArray(planned) ? planned : planned ? [planned] : []
+  })
+  const resultTargets = Object.keys(summary.scan_results?.asset_results || {}).filter(target => target !== 'unknown')
+  const value = parameters.target || parameters.targets
+    || (plannedTargets.length ? plannedTargets : null)
+    || (resultTargets.length ? resultTargets : null)
+    || summary.target
   return Array.isArray(value) ? value.join(', ') : value || '未记录目标'
 }
 
@@ -108,6 +116,14 @@ export function scanTaskSource(task = {}) {
 
 export function scanTaskConclusion(task = {}) {
   const summary = task.result_summary || {}
+  if (task.status === 'running' || task.status === 'pending') return { key: 'running', label: '执行中' }
+  const authoritative = {
+    clean: { key: 'clean', label: '检测完成' },
+    issues: { key: 'risk', label: '发现问题' },
+    incomplete: { key: 'warning', label: '检测不完整' },
+    failed: { key: 'failed', label: '执行失败' },
+  }[task.conclusion_status]
+  if (authoritative) return { ...authoritative, label: task.conclusion_label || authoritative.label, detail: task.conclusion_summary }
   const executions = summary.results || []
   const scanAssets = Object.values(summary.scan_results?.asset_results || {})
   const hasUnverifiedVulnerabilityScan = scanAssets.some(item => {
@@ -121,15 +137,15 @@ export function scanTaskConclusion(task = {}) {
     const totals = result.summary || {}
     return result.skipped === true || (totals.total > 0 && totals.skipped === totals.total)
   })
-  if (task.status === 'failed' || task.status === 'cancelled' || task.error_message) return { key: 'failed', label: '无法完成' }
-  if (task.status === 'running' || task.status === 'pending') return { key: 'running', label: '执行中' }
-  if (summary.outcome === 'not_applicable' || allSkipped) return { key: 'skipped', label: '不适用' }
+  if (task.status === 'failed' || task.error_message) return { key: 'failed', label: '执行失败' }
+  if (task.status === 'cancelled' || summary.outcome === 'not_applicable' || allSkipped) return { key: 'warning', label: '检测不完整' }
+  const confirmedCount = task.confirmed_count ?? task.findings_count ?? 0
+  if (confirmedCount > 0) return { key: 'risk', label: '发现问题' }
   if (
     (summary.failed || []).length ||
     (summary.warnings || []).length ||
     summary.status === 'partial' ||
     hasUnverifiedVulnerabilityScan
-  ) return { key: 'warning', label: '部分未完成' }
-  if (task.findings_count > 0) return { key: 'risk', label: `发现 ${task.findings_count} 项问题` }
-  return { key: 'clean', label: '未发现问题' }
+  ) return { key: 'warning', label: '检测不完整' }
+  return { key: 'clean', label: '检测完成' }
 }
