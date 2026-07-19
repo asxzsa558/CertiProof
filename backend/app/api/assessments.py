@@ -14,7 +14,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from typing import Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -114,8 +114,7 @@ class AssessmentResponse(BaseModel):
     completed_at: Optional[str]
     created_at: str
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PhaseResponse(BaseModel):
@@ -133,8 +132,7 @@ class PhaseResponse(BaseModel):
     completed_at: Optional[str]
     depends_on: Optional[list]
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TaskResponse(BaseModel):
@@ -150,8 +148,7 @@ class TaskResponse(BaseModel):
     started_at: Optional[str]
     completed_at: Optional[str]
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TemplateResponse(BaseModel):
@@ -163,8 +160,7 @@ class TemplateResponse(BaseModel):
     phases_count: int
     is_active: bool
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CompletePhaseRequest(BaseModel):

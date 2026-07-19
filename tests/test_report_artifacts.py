@@ -142,6 +142,18 @@ def test_report_artifact_is_versioned_and_invalidated(tmp_path):
                 payload = report_artifact_payload(second)
                 assert payload["score"] is None
                 assert payload["coverage"] == 0.0
+
+                await db.delete(second)
+                await db.commit()
+                third = await create_report_artifact(
+                    db,
+                    project_id=project.id,
+                    assessment_id=assessment.id,
+                    task_id=report_task.id,
+                    generated_by=user.id,
+                )
+                await db.commit()
+                assert third.version == 3
         finally:
             file_storage.base_path = previous_path
             await engine.dispose()

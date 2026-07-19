@@ -1394,6 +1394,7 @@ class FlowEngine:
         project = await self.db.get(Project, project_id)
         if project:
             project.compliance_score = None
+            project.report_version_counter = 0
         await self.db.commit()
 
         file_rows = [*evidence_rows, *document_rows, *report_rows]

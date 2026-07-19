@@ -15,7 +15,7 @@ PERMISSION_GROUPS = {
     "asset": ["asset:read", "asset:create", "asset:update", "asset:delete"],
     "scan": ["scan:execute", "scan:read", "scan:cancel"],
     "assessment": ["assessment:read", "assessment:manage", "evidence:manage"],
-    "report": ["report:read", "report:export"],
+    "report": ["report:read", "report:export", "report:delete"],
     "rbac": ["role:read", "role:manage", "member:manage"],
     "system": ["system:config", "tool:diagnose"],
 }

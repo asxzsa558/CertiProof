@@ -83,7 +83,7 @@ services:
       dockerfile: Dockerfile
     container_name: certiproof-frontend
     ports:
-      - "3000:80"
+      - "127.0.0.1:3000:80"
     depends_on:
       - backend
     restart: unless-stopped
@@ -97,13 +97,14 @@ services:
       dockerfile: Dockerfile
     container_name: certiproof-backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-certiproof}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-certiproof}
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       APP_ENV: ${APP_ENV:-production}
       DEBUG: ${DEBUG:-false}
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000"]}'
       MCP_GATEWAY_URL: http://mcp-gateway:9000
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       TASK_EXECUTION_MODE: ${TASK_EXECUTION_MODE:-worker}
@@ -125,6 +126,28 @@ services:
         condition: service_started
       embedding-server:
         condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # 云上生产入口；仅在 --profile production 时启动，自动管理 HTTPS。
+  edge:
+    profiles: ["production"]
+    image: caddy:2.8-alpine
+    container_name: certiproof-edge
+    environment:
+      CERTIPROOF_DOMAIN: ${CERTIPROOF_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_started
     restart: unless-stopped
     networks:
       - certiproof-net
@@ -361,6 +384,8 @@ volumes:
   uploads_data:
   ocr_models:
   embedding_models:
+  caddy_data:
+  caddy_config:
 
 networks:
   certiproof-net:

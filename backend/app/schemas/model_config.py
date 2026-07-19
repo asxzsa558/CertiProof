@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
 from datetime import datetime
 from app.models.model_config import ProviderType
@@ -30,8 +30,7 @@ class ModelProviderResponse(ModelProviderBase):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Config Schemas ---
@@ -65,8 +64,7 @@ class ModelConfigResponse(ModelConfigBase):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ModelConfigWithProvider(ModelConfigResponse):
@@ -84,8 +82,7 @@ class ModelUsageResponse(BaseModel):
     task_type: Optional[str]
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ModelUsageSummary(BaseModel):
@@ -104,5 +101,4 @@ class AvailableModel(BaseModel):
     capabilities: Optional[List[str]]
     is_default: bool
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

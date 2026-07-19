@@ -383,6 +383,11 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
 
       const taskId = response.data.task_id
       const aiResponse = response.data.response
+      if (response.data.next_thread_id) {
+        setCurrentThreadId(response.data.next_thread_id)
+        window.localStorage.setItem(`certiproof:thread:${projectId}`, String(response.data.next_thread_id))
+        message.info('当前长对话已自动归档，后续消息将在接续对话中继续。')
+      }
 
       // 添加 AI 回复消息
       const assistantMessage = {
@@ -841,6 +846,11 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
               scanResults: msg.data?.scan_results || {},
               isMultiAsset: msg.data?.is_multi_asset,
             })])
+            if (msg.data?.next_thread_id) {
+              setCurrentThreadId(msg.data.next_thread_id)
+              window.localStorage.setItem(`certiproof:thread:${projectId}`, String(msg.data.next_thread_id))
+              message.info('当前长对话已自动归档，后续消息将在接续对话中继续。')
+            }
           } else if (msg.type === 'failed') {
             ws.close()
             wsRefsRef.current.delete(taskId)
@@ -928,6 +938,11 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
       setMessages,
       completedTaskIdsRef,
       pollRef,
+      onThreadRollover: nextThreadId => {
+        setCurrentThreadId(nextThreadId)
+        window.localStorage.setItem(`certiproof:thread:${projectId}`, String(nextThreadId))
+        message.info('当前长对话已自动归档，后续消息将在接续对话中继续。')
+      },
     })
   }
 

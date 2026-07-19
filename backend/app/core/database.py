@@ -242,6 +242,7 @@ async def _migrate_projects_table(conn):
         ("organization_id", "INTEGER"),
         ("system_name", "VARCHAR(500)"),
         ("owner_id", "INTEGER"),
+        ("report_version_counter", "INTEGER NOT NULL DEFAULT 0"),
     ]
     
     for col_name, col_type in columns_to_add:

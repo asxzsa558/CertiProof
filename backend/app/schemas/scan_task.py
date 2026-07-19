@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Dict, Any
 from datetime import datetime
 from app.models.scan_task import ScanTaskType, ScanTaskStatus, TriggeredBy
@@ -33,8 +33,7 @@ class ScanTaskResponse(ScanTaskBase):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScanTaskListResponse(BaseModel):
@@ -51,5 +50,4 @@ class ScanTaskListResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

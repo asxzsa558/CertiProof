@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from app.models.finding import Severity, Judgment, JudgmentEngine, FindingStatus
@@ -29,8 +29,7 @@ class FindingResponse(FindingBase):
     updated_at: datetime
     resolved_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FindingDetail(FindingResponse):
@@ -59,8 +58,7 @@ class EvidenceResponse(EvidenceBase):
     finding_id: Optional[int] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ScanTask schemas
@@ -86,8 +84,7 @@ class ScanTaskResponse(ScanTaskBase):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScanTaskDetail(ScanTaskResponse):

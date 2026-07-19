@@ -43,6 +43,13 @@
 .verification-finding-row { position:relative; display:grid; gap:8px; padding:12px 0; border-bottom:1px solid rgba(80,139,169,.16); }.verification-finding-row:last-child { border-bottom:0; }
 .verification-finding-main { min-width:0; display:grid; grid-template-columns:8px minmax(0,1fr); gap:9px; }.severity-dot { width:6px; height:6px; margin-top:6px; border-radius:50%; background:#6c8799; }.severity-dot.critical,.severity-dot.high { background:#f47683; }.severity-dot.medium { background:#f2c969; }.severity-dot.low { background:#56d9ef; }
 .verification-finding-main strong { color:#dff3ff; font-size:12px; overflow-wrap:anywhere; }.verification-finding-main p { margin:3px 0; color:rgba(205,225,237,.72); font-size:12px; overflow-wrap:anywhere; }.verification-finding-main em { display:block; color:#62cada; font-size:11px; font-style:normal; overflow-wrap:anywhere; }
+.controlled-remediation { margin-top:8px; border:1px solid rgba(86,217,239,.16); background:rgba(3,16,26,.5); }
+.controlled-remediation summary { cursor:pointer; padding:8px 10px; color:#7ddff0; font-size:11px; }
+.controlled-remediation>div { display:grid; grid-template-columns:68px minmax(0,1fr); gap:8px; padding:7px 10px; border-top:1px solid rgba(86,217,239,.1); }
+.controlled-remediation b { color:#b9d8e7; font-size:10px; }
+.controlled-remediation span,.controlled-remediation li { color:rgba(205,225,237,.72); font-size:11px; line-height:1.55; overflow-wrap:anywhere; }
+.controlled-remediation ul,.controlled-remediation ol { margin:0; padding-left:18px; }
+.controlled-remediation small { display:block; padding:7px 10px; color:#f2c969; border-top:1px solid rgba(242,201,105,.14); }
 .verification-finding-state { display:flex; flex-wrap:wrap; gap:5px; }.verification-finding-state .ant-tag { margin:0; }
 .verification-finding-actions { display:flex; justify-content:flex-end; }.verification-comparison { display:flex; align-items:center; gap:8px; color:rgba(194,216,229,.65); font-size:11px; }.verification-comparison i { width:18px; height:1px; background:#4ecadd; }
 .verification-group-action { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-start; padding:12px 0 4px; }

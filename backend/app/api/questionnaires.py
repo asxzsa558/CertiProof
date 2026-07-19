@@ -4,7 +4,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -35,8 +35,7 @@ class QuestionnaireResponse(BaseModel):
     created_at: str
     completed_at: Optional[str] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SubmitAnswersRequest(BaseModel):

@@ -14,6 +14,7 @@ from app.services.capability_registry import CapabilityRegistry, capability_regi
 from app.services.context_manager import ContextManager
 from app.core.rbac import require_org_permission_for_user_id
 from app.core.redaction import redact_sensitive
+from app.services.display_names import scan_display_name
 from app.services.execution_policy import NETWORK_CAPABILITIES, validate_execution_parameters
 
 logger = logging.getLogger(__name__)
@@ -892,6 +893,8 @@ class ExecutionEngine:
 
         elif capability_name == "view_scan_history":
             return await self._view_scan_history(parameters, user_id, project_id, db)
+        elif capability_name == "view_scan_changes":
+            return await self._view_scan_changes(parameters, user_id, project_id, db)
 
         elif capability_name == "assessment_flow_action":
             return await self._assessment_flow_action(parameters, user_id, project_id, db)
@@ -1579,21 +1582,53 @@ class ExecutionEngine:
             -finding.id,
         ))
 
+        serialized = [
+            {
+                "id": f.id,
+                "clause_id": f.clause_id,
+                "clause_name": f.clause_name,
+                "severity": f.severity.value if f.severity else None,
+                "status": f.status.value if f.status else None,
+                "judgment": f.judgment.value if f.judgment else None,
+                "source_type": f.source_type,
+                "source_key": f.source_key,
+                "scope_key": f.scope_key,
+                "description": f.description,
+                "remediation_suggestion": f.remediation_suggestion,
+            }
+            for f in findings
+        ]
+        grouped = {}
+        for item in serialized:
+            key = (
+                item.get("source_type") or "unknown",
+                item.get("source_key") or item.get("clause_id") or item.get("clause_name") or item.get("description") or "unknown",
+                item.get("status") or "unknown",
+                item.get("judgment") or "unknown",
+            )
+            group = grouped.setdefault(key, {
+                "title": item.get("clause_name") or item.get("clause_id") or item.get("description") or "未命名问题",
+                "source_type": item.get("source_type"),
+                "severity": item.get("severity"),
+                "status": item.get("status"),
+                "judgment": item.get("judgment"),
+                "count": 0,
+                "targets": [],
+                "finding_ids": [],
+                "description": item.get("description"),
+            })
+            group["count"] += 1
+            group["finding_ids"].append(item["id"])
+            target = item.get("scope_key")
+            if target and not str(target).startswith("task:") and target not in group["targets"]:
+                group["targets"].append(target)
+            severity_rank = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
+            if severity_rank.get(item.get("severity"), 0) > severity_rank.get(group.get("severity"), 0):
+                group["severity"] = item.get("severity")
+
         return {
-            "findings": [
-                {
-                    "id": f.id,
-                    "clause_id": f.clause_id,
-                    "clause_name": f.clause_name,
-                    "severity": f.severity.value if f.severity else None,
-                    "status": f.status.value if f.status else None,
-                    "judgment": f.judgment.value if f.judgment else None,
-                    "source_type": f.source_type,
-                    "description": f.description,
-                    "remediation_suggestion": f.remediation_suggestion,
-                }
-                for f in findings
-            ],
+            "findings": serialized,
+            "groups": sorted(grouped.values(), key=lambda item: (-item["count"], item["title"])),
             "total": int((await db.execute(count_query)).scalar_one() or 0),
             "returned": len(findings),
             "message": "项目问题清单已更新",
@@ -1834,14 +1869,17 @@ class ExecutionEngine:
         return {"success": False, "action": action, "message": "不支持的测评流程操作"}
 
     async def _view_scan_history(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
-        """查看扫描历史"""
+        """Return readable detection history without leaking internal enum values."""
         from app.models.scan_task import ScanTask
         from sqlalchemy import select
 
         if not await self._project_for_user_id(db, project_id, user_id, "scan:read"):
             return {"scan_history": [], "total": 0, "message": "项目不存在或无权查看检测历史"}
 
-        limit = parameters.get("limit", 10)
+        try:
+            limit = max(1, min(int(parameters.get("limit", 10)), 50))
+        except (TypeError, ValueError):
+            limit = 10
 
         query = select(ScanTask).where(ScanTask.project_id == project_id)
         result = await db.execute(
@@ -1850,18 +1888,127 @@ class ExecutionEngine:
         tasks = result.scalars().all()
 
         return {
-            "scan_history": [
-                {
-                    "id": t.id,
-                    "task_type": t.task_type.value if t.task_type else None,
-                    "status": t.status.value if t.status else None,
-                    "findings_count": t.findings_count,
-                    "created_at": t.created_at.isoformat() if t.created_at else None,
-                    "completed_at": t.completed_at.isoformat() if t.completed_at else None,
-                }
-                for t in tasks
-            ],
+            "scan_history": [self._scan_task_descriptor(t) for t in tasks],
             "total": len(tasks),
+        }
+
+    @staticmethod
+    def _scan_task_descriptor(task) -> Dict:
+        status_labels = {
+            "pending": "等待执行", "running": "执行中", "completed": "已完成",
+            "failed": "执行失败", "cancelled": "已取消",
+        }
+        parameters = task.parameters or {}
+        plan = parameters.get("plan") or []
+        capabilities = [step.get("capability") for step in plan if isinstance(step, dict) and step.get("capability")]
+        if not capabilities and parameters.get("task_type"):
+            capabilities = [parameters["task_type"]]
+        targets = []
+        for step in plan:
+            target = (step.get("parameters") or {}).get("target") if isinstance(step, dict) else None
+            if target and target not in targets:
+                targets.append(str(target))
+        if not targets and parameters.get("target"):
+            targets = [str(parameters["target"])]
+        name = " + ".join(scan_display_name(item) for item in capabilities) or "安全检测"
+        raw_status = getattr(task.status, "value", task.status) or "pending"
+        summary = task.result_summary or {}
+        quality = ((summary.get("scan_results") or {}).get("quality") or {}) if isinstance(summary, dict) else {}
+        quality_labels = {"complete": "结果完整", "partial": "部分失败", "conditional": "结果需复核"}
+        return {
+            "id": task.id,
+            "name": name,
+            "capabilities": capabilities,
+            "targets": targets,
+            "status": raw_status,
+            "status_label": status_labels.get(raw_status, str(raw_status)),
+            "quality": quality.get("verdict"),
+            "quality_label": quality_labels.get(quality.get("verdict"), "尚未形成结果质量结论"),
+            "findings_count": task.findings_count or 0,
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        }
+
+    @staticmethod
+    def _scan_issue_labels(task) -> set[str]:
+        summary = task.result_summary or {}
+        results = summary.get("scan_results") or {}
+        labels = set()
+        for field in ("vulnerabilities", "ssl_issues", "web_vulnerabilities", "database_issues", "weak_passwords"):
+            for item in results.get(field) or []:
+                if isinstance(item, dict):
+                    label = item.get("name") or item.get("title") or item.get("description") or item.get("issue")
+                    target = item.get("target") or item.get("host") or item.get("asset")
+                    text = str(label or item.get("id") or "未命名问题")
+                    labels.add(f"{target}: {text}" if target else text)
+                elif item:
+                    labels.add(str(item))
+        return labels
+
+    @classmethod
+    def _latest_comparable_scan_pair(cls, tasks):
+        """Return the newest pair with the same capability and target scope."""
+        newest_by_signature = {}
+        for task in tasks:
+            info = cls._scan_task_descriptor(task)
+            if not info["capabilities"]:
+                continue
+            signature = (tuple(info["capabilities"]), tuple(sorted(info["targets"])))
+            if signature in newest_by_signature:
+                return newest_by_signature[signature], task
+            newest_by_signature[signature] = task
+        return None, None
+
+    async def _view_scan_changes(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """Compare the newest available pair using the same capability and targets."""
+        from app.models.finding import Finding
+        from app.models.scan_task import ScanTask, ScanTaskStatus
+        from sqlalchemy import select
+
+        if not await self._project_for_user_id(db, project_id, user_id, "scan:read"):
+            return {"comparable": False, "message": "项目不存在或无权比较检测结果"}
+        result = await db.execute(
+            select(ScanTask)
+            .where(ScanTask.project_id == project_id, ScanTask.status.in_([ScanTaskStatus.COMPLETED, ScanTaskStatus.FAILED]))
+            .order_by(ScanTask.created_at.desc())
+            .limit(100)
+        )
+        tasks = result.scalars().all()
+        if not tasks:
+            return {"comparable": False, "message": "当前项目还没有可比较的检测结果。"}
+        current, previous = self._latest_comparable_scan_pair(tasks)
+        if not current:
+            latest_info = self._scan_task_descriptor(tasks[0])
+            return {
+                "comparable": False,
+                "current": latest_info,
+                "message": "最近 100 条检测中没有目标范围与检测能力相同的两次结果，暂时无法比较变化。",
+            }
+        current_info = self._scan_task_descriptor(current)
+        previous_info = self._scan_task_descriptor(previous)
+        current_issues = self._scan_issue_labels(current)
+        previous_issues = self._scan_issue_labels(previous)
+        finding_result = await db.execute(
+            select(Finding.scan_task_id, Finding.fingerprint, Finding.clause_name, Finding.description, Finding.scope_key)
+            .where(Finding.scan_task_id.in_([current.id, previous.id]))
+        )
+        for task_id, fingerprint, title, description, scope in finding_result.all():
+            label = str(title or description or fingerprint or "未命名问题")
+            if scope:
+                label = f"{scope}: {label}"
+            (current_issues if task_id == current.id else previous_issues).add(label)
+        reliable = current_info.get("quality") == "complete" and previous_info.get("quality") == "complete"
+        return {
+            "comparable": True,
+            "reliable": reliable,
+            "current": current_info,
+            "previous": previous_info,
+            "changes": {
+                "added": sorted(current_issues - previous_issues),
+                "resolved": sorted(previous_issues - current_issues) if reliable else [],
+                "persistent": sorted(current_issues & previous_issues),
+            },
+            "message": "已完成最近两次同类检测结果比较",
         }
 
     async def _create_project(self, parameters: Dict, user_id: int, db: AsyncSession) -> Dict:

@@ -51,6 +51,7 @@ SKILLS: Tuple[PromptSkill, ...] = (
             "query_open_ports": "已经确认的开放端口和服务",
             "query_vulnerabilities": "已经发现的漏洞",
             "query_scan_history": "检测历史、之前执行过什么",
+            "query_scan_changes": "当前检测与前一次同类检测相比有什么变化",
         },
         intent_capabilities={
             "query_project_status": ("view_project_status",),
@@ -61,12 +62,14 @@ SKILLS: Tuple[PromptSkill, ...] = (
             "query_open_ports": ("view_open_ports",),
             "query_vulnerabilities": ("view_vulnerabilities",),
             "query_scan_history": ("view_scan_history",),
+            "query_scan_changes": ("view_scan_changes",),
         },
         instructions="""
 - 整体状态、通过准备度、主要差距和管理层摘要都读取同一份 view_project_status 事实快照，但必须使用对应的 view 参数。
 - “能否通过”必须先给直接结论，再说明事实依据；只能表达内部自查准备度，不承诺通过正式测评。
 - “主要差距”必须展示真实待处理 Finding，不得只重复总数。
 - “管理层摘要”必须包含总体判断、主要风险和下一步，不输出工具内部名称。
+- “检测结果变化”必须比较最近两次目标与能力相同的检测；没有可比基线时明确说明，不得退化为历史列表。
 - 不得从历史对话复用旧分数，也不得把流程完成度当成合规评分。
 """.strip(),
         context_fields=("project", "assessment", "thread"),

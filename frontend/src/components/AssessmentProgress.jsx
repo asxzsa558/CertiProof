@@ -1362,7 +1362,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
             <dl>
               <div><dt>总任务</dt><dd>{totalTasks}</dd></div>
               <div><dt>已完成</dt><dd>{completedTasks}</dd></div>
-              <div><dt>待处理</dt><dd>{Math.max(totalTasks - completedTasks, 0)}</dd></div>
+              <div><dt>未完成任务</dt><dd>{Math.max(totalTasks - completedTasks, 0)}</dd></div>
             </dl>
           </div>
 

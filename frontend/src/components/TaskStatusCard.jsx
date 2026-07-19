@@ -11,6 +11,15 @@ import {
   UpOutlined,
 } from '@ant-design/icons'
 
+const completedStepLabel = (currentStep) => {
+  const label = String(currentStep || '')
+    .replace(/^正在执行[:：]\s*/, '')
+    .replace(/[.。…]+$/, '')
+    .replace(/^正在/, '')
+    .trim()
+  return label ? `${label}已完成` : '任务执行完成'
+}
+
 function MultiAssetProgressCard({ msg, onPause, onStop, onResume }) {
   const [expanded, setExpanded] = useState(!msg.taskCompleted)
   const assetProgress = msg.assetProgress || {}
@@ -172,6 +181,7 @@ export default function TaskStatusCard({ msg, onPause, onStop, onResume }) {
   const progress = stepProgress?.total_steps > 0
     ? Math.round(((stepProgress.step_index + 1) / stepProgress.total_steps) * 100)
     : isCompleted ? 100 : 0
+  const completedLabel = completedStepLabel(currentStep)
 
   return (
     <div className="scan-animation-fade-in" style={{ marginTop: 4 }}>
@@ -181,8 +191,8 @@ export default function TaskStatusCard({ msg, onPause, onStop, onResume }) {
             {isFailed || isStopped ? <CloseCircleFilled /> : isCompleted ? <CheckCircleFilled /> : isPaused ? <PauseCircleOutlined /> : <LoadingOutlined spin />}
           </span>
           <span className="task-summary-copy">
-            <strong>{msg.content || '安全检测任务'}</strong>
-            <small>{currentStep || (isCompleted ? '执行结果已返回' : '等待执行进度')}</small>
+            <strong>{isCompleted && !isFailed && !isStopped ? completedLabel : (msg.content || '安全检测任务')}</strong>
+            <small>{isCompleted && !isFailed && !isStopped ? '执行结果已返回，可查看下方详情' : (currentStep || '等待执行进度')}</small>
           </span>
           <span className={`task-summary-status ${isFailed || isStopped ? 'failed' : isCompleted ? 'completed' : isPaused ? 'paused' : 'running'}`}>{displayStatus}</span>
           {expanded ? <UpOutlined /> : <DownOutlined />}
@@ -220,7 +230,7 @@ export default function TaskStatusCard({ msg, onPause, onStop, onResume }) {
           ) : (
             <LoadingOutlined style={{ color: '#6366f1' }} spin />
           )}
-          <span className="step-text">{isFailed ? (currentStep || '任务执行失败') : isStopped ? '任务已停止' : isPaused ? '任务已暂停' : isCompleted ? (currentStep || '任务执行完成') : (currentStep || '任务执行中...')}</span>
+          <span className="step-text">{isFailed ? (currentStep || '任务执行失败') : isStopped ? '任务已停止' : isPaused ? '任务已暂停' : isCompleted ? completedLabel : (currentStep || '任务执行中...')}</span>
         </div>
 
         {stepProgress && stepProgress.steps && stepProgress.steps.length > 0 && (

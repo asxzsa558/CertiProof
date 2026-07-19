@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Drawer, message, Progress, Tag, Tooltip } from 'antd'
+import { Button, Checkbox, Drawer, message, Modal, Progress, Tag, Tooltip } from 'antd'
 import {
   BarChartOutlined,
   BugOutlined,
   CloseOutlined,
   DatabaseOutlined,
   DownloadOutlined,
+  DeleteOutlined,
   ExclamationCircleFilled,
   EyeOutlined,
   FileProtectOutlined,
@@ -74,6 +75,8 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
   const [scoreSummary, setScoreSummary] = useState(null)
   const [reportHistory, setReportHistory] = useState([])
   const [reportComparison, setReportComparison] = useState(null)
+  const [selectedReportVersions, setSelectedReportVersions] = useState([])
+  const [deletingReports, setDeletingReports] = useState(false)
   const [detailTab, setDetailTab] = useState('history')
   const [detailCollapsed, setDetailCollapsed] = useState(false)
   const [verificationVisible, setVerificationVisible] = useState(false)
@@ -224,6 +227,33 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
     }
   }
 
+  const deleteSelectedReports = () => {
+    if (!selectedReportVersions.length) return
+    const labels = selectedReportVersions.sort((a, b) => b - a).map(version => `V${version}`).join('、')
+    Modal.confirm({
+      title: `彻底删除 ${labels}？`,
+      content: '数据库快照和 HTML 文件都会删除，操作不可恢复；后续报告不会复用这些版本号。',
+      okText: '彻底删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      async onOk() {
+        setDeletingReports(true)
+        try {
+          await api.delete(`/projects/${project.id}/reports`, { data: { versions: selectedReportVersions } })
+          setReportHistory(items => items.filter(item => !selectedReportVersions.includes(item.version)))
+          setReportComparison(null)
+          setSelectedReportVersions([])
+          message.success(`已彻底删除 ${labels}`)
+        } catch (error) {
+          message.error(error.response?.data?.detail || '报告版本删除失败')
+          throw error
+        } finally {
+          setDeletingReports(false)
+        }
+      },
+    })
+  }
+
   const applicable = Number(scoreMetrics.reliable || 0) + Number(scoreMetrics.unable || 0)
   const unablePercent = applicable ? Math.round(Number(scoreMetrics.unable || 0) / applicable * 100) : 0
   const openVerification = (filter = 'all') => {
@@ -359,7 +389,11 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
               </section>
               <section className="history-heading">
                 <div><HistoryOutlined /><span><strong>评分与报告版本</strong><small>每份报告使用生成时的不可变数据快照</small></span></div>
-                <b>{reportHistory.length} 个版本</b>
+                <div className="history-selection-actions">
+                  {reportHistory.some(item => item.stale) && <Button type="text" size="small" onClick={() => setSelectedReportVersions(reportHistory.filter(item => item.stale).map(item => item.version))}>选择已过期</Button>}
+                  <Button danger type="text" size="small" icon={<DeleteOutlined />} disabled={!selectedReportVersions.length} loading={deletingReports} onClick={deleteSelectedReports}>删除 {selectedReportVersions.length || ''}</Button>
+                  <b>{reportHistory.length} 个版本</b>
+                </div>
               </section>
               {reportComparison && <section className="report-comparison-strip">
                 <span>V{reportComparison.previous.version}</span>
@@ -372,7 +406,9 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
               {reportHistory.length ? reportHistory.map((item, index) => {
                 const older = reportHistory[index + 1]
                 const delta = Number.isFinite(item.score) && Number.isFinite(older?.score) ? Number((item.score - older.score).toFixed(1)) : null
-                return <article className={`report-version-row ${item.stale ? 'stale' : 'current'}`} key={item.id}>
+                const selected = selectedReportVersions.includes(item.version)
+                return <article className={`report-version-row ${item.stale ? 'stale' : 'current'} ${selected ? 'selected' : ''}`} key={item.id}>
+                  <Checkbox checked={selected} onChange={event => setSelectedReportVersions(values => event.target.checked ? [...values, item.version] : values.filter(version => version !== item.version))} aria-label={`选择报告 V${item.version}`} />
                   <div className="report-version-state"><span>{item.stale ? '已过期' : '当前'}</span><strong>V{item.version}</strong></div>
                   <div className="report-version-score"><strong>{item.score ?? '未出具'}</strong>{delta !== null && <small className={delta >= 0 ? 'up' : 'down'}>{delta >= 0 ? '+' : ''}{delta}</small>}</div>
                   <dl>

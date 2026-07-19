@@ -19,6 +19,7 @@ from app.models.document_knowledge import DocumentAnalysisRun, DocumentFile
 from app.models.assessment_type import ProjectAssessment
 from app.models.monitoring import ScheduledScan, ScanHistory
 from app.models.change_snapshot import ChangeSnapshot
+from app.models.report import ReportArtifact
 from app.models.organization import OrganizationMember
 from app.models.context import (
     ConversationHistory, ActionHistory, ResultCache,
@@ -319,6 +320,54 @@ async def get_report_version(
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_410_GONE, detail=str(exc)) from exc
+
+
+@router.delete("/{project_id}/reports")
+async def delete_report_versions(
+    project_id: int,
+    versions: List[int] = Body(embed=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Permanently delete selected immutable snapshots and their HTML files."""
+    project = await get_project_for_user(db, project_id, current_user.id, "report:delete")
+    selected = sorted({int(version) for version in versions if int(version) > 0})
+    if not selected:
+        raise HTTPException(status_code=422, detail="请至少选择一个报告版本")
+    artifacts = list((await db.execute(select(ReportArtifact).where(
+        ReportArtifact.project_id == project_id,
+        ReportArtifact.version.in_(selected),
+    ))).scalars().all())
+    if len(artifacts) != len(selected):
+        found = {artifact.version for artifact in artifacts}
+        missing = "、".join(f"V{version}" for version in selected if version not in found)
+        raise HTTPException(status_code=404, detail=f"报告版本不存在：{missing}")
+
+    project.report_version_counter = max(int(project.report_version_counter or 0), max(selected))
+    file_paths = [artifact.html_path for artifact in artifacts]
+    deleted_current = any(artifact.status == "current" for artifact in artifacts)
+    await db.execute(delete(ReportArtifact).where(
+        ReportArtifact.project_id == project_id,
+        ReportArtifact.version.in_(selected),
+    ))
+    await record_audit_event(
+        db,
+        event_type="report.versions_deleted",
+        resource_type="report",
+        resource_id=project_id,
+        actor_user_id=current_user.id,
+        organization_id=project.organization_id,
+        project_id=project_id,
+        details={"versions": selected, "deleted_current": deleted_current},
+    )
+    await db.commit()
+    files = await delete_storage_files(file_paths)
+    return {
+        "deleted_versions": selected,
+        "deleted_count": len(selected),
+        "deleted_current": deleted_current,
+        **files,
+    }
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

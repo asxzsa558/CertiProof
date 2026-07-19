@@ -23,6 +23,7 @@ from app.services.document_pipeline import SUPPORTED_SUFFIXES, normalize_analysi
 from app.services.file_storage import file_storage
 from app.services.upload_validation import read_limited_upload
 from app.services.verification_service import (
+    controlled_remediation_plan,
     create_verification_run,
     queue_document_task_verification,
     reopen_finding,
@@ -74,6 +75,7 @@ def _finding_payload(finding: Finding, latest: VerificationItem | None = None) -
         "confidence": finding.confidence,
         "description": finding.description,
         "remediation_suggestion": finding.remediation_suggestion,
+        "remediation_plan": controlled_remediation_plan(finding),
         "status": _value(finding.status),
         "scan_task_id": finding.scan_task_id,
         "document_run_id": finding.document_run_id,

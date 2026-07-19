@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import datetime
 from app.models.asset import AssetType, VerificationStatus, VerificationMethod
@@ -35,8 +35,7 @@ class AssetResponse(AssetBase):
     scope_confirmed_by: Optional[int] = None
     scope_confirmed_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AssetListResponse(BaseModel):
@@ -49,5 +48,4 @@ class AssetListResponse(BaseModel):
     created_at: datetime
     scope_confirmed_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

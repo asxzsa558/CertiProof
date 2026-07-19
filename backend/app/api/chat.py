@@ -20,44 +20,9 @@ from app.models.project import Project
 from app.models.scan_task import ScanTask
 from app.orchestrator import orchestrator
 from app.services.audit import record_audit_event
+from app.services.display_names import scan_display_name
 
 router = APIRouter(prefix="/chat", tags=["AI Chat"])
-
-CAPABILITY_DISPLAY_NAMES = {
-    "scan_ports": "端口扫描",
-    "masscan_scan": "高速端口扫描",
-    "fping_scan": "批量存活检测",
-    "scan_ssl": "SSL/TLS 检测",
-    "scan_vulnerabilities": "漏洞扫描",
-    "scan_weak_passwords": "弱口令检测",
-    "baseline_check": "安全基线核查",
-    "linux_baseline": "安全基线核查",
-    "ssh_config_check": "SSH 配置检查",
-    "nikto_scan": "Web 安全扫描",
-    "sqlmap_scan": "SQL 注入检测",
-    "gobuster_scan": "目录爆破",
-    "ffuf_scan": "Web 模糊测试",
-    "web_discovery_scan": "Web 目录发现",
-    "database_security_scan": "数据库安全检测",
-    "redis_check": "Redis 未授权检测",
-    "mysql_check": "MySQL 空口令检测",
-    "mongodb_check": "MongoDB 未授权检测",
-    "oracle_check": "Oracle 检测",
-    "memcached_check": "Memcached 检测",
-    "snmp_walk": "SNMP 检测",
-    "snmp_bruteforce": "SNMP 团体字检测",
-    "snmp_get": "SNMP OID 读取",
-    "network_device_scan": "网络设备检测",
-    "enum4linux_scan": "Windows/AD/SMB 子项",
-    "crackmapexec_scan": "Windows SID 枚举",
-    "smb_enum": "Windows/AD/SMB 子项",
-    "windows_security_scan": "Windows/AD/SMB 检测",
-    "full_compliance_scan": "全量合规扫描",
-    "tech_assessment": "等保技术测评",
-    "ping_host": "Ping 检测",
-    "ping_asset": "Ping 检测",
-}
-
 
 async def _can_read_task_payload(task: Dict[str, Any], db: AsyncSession, current_user: User) -> bool:
     if task.get("user_id") == current_user.id:
@@ -90,6 +55,7 @@ class ChatResponse(BaseModel):
     context: Optional[Dict[str, Any]] = None
     task_id: Optional[str] = None
     scan_task_id: Optional[int] = None
+    next_thread_id: Optional[int] = None
 
 
 class TaskStatusResponse(BaseModel):
@@ -105,6 +71,7 @@ class TaskResultResponse(BaseModel):
     completed_at: Optional[str] = None
     current_step: Optional[str] = None
     step_progress: Optional[Dict[str, Any]] = None
+    next_thread_id: Optional[int] = None
 
 
 # --- Chat Endpoint ---
@@ -198,7 +165,7 @@ async def chat(
         ssh_info = ""
         if ssh_credential:
             ssh_info = f"（SSH 用户: {ssh_credential.get('username', 'root')}）"
-        capability_name = CAPABILITY_DISPLAY_NAMES.get(capability, capability)
+        capability_name = scan_display_name(capability)
         response = f"好的，我将对项目中的 {len(assets)} 个资产执行{capability_name}{ssh_info}：{', '.join(asset_names)}"
         
         try:
@@ -254,6 +221,7 @@ async def chat(
         context={"asset": asset},
         task_id=result.get("task_id"),
         scan_task_id=result.get("scan_task_id"),
+        next_thread_id=result.get("next_thread_id"),
     )
 
 
@@ -289,6 +257,7 @@ async def get_task_result(
                 result_description=task.get("result_description", ""),
                 scan_results=task.get("scan_results", {}),
                 completed_at=task.get("completed_at"),
+                next_thread_id=task.get("next_thread_id"),
             )
     
     # 检查是否有进度信息
@@ -555,6 +524,22 @@ async def list_archives(
     archives = await context_manager.list_archives(limit=limit)
     
     return {"archives": archives, "count": len(archives)}
+
+
+@router.get("/archives/search")
+async def search_archive_messages(
+    q: str = Query(..., min_length=2, max_length=200),
+    project_id: Optional[int] = Query(None),
+    limit: int = Query(10, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if project_id is not None:
+        from app.api.projects import get_project_for_user
+        await get_project_for_user(db, project_id, current_user.id, "project:read")
+    manager = ContextManager(db, current_user.id, project_id=project_id)
+    matches = await manager.recall_archived_messages(q, limit=limit)
+    return {"matches": matches, "count": len(matches)}
 
 
 @router.get("/archives/{archive_id}")

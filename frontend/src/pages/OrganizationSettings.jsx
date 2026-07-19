@@ -61,6 +61,7 @@ const PERMISSION_LABELS = {
   'evidence:manage': '管理证据',
   'report:read': '查看报告',
   'report:export': '导出报告',
+  'report:delete': '删除报告版本',
   'role:read': '查看角色',
   'role:manage': '管理角色',
   'member:manage': '管理成员',

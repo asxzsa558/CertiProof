@@ -156,6 +156,7 @@ def test_pending_findings_have_only_one_router_intent():
     ("query_open_ports", "view_open_ports", {}),
     ("query_vulnerabilities", "view_vulnerabilities", {}),
     ("query_scan_history", "view_scan_history", {}),
+    ("query_scan_changes", "view_scan_changes", {}),
     ("asset_list", "list_assets", {}),
 ])
 def test_project_queries_use_typed_deterministic_contracts(intent, expected_capability, expected_parameters):
@@ -294,6 +295,7 @@ def test_clear_detection_intent_has_bounded_fallback_when_planner_times_out():
     ("给领导汇报一下当前态势", "project_query", "query_executive_summary"),
     ("还有哪些问题没处理", "project_query", "query_findings"),
     ("以前做过哪些检测", "project_query", "query_scan_history"),
+    ("当前检测结果和前面的检测结果有什么变化", "project_query", "query_scan_changes"),
     ("对所有资产扫描高危端口", "detection_execution", "scan_ports"),
     ("检查所有资产有没有漏洞", "detection_execution", "scan_vulnerabilities"),
     ("做一次 Web 安全检测", "detection_execution", "scan_web"),

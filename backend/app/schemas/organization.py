@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal, Optional, List
 from datetime import datetime
 
@@ -23,8 +23,7 @@ class OrganizationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrganizationBrief(BaseModel):
@@ -33,8 +32,7 @@ class OrganizationBrief(BaseModel):
     code: str
     role: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrganizationMemberResponse(BaseModel):
@@ -48,8 +46,7 @@ class OrganizationMemberResponse(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrganizationMemberCreate(BaseModel):
@@ -95,5 +92,4 @@ class OrganizationRoleAuditResponse(BaseModel):
     detail: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

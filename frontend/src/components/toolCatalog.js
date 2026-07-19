@@ -43,6 +43,7 @@ export const CAPABILITY_NAMES = TOOL_CATALOG.reduce((acc, tool) => {
   view_open_ports: '已保存端口结果',
   view_vulnerabilities: '已保存漏洞结果',
   view_scan_history: '检测历史',
+  view_scan_changes: '检测结果变化',
   assessment_flow_action: '等保自查流程',
   generate_html_report: '生成 HTML 报告',
   list_assets: '项目资产清单',

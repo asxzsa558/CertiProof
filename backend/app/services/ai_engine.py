@@ -55,7 +55,7 @@ AI_PLANNER_OUTPUT = """## 输出要求
 VALID_CATEGORIES = {"project_query", "detection_execution", "flow_operation", "help", "out_of_scope"}
 PROJECT_QUERY_INTENTS = {
     "query_project_status", "query_compliance_readiness", "query_major_gaps", "query_executive_summary",
-    "query_findings", "query_open_ports", "query_vulnerabilities", "query_scan_history", "asset_list",
+    "query_findings", "query_open_ports", "query_vulnerabilities", "query_scan_history", "query_scan_changes", "asset_list",
 }
 DETECTION_INTENTS = {
     "scan_ports", "scan_web", "scan_vulnerabilities", "scan_baseline", "scan_passwords", "scan_tls",
@@ -83,6 +83,7 @@ QUERY_CONTRACTS = {
     "query_open_ports": ("view_open_ports", {}, "正在读取已确认的开放端口。"),
     "query_vulnerabilities": ("view_vulnerabilities", {}, "正在读取已发现的漏洞。"),
     "query_scan_history": ("view_scan_history", {}, "正在读取检测历史。"),
+    "query_scan_changes": ("view_scan_changes", {}, "正在比较最近两次同类检测结果。"),
     "asset_list": ("list_assets", {}, "正在读取当前项目资产。"),
 }
 FLOW_ACTIONS = {
@@ -306,6 +307,8 @@ class AIEngine:
             category, intent = "project_query", "query_findings"
         elif any(marker in text for marker in ("合规状态", "测评进度", "做到哪", "哪一步", "分数", "评分", "当前阶段")):
             category, intent = "project_query", "query_project_status"
+        elif any(marker in text for marker in ("检测结果有什么变化", "扫描结果有什么变化", "检测结果变化", "扫描结果变化", "和前面的检测结果", "与前面的检测结果", "前后检测对比")):
+            category, intent = "project_query", "query_scan_changes"
         elif any(marker in text for marker in ("检测历史", "扫描历史", "以前做过", "之前做过")):
             category, intent = "project_query", "query_scan_history"
         elif any(marker in text for marker in ("开放端口", "开了哪些端口")) and not any(marker in text for marker in ("扫描", "检测")):
@@ -514,6 +517,9 @@ class AIEngine:
                 thread_parts.append("接续归档：" + str(context["thread_handoff_summary"])[:2000])
             if context.get("thread_summary"):
                 thread_parts.append("当前线程摘要：" + str(context["thread_summary"])[:2000])
+            if context.get("archive_recall"):
+                excerpts = [str(item.get("content") or "")[:700] for item in context["archive_recall"][:6]]
+                thread_parts.append("按需回溯的归档原文片段：" + json.dumps(excerpts, ensure_ascii=False))
             recent = [
                 str(message.get("content", ""))[:500]
                 for message in context.get("recent_messages", [])

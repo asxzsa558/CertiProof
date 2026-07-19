@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.finding import Finding, FindingStatus, Judgment, JudgmentEngine, Severity
 from app.models.scan_task import ScanTask, ScanTaskStatus, ScanTaskType, TriggeredBy
+from app.services.display_names import CAPABILITY_DISPLAY_NAMES
 from app.services.verification_service import add_finding_event, make_finding_fingerprint, scrub_sensitive_parameters
 
 logger = logging.getLogger(__name__)
@@ -149,22 +150,7 @@ TASK_CAPABILITY_MAP = {
     "interview": None,
 }
 
-CAPABILITY_NAMES = {
-    "scan_ports": "端口扫描",
-    "masscan_scan": "高速端口扫描",
-    "fping_scan": "批量存活检测",
-    "scan_ssl": "SSL/TLS 检测",
-    "scan_vulnerabilities": "漏洞扫描",
-    "baseline_check": "安全基线核查",
-    "scan_weak_passwords": "弱口令检测",
-    "nikto_scan": "Web 漏洞扫描",
-    "sqlmap_scan": "SQL 注入检测",
-    "web_discovery_scan": "Web 目录发现",
-    "ffuf_scan": "Web 模糊测试",
-    "database_security_scan": "数据库安全检测",
-    "network_device_scan": "网络设备检测",
-    "windows_security_scan": "Windows/AD/SMB 检测",
-}
+CAPABILITY_NAMES = CAPABILITY_DISPLAY_NAMES
 
 
 class TaskExecutor:

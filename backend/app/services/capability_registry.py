@@ -734,7 +734,7 @@ class CapabilityRegistry:
         
         self.register(Capability(
             name="view_scan_history",
-            description="查看扫描历史记录，显示过去执行过的所有扫描任务。",
+            description="查看检测历史，返回业务名称、中文状态、目标范围和结果质量。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -743,6 +743,13 @@ class CapabilityRegistry:
                 "required": []
             },
             category="query"
+        ))
+
+        self.register(Capability(
+            name="view_scan_changes",
+            description="比较最近两次目标范围与检测能力相同的结果，返回新增、已消失和仍存在的问题。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            category="query",
         ))
         
         # ========== 项目管理类能力 ==========

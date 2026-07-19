@@ -34,6 +34,7 @@ class Project(Base):
     
     # Compliance score
     compliance_score = Column(Float, nullable=True)  # 0-100
+    report_version_counter = Column(Integer, nullable=False, default=0)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

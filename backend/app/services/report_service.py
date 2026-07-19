@@ -16,7 +16,7 @@ from app.models.change_snapshot import ChangeSnapshot
 from app.models.document_knowledge import DocumentAnalysisRun, DocumentBlock, DocumentFile
 from app.models.report import ReportArtifact
 from app.services.assessment_templates import LEVEL_3_TEMPLATE, TASK_TYPES
-from app.services.verification_service import scrub_sensitive_parameters
+from app.services.verification_service import controlled_remediation_plan, scrub_sensitive_parameters
 from app.services.file_storage import file_storage
 from app.services.flow_engine import workflow_progress
 
@@ -406,6 +406,7 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
             "judgment_engine": _value(finding.judgment_engine),
             "description": finding.description,
             "remediation_suggestion": finding.remediation_suggestion,
+            "remediation_plan": controlled_remediation_plan(finding),
             "status": status,
             "fingerprint": finding.fingerprint,
             "source_type": finding.source_type,
@@ -842,9 +843,14 @@ async def create_report_artifact(
     generated_by: int | None,
 ) -> ReportArtifact:
     await ensure_report_generation_ready(db, project_id, assessment_id)
-    version = int((await db.execute(select(func.max(ReportArtifact.version)).where(
+    project = (await db.execute(
+        select(Project).where(Project.id == project_id).with_for_update()
+    )).scalar_one()
+    existing_max = int((await db.execute(select(func.max(ReportArtifact.version)).where(
         ReportArtifact.project_id == project_id
-    ))).scalar() or 0) + 1
+    ))).scalar() or 0)
+    version = max(existing_max, int(project.report_version_counter or 0)) + 1
+    project.report_version_counter = version
     report = await generate_json_report(db, project_id)
     assessment = await db.get(Assessment, assessment_id)
     if assessment:
@@ -982,6 +988,18 @@ def _timestamp(value) -> str:
     return str(value).replace("T", " ").split("+")[0].split(".")[0]
 
 
+def _remediation_plan_html(finding: dict) -> str:
+    plan = finding.get("remediation_plan") or {}
+    steps = "".join(f"<li>{escape(str(step))}</li>" for step in plan.get("steps") or [])
+    if not steps:
+        return f'<p class="recommendation">{escape(str(finding.get("remediation_suggestion") or "请补充整改措施并重新验证。"))}</p>'
+    return (
+        '<div class="recommendation"><strong>受控整改步骤</strong>'
+        f'<ol>{steps}</ol><p><b>验证：</b>{escape(str(plan.get("verification") or "重新执行原检查。"))}</p>'
+        f'<p><b>回滚：</b>{escape(str(plan.get("rollback") or "恢复变更前版本。"))}</p></div>'
+    )
+
+
 async def generate_html_report(db: AsyncSession, project_id: int, report: dict | None = None) -> str:
     report = report or await generate_json_report(db, project_id)
     project = report["project"]
@@ -998,7 +1016,7 @@ async def generate_html_report(db: AsyncSession, project_id: int, report: dict |
         for p in assessment["phases"]
     ) or '<tr><td colspan="4">暂无测评阶段</td></tr>'
     priority_rows = "\n".join(
-        f"<article class=\"action-item\"><div>{_badge(f['priority'])}<strong>{escape(str(f.get('clause_name') or f['clause_id'] or '待整改事项'))}</strong></div><p>{escape(str(f['description'] or '-'))}</p>{_document_evidence_html(f)}<footer><span>当前：{_badge(f['status'])}</span><span>证据 {f['evidence_count']} 条</span></footer><p class=\"recommendation\">{escape(str(f['remediation_suggestion'] or '请补充整改措施并重新验证。'))}</p></article>"
+        f"<article class=\"action-item\"><div>{_badge(f['priority'])}<strong>{escape(str(f.get('clause_name') or f['clause_id'] or '待整改事项'))}</strong></div><p>{escape(str(f['description'] or '-'))}</p>{_document_evidence_html(f)}<footer><span>当前：{_badge(f['status'])}</span><span>证据 {f['evidence_count']} 条</span></footer>{_remediation_plan_html(f)}</article>"
         for f in open_findings[:12]
     ) or '<p class="empty">当前没有待整改问题。</p>'
     finding_map = {finding["id"]: finding for finding in report["findings"]}
@@ -1046,7 +1064,7 @@ async def generate_html_report(db: AsyncSession, project_id: int, report: dict |
     .metrics {{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:20px 0 30px; }} .metric {{ min-width:0; padding:15px; border:1px solid var(--line); background:#091827; }} .metric strong {{ display:block; color:#fff; font:600 27px/1.1 ui-monospace,SFMono-Regular,Menlo,monospace; }} .metric span {{ display:block; margin-top:7px; color:var(--muted); font-size:12px; }}
     .layout {{ display:grid; grid-template-columns:186px minmax(0,1fr); gap:28px; }} .toc {{ align-self:start; position:sticky; top:20px; display:grid; gap:3px; padding-right:16px; border-right:1px solid var(--line); }} .toc span {{ margin-bottom:7px; color:var(--muted); font-size:11px; }} .toc a {{ padding:6px 0; color:#a9c4d7; text-decoration:none; font-size:12px; }} .toc a:hover {{ color:var(--cyan); }} .content {{ min-width:0; }} section {{ padding:0 0 30px; margin:0 0 30px; border-bottom:1px solid var(--line); }} section:last-child {{ border:0; }} .section-head {{ display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:13px; }} h2 {{ font-size:19px; }} .section-head p {{ color:var(--muted); font-size:12px; }}
     .badge {{ display:inline-flex; align-items:center; min-height:22px; padding:2px 8px; color:#bfeefa; border:1px solid #275168; background:#0b2635; border-radius:999px; font-size:11px; white-space:nowrap; }} .badge.good {{ color:#a9f0c8; border-color:#246447; background:#0b2b21; }} .badge.warning {{ color:#ffe099; border-color:#705826; background:#30270e; }} .badge.danger {{ color:#ffb0b8; border-color:#71343f; background:#32151d; }} .badge.info {{ color:#bfeefa; border-color:#275168; background:#0b2635; }} .badge.neutral {{ color:#becbd6; border-color:#3b4c5b; background:#14202c; }}
-    .action-list {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }} .action-item {{ min-width:0; padding:15px; border:1px solid #31445a; background:#0a1928; }} .action-item > div {{ display:flex; align-items:center; gap:8px; }} .action-item strong {{ min-width:0; overflow-wrap:anywhere; font-size:14px; }} .action-item p {{ margin-top:10px; color:#c9d8e6; }} .action-item footer {{ display:flex; justify-content:space-between; gap:8px; margin-top:12px; color:var(--muted); font-size:11px; }} .action-item .recommendation {{ padding-top:10px; border-top:1px solid var(--line); color:#9fddeb; }} .empty {{ color:var(--muted); padding:14px 0; }}
+    .action-list {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }} .action-item {{ min-width:0; padding:15px; border:1px solid #31445a; background:#0a1928; }} .action-item > div {{ display:flex; align-items:center; gap:8px; }} .action-item strong {{ min-width:0; overflow-wrap:anywhere; font-size:14px; }} .action-item p {{ margin-top:10px; color:#c9d8e6; }} .action-item footer {{ display:flex; justify-content:space-between; gap:8px; margin-top:12px; color:var(--muted); font-size:11px; }} .action-item .recommendation {{ display:block; padding-top:10px; border-top:1px solid var(--line); color:#9fddeb; }} .action-item .recommendation ol {{ margin:8px 0; padding-left:20px; color:#c9d8e6; }} .action-item .recommendation li {{ margin:5px 0; }} .empty {{ color:var(--muted); padding:14px 0; }}
     .evidence-ref {{ display:grid!important; gap:3px!important; margin-top:9px; padding:8px 10px; border-left:2px solid #2e7084; background:#081522; }} .evidence-ref strong {{ color:#9fddeb; font-size:11px; }} .evidence-ref span {{ color:#aebfce; font-size:11px; overflow-wrap:anywhere; }}
     .table-wrap {{ overflow:auto; border:1px solid var(--line); background:#091827; }} table {{ width:100%; min-width:680px; border-collapse:collapse; }} th,td {{ padding:11px 12px; border-bottom:1px solid #183247; text-align:left; vertical-align:top; }} th {{ color:#9ec9df; background:#0c2032; font-size:11px; font-weight:600; }} td {{ color:#d7e5ef; font-size:12px; }} tr:last-child td {{ border-bottom:0; }} td em {{ display:inline-block; margin-left:8px; color:var(--muted); font-size:11px; font-style:normal; }} .progress {{ display:inline-block; width:92px; height:6px; margin-right:6px; overflow:hidden; vertical-align:middle; background:#10283a; }} .progress i {{ display:block; height:100%; background:var(--cyan); }}
     details {{ border:1px solid var(--line); background:#091827; }} summary {{ padding:12px 14px; color:#c8e9f3; cursor:pointer; }} details .table-wrap {{ border-width:1px 0 0; }}

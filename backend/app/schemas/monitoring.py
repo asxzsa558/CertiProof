@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from app.models.monitoring import ScheduleFrequency
@@ -35,8 +35,7 @@ class ScheduledScanResponse(ScheduledScanBase):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScanHistoryResponse(BaseModel):
@@ -47,5 +46,4 @@ class ScanHistoryResponse(BaseModel):
     changes_summary: Optional[Dict[str, Any]] = None
     executed_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

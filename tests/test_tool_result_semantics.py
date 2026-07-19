@@ -372,6 +372,10 @@ def test_findings_query_renders_titles_and_states_without_generic_tool_name():
         "results": [{
             "capability": "view_findings", "status": "success", "result": {
                 "total": 2,
+                "groups": [
+                    {"title": "日志留存周期不足", "severity": "high", "status": "open", "source_type": "technical", "count": 1, "targets": ["10.0.0.1"]},
+                    {"title": "制度已补充", "severity": "medium", "status": "fixed", "source_type": "document", "count": 1, "targets": ["安全审计管理制度"]},
+                ],
                 "findings": [
                     {"id": 1, "clause_name": "日志留存周期不足", "severity": "high", "status": "open", "judgment": "fail", "source_type": "technical"},
                     {"id": 2, "clause_name": "制度已补充", "severity": "medium", "status": "fixed", "judgment": "pass", "source_type": "document"},
@@ -383,8 +387,67 @@ def test_findings_query_renders_titles_and_states_without_generic_tool_name():
     description = Orchestrator()._generate_fallback_description(execution)
     assert "日志留存周期不足" in description
     assert "制度已补充" in description
+    assert "资产 1 个" in description
+    assert "文档范围 1 个" in description
     assert "view_findings" not in description
     assert "unknown" not in description
+
+
+def test_scan_history_uses_business_labels_instead_of_internal_enums():
+    execution = {
+        "results": [{"capability": "view_scan_history", "status": "success", "result": {
+            "scan_history": [{
+                "id": 12, "name": "Web 安全扫描", "targets": ["example.com"],
+                "status": "completed", "status_label": "已完成", "quality_label": "结果完整",
+                "findings_count": 2,
+            }],
+        }}],
+        "success_count": 1, "warning_count": 0, "failed_count": 0,
+    }
+    description = Orchestrator()._generate_fallback_description(execution)
+    assert "Web 安全扫描" in description
+    assert "已完成" in description
+    assert "completed" not in description
+
+
+def test_scan_history_resolves_assessment_and_tool_names_without_leaking_enums():
+    class Task:
+        id = 1
+        status = "completed"
+        result_summary = {}
+        findings_count = 0
+        created_at = None
+        completed_at = None
+
+        def __init__(self, task_type):
+            self.parameters = {"task_type": task_type}
+
+    expected = {
+        "full_asset_assessment": "全资产组合扫描",
+        "web_vulnerability_assessment": "Web 漏洞扫描",
+        "network_device_assessment": "网络设备检测",
+        "gobuster_scan": "目录爆破",
+        "unregistered_internal_task": "安全检测",
+    }
+    for internal_name, display_name in expected.items():
+        result = ExecutionEngine._scan_task_descriptor(Task(internal_name))
+        assert result["name"] == display_name
+        assert internal_name not in result["name"]
+
+
+def test_scan_change_query_does_not_fall_back_to_history_list():
+    execution = {
+        "results": [{"capability": "view_scan_changes", "status": "success", "result": {
+            "comparable": True, "reliable": True,
+            "current": {"id": 12, "name": "漏洞扫描"}, "previous": {"id": 11},
+            "changes": {"added": ["CVE-A"], "resolved": ["CVE-B"], "persistent": ["CVE-C"]},
+        }}],
+        "success_count": 1, "warning_count": 0, "failed_count": 0,
+    }
+    description = Orchestrator()._generate_fallback_description(execution)
+    assert "新增问题 1 项" in description
+    assert "已消失问题 1 项" in description
+    assert "CVE-A" in description
 
 
 def test_composite_summary_counts_child_outcomes_not_successful_wrapper():

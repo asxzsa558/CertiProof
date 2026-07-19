@@ -48,7 +48,7 @@ class Orchestrator:
     }
     QUERY_CAPABILITIES = {
         "list_assets", "list_projects", "view_project_status", "view_compliance_score",
-        "view_findings", "view_open_ports", "view_vulnerabilities", "view_scan_history",
+        "view_findings", "view_open_ports", "view_vulnerabilities", "view_scan_history", "view_scan_changes",
         "assessment_flow_action", "generate_html_report",
     }
     
@@ -538,6 +538,8 @@ class Orchestrator:
         # 1. 构建上下文
         context_manager = ContextManager(db, user_id, project_id, thread_id)
         context = await context_manager.build_context()
+        if any(marker in user_input for marker in ("之前讨论", "以前讨论", "归档里", "历史对话", "上次说过", "此前说过")):
+            context["archive_recall"] = await context_manager.recall_archived_messages(user_input)
         
         if asset:
             context["default_asset"] = asset
@@ -551,6 +553,10 @@ class Orchestrator:
         plan, response = self._normalize_explicit_asset_plan(plan, context, user_input, response)
         plan, response = self._normalize_project_asset_plan(plan, context, user_input, response)
         plan = self._expand_project_asset_targets(plan, context)
+        non_async_capabilities = ["chat", "help"]
+        has_async_capability = any(
+            step.get("capability") not in non_async_capabilities for step in plan
+        )
         
         logger.info(f"AI plan: {plan}")
         
@@ -562,22 +568,18 @@ class Orchestrator:
         
         # 显式提交对话历史，确保持久化
         await db.commit()
+        rollover = None if has_async_capability else await context_manager.maybe_auto_rollover()
         
         # 5. 如果有执行计划，异步执行
         if plan:
             # 检查是否只有纯对话/帮助类能力（不需要异步执行）
-            non_async_capabilities = ["chat", "help"]
-            has_async_capability = any(
-                step.get("capability") not in non_async_capabilities 
-                for step in plan
-            )
-            
             if not has_async_capability:
                 # 只有 chat/help，直接返回，不触发异步执行
                 return {
                     "task_ids": [],
                     "agents": [],
                     "message": response,
+                    "next_thread_id": rollover.get("thread_id") if rollover else None,
                 }
             
             task_info = await self.start_async_plan(
@@ -601,6 +603,7 @@ class Orchestrator:
                 "message": response,
                 "task_id": task_id,
                 "scan_task_id": task_info.get("scan_task_id"),
+                "next_thread_id": None,
             }
         else:
             # 没有执行计划，直接返回回复
@@ -608,6 +611,7 @@ class Orchestrator:
                 "task_ids": [],
                 "agents": [],
                 "message": response,
+                "next_thread_id": rollover.get("thread_id") if rollover else None,
             }
 
     def _normalize_explicit_asset_plan(
@@ -1033,16 +1037,6 @@ class Orchestrator:
                 if task_id in self.task_progress:
                     del self.task_progress[task_id]
 
-                try:
-                    from app.api.websocket import broadcast_agent_completed
-                    await broadcast_agent_completed(task_id, {
-                        "task_id": task_id,
-                        "result_description": result_description,
-                        "scan_results": scan_results,
-                    })
-                except Exception:
-                    pass
-
                 # 记录助手结果到对话历史
                 await async_context_manager.add_conversation(
                     "assistant",
@@ -1054,6 +1048,20 @@ class Orchestrator:
                     }
                 )
                 await async_db.commit()
+                rollover = await async_context_manager.maybe_auto_rollover()
+                next_thread_id = rollover.get("thread_id") if rollover else None
+                self.completed_tasks[-1]["next_thread_id"] = next_thread_id
+
+                try:
+                    from app.api.websocket import broadcast_agent_completed
+                    await broadcast_agent_completed(task_id, {
+                        "task_id": task_id,
+                        "result_description": result_description,
+                        "scan_results": scan_results,
+                        "next_thread_id": next_thread_id,
+                    })
+                except Exception:
+                    pass
 
                 logger.info(f"Task {task_id} completed: {result_description[:100]}")
                 
@@ -1208,6 +1216,7 @@ class Orchestrator:
             "view_project_status": "查看项目合规状态",
             "view_compliance_score": "查看合规评分",
             "view_scan_history": "查看扫描历史",
+            "view_scan_changes": "比较检测结果",
             "assessment_flow_action": "等保自查流程操作",
             "create_project": "创建项目",
             "list_projects": "列出项目",
@@ -1705,6 +1714,7 @@ class Orchestrator:
 
         if capability == "view_findings":
             findings = data.get("findings") or []
+            groups = data.get("groups") or []
             total = int(data.get("total") or len(findings))
             if not findings:
                 return data.get("message") or "当前项目没有已记录的问题。"
@@ -1714,15 +1724,20 @@ class Orchestrator:
             severity_labels = {"critical": "严重", "high": "高", "medium": "中", "low": "低", "info": "提示"}
             source_labels = {"technical": "技术", "document": "文档", "manual": "人工"}
             lines = [f"项目问题：全部 {total}，当前列表中待处理 {open_count}，已修复 {fixed_count}，无法验证 {unable_count}。"]
-            for item in findings[:10]:
-                title = item.get("clause_name") or item.get("clause_id") or item.get("description") or "未命名问题"
+            display_items = groups or findings
+            for item in display_items[:10]:
+                title = item.get("title") or item.get("clause_name") or item.get("clause_id") or item.get("description") or "未命名问题"
+                count_suffix = f"，涉及 {item.get('count')} 项" if int(item.get("count") or 0) > 1 else ""
+                scope_label = "文档范围" if item.get("source_type") == "document" else "资产" if item.get("source_type") == "technical" else "范围"
+                target_suffix = f"，{scope_label} {len(item.get('targets') or [])} 个" if item.get("targets") else ""
                 lines.append(
                     f"- [{severity_labels.get(item.get('severity'), item.get('severity') or '未分级')}] "
                     f"{title}（{source_labels.get(item.get('source_type'), item.get('source_type') or '未知来源')}，"
-                    f"{'待处理' if item.get('status') == 'open' else '已修复'}）"
+                    f"{'待处理' if item.get('status') == 'open' else '已修复'}{count_suffix}{target_suffix}）"
                 )
-            if total > len(findings[:10]):
-                lines.append(f"- 其余 {total - len(findings[:10])} 项请在“问题与复测”中查看。")
+            shown_count = sum(int(item.get("count") or 1) for item in display_items[:10])
+            if total > shown_count:
+                lines.append(f"- 其余 {total - shown_count} 项请在“问题与复测”中查看。")
             return "\n".join(lines)
 
         if capability == "view_open_ports":
@@ -1754,7 +1769,32 @@ class Orchestrator:
                 return data.get("message") or "当前项目没有检测历史。"
             lines = [f"最近 {len(history)} 条检测记录："]
             for item in history:
-                lines.append(f"- #{item.get('id')} {item.get('task_type') or '检测'}：{item.get('status') or '未知'}，问题 {item.get('findings_count') or 0} 个")
+                targets = item.get("targets") or []
+                scope = f"（{', '.join(targets[:2])}{' 等' if len(targets) > 2 else ''}）" if targets else ""
+                lines.append(
+                    f"- {item.get('name') or '安全检测'}{scope}：{item.get('status_label') or '状态未知'}，"
+                    f"{item.get('quality_label') or '结果质量未知'}，问题 {item.get('findings_count') or 0} 个"
+                )
+            return "\n".join(lines)
+
+        if capability == "view_scan_changes":
+            if data.get("comparable") is False:
+                return data.get("message") or "尚无相同目标和检测类型的历史结果，暂时无法进行前后比较。"
+            current = data.get("current") or {}
+            previous = data.get("previous") or {}
+            changes = data.get("changes") or {}
+            lines = [
+                f"{current.get('name') or '检测'}结果对比：本次 #{current.get('id')}，上次 #{previous.get('id')}。",
+                f"- 新增问题 {len(changes.get('added') or [])} 项",
+                f"- 已消失问题 {len(changes.get('resolved') or [])} 项",
+                f"- 仍存在问题 {len(changes.get('persistent') or [])} 项",
+            ]
+            if data.get("reliable") is False:
+                lines.append("- 至少一次检测未完整完成，本次变化仅供参考，不能据此确认问题已修复。")
+            for item in (changes.get("added") or [])[:5]:
+                lines.append(f"- 新增：{item}")
+            for item in (changes.get("resolved") or [])[:5]:
+                lines.append(f"- 已消失：{item}")
             return "\n".join(lines)
 
         if capability in {"assessment_flow_action", "generate_html_report"}:

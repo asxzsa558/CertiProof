@@ -93,6 +93,17 @@ function FindingRow({ finding }) {
           <strong>{finding.clause_name || finding.clause_id}</strong>
           <p>{finding.description || '未提供问题说明'}</p>
           {finding.remediation_suggestion && <em>{finding.remediation_suggestion}</em>}
+          {finding.remediation_plan && (
+            <details className="controlled-remediation">
+              <summary>查看整改步骤与验证方法</summary>
+              <div><b>适用条件</b><span>{finding.remediation_plan.applicability}</span></div>
+              <div><b>执行前</b><ul>{(finding.remediation_plan.prerequisites || []).map(item => <li key={item}>{item}</li>)}</ul></div>
+              <div><b>整改步骤</b><ol>{(finding.remediation_plan.steps || []).map(item => <li key={item}>{item}</li>)}</ol></div>
+              <div><b>验证方法</b><span>{finding.remediation_plan.verification}</span></div>
+              <div><b>回滚方案</b><span>{finding.remediation_plan.rollback}</span></div>
+              {finding.remediation_plan.requires_context && <small>技术栈尚未确认，执行前需由系统负责人选择实际配置位置。</small>}
+            </details>
+          )}
         </div>
       </div>
       <div className="verification-finding-state">

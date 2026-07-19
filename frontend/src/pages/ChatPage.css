@@ -1459,6 +1459,11 @@
   .workspace-global-header .workspace-header-metrics > div:nth-child(3) {
     display: none;
   }
+
+  .workspace-global-header .workspace-breadcrumb > span,
+  .workspace-global-header .workspace-breadcrumb > i {
+    display: none;
+  }
 }
 
 /* Final visual calibration against the project cockpit reference */

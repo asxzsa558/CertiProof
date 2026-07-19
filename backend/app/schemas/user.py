@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from app.models.user import UserRole, SubscriptionTier
@@ -58,8 +58,7 @@ class OrganizationBrief(BaseModel):
     code: str
     role: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserResponse(UserBase):
@@ -72,8 +71,7 @@ class UserResponse(UserBase):
     created_at: datetime
     last_login_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserLogin(BaseModel):

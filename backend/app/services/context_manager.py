@@ -34,6 +34,8 @@ class ContextManager:
     HARD_TOKEN_LIMIT = 500000
     SUMMARY_SEGMENT_MESSAGES = 40  # 约 20 轮
     SUMMARY_SEGMENT_TOKENS = 20000
+    AUTO_ROLLOVER_MESSAGES = 160
+    AUTO_ROLLOVER_TOKENS = 120000
     ACTIVE_HISTORY_RETENTION_DAYS = 90
     MAX_ACTION_HISTORY = 200  # 最大操作历史记录数（增加到 200）
     MAX_CACHE_ENTRIES = 100  # 最大缓存条目数
@@ -572,6 +574,79 @@ class ContextManager:
         )
         summaries = list(reversed(result.scalars().all()))
         return "\n\n".join(item.summary for item in summaries if item.summary)
+
+    async def recall_archived_messages(self, query_text: str, limit: int = 6) -> List[Dict]:
+        """Return small source-backed excerpts only when a turn explicitly needs old context."""
+        words = [word for word in re.findall(r"[\w\u4e00-\u9fff]{2,}", query_text or "") if word not in {"之前", "以前", "归档", "对话", "讨论", "内容"}]
+        query = select(ConversationHistory, ConversationArchive).join(
+            ConversationArchive, ConversationArchive.id == ConversationHistory.archive_id
+        ).where(
+            ConversationHistory.user_id == self.user_id,
+            ConversationHistory.archive_id.is_not(None),
+            ConversationHistory.project_id.is_(None) if self.project_id is None else ConversationHistory.project_id == self.project_id,
+        )
+        if words:
+            query = query.where(func.lower(ConversationHistory.content).contains(words[0].lower()))
+        rows = (await self.db.execute(
+            query.order_by(ConversationHistory.created_at.desc()).limit(max(1, min(limit, 20)))
+        )).all()
+        return [{
+            "archive_id": archive.id,
+            "archive_title": archive.title,
+            "role": history.role,
+            "content": history.content[:1200],
+            "created_at": history.created_at.isoformat() if history.created_at else None,
+        } for history, archive in rows]
+
+    async def maybe_auto_rollover(self) -> Optional[Dict]:
+        """Archive a completed conversation boundary and create its continuation thread."""
+        from app.models.scan_task import ScanTask, ScanTaskStatus
+
+        active_parameters = (await self.db.execute(select(ScanTask.parameters).where(
+            ScanTask.project_id == self.project_id,
+            ScanTask.status.in_([ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING]),
+        ))).scalars().all() if self.project_id is not None else []
+        if any(
+            (parameters or {}).get("source") == "interactive"
+            and (parameters or {}).get("user_id") == self.user_id
+            and (parameters or {}).get("thread_id") == self.thread_id
+            for parameters in active_parameters
+        ):
+            return None
+
+        count, tokens = (await self.db.execute(select(
+            func.count(ConversationHistory.id),
+            func.coalesce(func.sum(ConversationHistory.tokens_used), 0),
+        ).where(*self._history_conditions()))).one()
+        if int(count or 0) < self.AUTO_ROLLOVER_MESSAGES and int(tokens or 0) < self.AUTO_ROLLOVER_TOKENS:
+            return None
+
+        summary = await self.get_thread_summary()
+        if not summary:
+            recent = (await self.db.execute(
+                select(ConversationHistory).where(*self._history_conditions())
+                .order_by(ConversationHistory.id.desc()).limit(8)
+            )).scalars().all()
+            summary = "\n".join(f"{item.role}: {item.content[:500]}" for item in reversed(recent))
+        archive_id = await self.create_archive_placeholder(
+            f"自动归档 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+        )
+        if not archive_id:
+            return None
+        archive = await self.db.get(ConversationArchive, archive_id)
+        archive.summary = summary[:4000]
+        continuation_id = await self.create_thread(
+            title=f"接续对话 {datetime.now(timezone.utc).strftime('%m-%d %H:%M')}",
+            parent_thread_id=self.thread_id,
+            source_archive_id=archive_id,
+        )
+        if self.thread_id is not None:
+            thread = await self.db.get(ConversationThread, self.thread_id)
+            if thread:
+                thread.is_active = False
+                thread.is_archived = True
+        await self.db.commit()
+        return {"archive_id": archive_id, "thread_id": continuation_id, "message_count": int(count), "token_count": int(tokens)}
     
     async def _broadcast_compression_status(self, status: str, tokens_freed: int = 0, message_count: int = 0):
         """广播压缩状态到前端"""
@@ -1064,7 +1139,6 @@ class ContextManager:
             return ""
         query = select(ConversationArchive).where(
             ConversationArchive.user_id == self.user_id,
-            ConversationArchive.status == "completed",
         )
         if thread.source_archive_id:
             query = query.where(ConversationArchive.id == thread.source_archive_id)

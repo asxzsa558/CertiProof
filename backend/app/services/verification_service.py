@@ -27,6 +27,98 @@ SENSITIVE_PARAMETER_KEYS = {
 }
 
 
+def controlled_remediation_plan(finding: Finding) -> dict:
+    """Build deterministic, evidence-bound guidance; verification remains authoritative."""
+    description = (finding.description or "").strip()
+    source_key = (finding.source_key or "").strip()
+    target = (finding.scope_key or "").strip()
+    base = {
+        "evidence": description or "当前问题未附带可读证据，应先补充证据再实施变更。",
+        "target": target or "尚未明确对象",
+        "applicability": "执行前确认实际技术栈、业务窗口和配置归属；本建议不会自动修改生产环境。",
+        "prerequisites": ["备份当前配置或文档版本", "在测试环境验证并安排可回滚的变更窗口"],
+        "steps": [],
+        "verification": "重新执行产生该 Finding 的同一检查，只有真实复测不再出现该问题才可关闭。",
+        "rollback": "恢复变更前版本，重载服务并执行健康检查。",
+        "requires_context": True,
+    }
+    lower = description.lower()
+    if finding.source_type == "document":
+        base.update({
+            "applicability": "适用于当前文档检查点；修改对象以证据中标明的制度或方案为准。",
+            "prerequisites": ["保留现行文件和版本号", "确认文档责任部门、审批人和生效范围"],
+            "steps": [
+                f"定位“{finding.clause_name or finding.clause_id}”对应章节，并逐项补足问题描述指出的缺失内容。",
+                "明确适用对象、责任主体、执行步骤、频率或时限、记录留存和例外处理，避免只罗列关键词。",
+                "完成审批、生效日期和版本记录后，上传整改后的完整文件替换或补充原材料。",
+            ],
+            "verification": "由文档合规检查重新解析全部有效材料，并对该文档类别所有检查点重新取证；证据完整且无矛盾才关闭问题。",
+            "rollback": "恢复上一已批准文档版本，并保留本次修改、审批和复测记录。",
+            "requires_context": False,
+        })
+        return base
+
+    if source_key == "scan_ssl":
+        if "hsts" in lower:
+            steps = [
+                "确认所有 HTTP 请求均可靠跳转 HTTPS，且子域是否都支持 HTTPS。",
+                "在实际入口组件中配置 Strict-Transport-Security；先使用较短 max-age 验证，再按策略提高，确认后才考虑 includeSubDomains。",
+                "重载入口服务并检查业务、回调和旧客户端兼容性。",
+            ]
+        elif any(word in lower for word in ("cbc", "obsolete", "cipher", "lucky13")):
+            steps = [
+                "盘点客户端兼容范围，确认可以停用旧 TLS 协议和 CBC/弱密码套件。",
+                "在实际 TLS 终止组件中仅保留组织批准的 TLS 1.2/1.3 套件，并优先启用 TLS 1.3。",
+                "重载服务，在测试客户端和关键业务链路验证握手后再发布。",
+            ]
+        else:
+            steps = ["核对证书链、协议版本、密码套件和安全响应头配置。", "在测试环境修正对应 TLS 项并完成兼容性验证后发布。"]
+        base.update({
+            "steps": steps,
+            "verification": f"对 {target or '目标 HTTPS 服务'} 重新执行 SSL/TLS 检测，确认原证据项消失且证书链与业务握手正常。",
+            "rollback": "恢复入口服务配置备份并重载；若 HSTS 已被客户端缓存，需评估其不可即时回滚特性。",
+        })
+        return base
+
+    if source_key in {"nikto_scan", "web_discovery_scan"}:
+        base["steps"] = [
+            "确认问题由反向代理、Web 服务器还是应用代码产生，并定位负责配置。",
+            "在测试环境限制非业务 HTTP 方法，补齐证据指出的安全响应头；根据应用实际需要设定值，避免照搬模板。",
+            "执行功能、登录、跨域、下载和回调回归测试后再发布。",
+        ]
+        base["verification"] = f"重新执行 Web 安全扫描并使用 curl 检查 {target or '目标站点'} 的状态码、允许方法和响应头，同时完成业务回归。"
+        return base
+
+    if source_key == "scan_weak_passwords":
+        base.update({
+            "steps": ["立即停用已命中的弱口令并轮换为唯一强凭据。", "检查同凭据复用、异常登录和权限范围，必要时吊销会话。", "启用登录限速、锁定策略和多因素认证。"],
+            "verification": "使用授权账号验证新凭据可用，再按相同账号和协议重新执行弱口令检测，确认旧凭据不可登录。",
+            "rollback": "不得恢复已泄露弱口令；若业务失败，使用受控应急账号并再次轮换。",
+            "requires_context": False,
+        })
+        return base
+
+    if source_key in {"scan_vulnerabilities", "baseline_check", "network_device_scan"} and any(word in lower for word in ("timeout", "超时", "必须提供", "无法", "no response", "未完成")):
+        base.update({
+            "applicability": "这是检测链路未完成，不是“未发现风险”的结论。",
+            "prerequisites": ["确认资产授权范围", "确认网络可达、目标端口、白名单和有效凭据"],
+            "steps": ["按错误详情修复连通性、凭据或超时配置。", "缩小目标范围或降低并发后重试；仍失败时检查目标日志和云安全组。"],
+            "verification": "原工具完整执行并返回可靠结果后，才能形成风险结论。",
+            "rollback": "本项通常不修改业务配置；临时白名单或调试策略应在检测后撤销。",
+            "requires_context": False,
+        })
+        return base
+
+    templates = {
+        "scan_ports": ["确认暴露端口是否为业务必需。", "非必需服务应停用；必需服务通过安全组、防火墙或访问控制仅允许授权来源。"],
+        "database_security_scan": ["确认数据库类型、监听地址和认证模式。", "关闭未授权访问，启用身份认证并将管理端口限制到应用或运维网段。"],
+        "windows_security_scan": ["确认域、主机和 SMB 业务依赖。", "按最小权限修正共享、匿名访问和协议配置，并审计高权限账号。"],
+        "baseline_check": ["依据失败检查项定位主机配置。", "在测试主机按最小权限和审计要求修正，验证服务后分批发布。"],
+    }
+    base["steps"] = templates.get(source_key) or [finding.remediation_suggestion or "由系统负责人确认风险成因并制定最小变更方案。", "在测试环境验证后发布并保留变更记录。"]
+    return base
+
+
 def scrub_sensitive_parameters(value):
     if isinstance(value, dict):
         return {

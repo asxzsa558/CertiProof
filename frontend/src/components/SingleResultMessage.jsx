@@ -56,6 +56,10 @@ const renderResultMessage = (msg, options = {}) => {
   const projectStatus = ['view_project_status', 'view_compliance_score'].includes(queryResult?.capability)
     ? (queryResult.data || {})
     : null
+  const queryData = queryResult?.data || {}
+  const findingGroups = queryResult?.capability === 'view_findings' ? (queryData.groups || []) : []
+  const scanHistory = queryResult?.capability === 'view_scan_history' ? (queryData.scan_history || []) : []
+  const scanChanges = queryResult?.capability === 'view_scan_changes' ? queryData : null
   const openPorts = scanResults.open_ports || []
   const filteredPorts = scanResults.filtered_ports || []
   const vulnerabilities = scanResults.vulnerabilities || []
@@ -163,6 +167,24 @@ const renderResultMessage = (msg, options = {}) => {
               <div className="summary-value">{Number(projectStatus.coverage || 0).toFixed(1)}%</div>
             </div>
           </div>
+        </>
+      )}
+      {queryResult?.capability === 'view_findings' && (
+        <div className="summary-item">
+          <div className="summary-icon" style={{ background: 'rgba(245, 158, 11, 0.18)' }}><ExclamationCircleFilled style={{ color: '#f59e0b' }} /></div>
+          <div className="summary-content"><div className="summary-title">项目问题</div><div className="summary-value">{queryData.total || 0} 项</div></div>
+        </div>
+      )}
+      {queryResult?.capability === 'view_scan_history' && (
+        <div className="summary-item">
+          <div className="summary-icon" style={{ background: 'rgba(14, 165, 233, 0.2)' }}><RadarChartOutlined style={{ color: '#38bdf8' }} /></div>
+          <div className="summary-content"><div className="summary-title">检测记录</div><div className="summary-value">{scanHistory.length} 条</div></div>
+        </div>
+      )}
+      {scanChanges?.comparable && (
+        <>
+          <div className="summary-item"><div className="summary-icon" style={{ background: 'rgba(239, 68, 68, 0.16)' }}><ExclamationCircleFilled style={{ color: '#f87171' }} /></div><div className="summary-content"><div className="summary-title">新增</div><div className="summary-value">{scanChanges.changes?.added?.length || 0} 项</div></div></div>
+          <div className="summary-item"><div className="summary-icon" style={{ background: 'rgba(16, 185, 129, 0.16)' }}><SafetyCertificateOutlined style={{ color: '#34d399' }} /></div><div className="summary-content"><div className="summary-title">已消失</div><div className="summary-value">{scanChanges.changes?.resolved?.length || 0} 项</div></div></div>
         </>
       )}
       {openPorts.length > 0 && (
@@ -348,6 +370,45 @@ const renderResultMessage = (msg, options = {}) => {
               <span className="text-muted">{Number(phase.progress || 0).toFixed(1)}% · {phase.status}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {queryResult?.capability === 'view_findings' && (
+        <div className="result-details-section query-list-section">
+          <div className="section-title">按同类问题归并</div>
+          {(findingGroups.length ? findingGroups : queryData.findings || []).slice(0, 20).map((item, index) => (
+            <div className="query-list-row" key={(item.finding_ids || [item.id || index]).join('-')}>
+              <Tag color={['critical', 'high'].includes(item.severity) ? 'red' : item.severity === 'medium' ? 'orange' : 'blue'}>{severityLabel(item.severity, '未分级')}</Tag>
+              <div><strong>{item.title || item.clause_name || item.clause_id || '未命名问题'}</strong><small>{item.source_type === 'document' ? '文档问题' : '技术问题'}{item.count > 1 ? ` · ${item.count} 项` : ''}{item.targets?.length ? ` · ${item.targets.length} 个${item.source_type === 'document' ? '文档范围' : item.source_type === 'technical' ? '资产' : '范围'}` : ''}</small></div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {queryResult?.capability === 'view_scan_history' && (
+        <div className="result-details-section query-list-section">
+          <div className="section-title">最近检测</div>
+          {scanHistory.map(item => (
+            <div className="query-history-row" key={item.id}>
+              <div><strong>{item.name || '安全检测'}</strong><small>{item.targets?.length ? item.targets.join('、') : '当前项目范围'}</small></div>
+              <div><Tag color={item.status === 'completed' ? 'green' : item.status === 'failed' ? 'red' : 'blue'}>{item.status_label}</Tag><small>{item.quality_label} · 问题 {item.findings_count || 0} 项</small></div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {scanChanges && (
+        <div className="result-details-section query-list-section">
+          <div className="section-title">同类检测前后比较</div>
+          {!scanChanges.comparable ? <div className="query-empty-note">{scanChanges.message}</div> : (
+            <>
+              <div className="query-compare-meta">{scanChanges.current?.name} · 本次与上次目标、检测能力一致</div>
+              {scanChanges.reliable === false && <div className="query-warning-note">至少一次检测结果不完整，已消失项不自动视为已修复。</div>}
+              {['added', 'resolved', 'persistent'].map(key => (
+                <div className="query-change-group" key={key}><strong>{key === 'added' ? '新增' : key === 'resolved' ? '已消失' : '仍存在'} {scanChanges.changes?.[key]?.length || 0}</strong>{(scanChanges.changes?.[key] || []).slice(0, 8).map(item => <span key={item}>{item}</span>)}</div>
+              ))}
+            </>
+          )}
         </div>
       )}
 
@@ -662,6 +723,17 @@ const renderResultMessage = (msg, options = {}) => {
       )}
     </>
   )
+
+  if (queryResult) {
+    return (
+      <div className="scan-animation-fade-in query-answer-card">
+        <div className="query-answer-heading"><InfoCircleFilled /><strong>{CAPABILITY_NAMES[tool] || '项目查询'}</strong></div>
+        <div className="query-answer-copy" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+        {summary}
+        <div className="query-answer-details">{details}</div>
+      </div>
+    )
+  }
 
   return (
     <div className="scan-animation-fade-in">

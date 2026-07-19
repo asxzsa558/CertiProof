@@ -8,7 +8,7 @@ from fastapi import HTTPException
 import app.models  # noqa: F401
 from app.api import projects as projects_api
 from app.core.database import Base
-from app.models.context import ActionHistory, ConversationArchive, ConversationHistory, ConversationSummary
+from app.models.context import ActionHistory, ConversationArchive, ConversationHistory, ConversationSummary, ConversationThread
 from app.models.project import ProjectStatus
 from app.services.context_manager import ContextManager
 
@@ -107,6 +107,33 @@ def test_compression_queues_a_source_backed_segment_without_deleting_messages():
             assert segment.message_count == 40
             assert len(message_count) == 40
 
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_long_thread_rolls_over_without_deleting_raw_messages():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with session_factory() as db:
+            db.add_all([
+                ConversationHistory(user_id=1, project_id=1, role="user" if index % 2 == 0 else "assistant", content=f"归档测试消息 {index}", tokens_used=10)
+                for index in range(ContextManager.AUTO_ROLLOVER_MESSAGES)
+            ])
+            await db.commit()
+            context = ContextManager(db, user_id=1, project_id=1)
+            rollover = await context.maybe_auto_rollover()
+            assert rollover and rollover["thread_id"]
+            archive = await db.get(ConversationArchive, rollover["archive_id"])
+            assert archive.message_count == ContextManager.AUTO_ROLLOVER_MESSAGES
+            assert len((await db.execute(select(ConversationHistory).where(ConversationHistory.archive_id == archive.id))).scalars().all()) == ContextManager.AUTO_ROLLOVER_MESSAGES
+            thread = await db.get(ConversationThread, rollover["thread_id"])
+            assert thread.source_archive_id == archive.id
+            recalled = await ContextManager(db, user_id=1, project_id=1).recall_archived_messages("归档测试消息")
+            assert recalled and recalled[0]["archive_id"] == archive.id
         await engine.dispose()
 
     asyncio.run(run())

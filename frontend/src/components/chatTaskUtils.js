@@ -20,6 +20,7 @@ const pollTaskResultUntilDone = async ({
   setMessages,
   completedTaskIdsRef,
   pollRef,
+  onThreadRollover,
   maxAttempts = 900,
   interval = 2000,
 }) => {
@@ -46,6 +47,7 @@ const pollTaskResultUntilDone = async ({
           resultDescription: data.result_description,
           scanResults: data.scan_results || {},
         })])
+        if (data.next_thread_id) onThreadRollover?.(data.next_thread_id)
         return
       }
 

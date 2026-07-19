@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 
@@ -13,8 +13,7 @@ class AssessmentTypeResponse(BaseModel):
     sort_order: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProjectAssessmentCreate(BaseModel):
@@ -36,5 +35,4 @@ class ProjectAssessmentResponse(BaseModel):
 
     assessment_type: Optional[AssessmentTypeResponse] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
