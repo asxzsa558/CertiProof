@@ -148,7 +148,7 @@ async def chat(
     project = None
     if project_id:
         from app.api.projects import get_project_for_user
-        project = await get_project_for_user(db, project_id, current_user.id, "scan:execute")
+        project = await get_project_for_user(db, project_id, current_user.id, "project:read")
     
     # 如果是多资产扫描，直接构建执行计划，跳过 AI 决策
     if is_multi_asset_scan and multi_asset_data:
@@ -210,6 +210,15 @@ async def chat(
                 context_manager=None,
                 ai_response=response,
                 user_input=message,
+                ai_routing={
+                    "intents": ["explicit_capability"],
+                    "skills": [],
+                    "scope": "explicit_assets",
+                    "entities": {"asset_count": len(assets)},
+                    "confidence": 1.0,
+                    "needs_clarification": False,
+                    "use_thread_context": False,
+                },
                 thread_id=msg.thread_id,
             )
         except ValueError as exc:

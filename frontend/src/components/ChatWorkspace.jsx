@@ -58,6 +58,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
   const [currentModelId, setCurrentModelId] = useState(modelId || null)
   const [lastRequest, setLastRequest] = useState({ message: '', timestamp: 0 })
   const [showCommandPalette, setShowCommandPalette] = useState(false)
+  const [showQuickActions, setShowQuickActions] = useState(false)
   const [commandFilter, setCommandFilter] = useState('')
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
   const [assetSelectorVisible, setAssetSelectorVisible] = useState(false)
@@ -517,6 +518,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
           assets: uniqueAssets,
         }),
         project_id: projectId,
+        thread_id: currentThreadId,
       })
       
       const taskId = scanResponse.data.task_id
@@ -582,6 +584,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
           assets: assets.map(a => ({ id: a.id, value: a.value, type: a.asset_type })),
         }),
         project_id: projectId,
+        thread_id: currentThreadId,
       })
       
       const taskId = scanResponse.data.task_id
@@ -704,6 +707,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
           },
         }),
         project_id: projectId,
+        thread_id: currentThreadId,
       })
       
       const taskId = scanResponse.data.task_id
@@ -938,6 +942,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
     setInput(value)
     
     if (value.startsWith('/')) {
+      setShowQuickActions(false)
       setShowCommandPalette(true)
       setCommandFilter(value.slice(1))
       setSelectedCommandIndex(0)
@@ -947,11 +952,22 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
   }
 
   const openSlashPalette = () => {
+    setShowQuickActions(false)
     setInput('/')
     setCommandFilter('')
     setSelectedCommandIndex(0)
     setShowCommandPalette(true)
     window.requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  const toggleQuickActions = () => {
+    setShowCommandPalette(false)
+    setShowQuickActions(value => !value)
+  }
+
+  const executeQuickAction = async (tool) => {
+    setShowQuickActions(false)
+    await openAssetSelector(tool.command, tool.parameters || (tool.command === '/scan' ? { port_range: 'high-risk' } : {}))
   }
 
   const handleClearHistory = async () => {
@@ -1597,6 +1613,34 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
 
       {/* Input */}
       <div className="workspace-input-area">
+        {showQuickActions && (
+          <div className="quick-action-panel" role="dialog" aria-label="快捷指令">
+            <div className="quick-action-panel-head">
+              <div>
+                <strong>快捷指令</strong>
+                <span>选择检测能力后确认目标资产</span>
+              </div>
+              <Button type="text" size="small" onClick={() => setShowQuickActions(false)}>关闭</Button>
+            </div>
+            <div className="quick-action-grid">
+              {[...TOOL_CATALOG].sort((a, b) => Number(Boolean(b.primary)) - Number(Boolean(a.primary))).map(tool => (
+                <button
+                  key={tool.command}
+                  type="button"
+                  className="quick-action-card"
+                  onClick={() => executeQuickAction(tool)}
+                >
+                  <span className="quick-action-icon" style={{ color: tool.color }}>{tool.icon}</span>
+                  <span className="quick-action-copy">
+                    <strong>{tool.name}</strong>
+                    <small>{tool.description}</small>
+                  </span>
+                  <code>{tool.command}</code>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {/* Command Palette */}
         {showCommandPalette && filteredCommands.length > 0 && (
           <div className="command-palette">
@@ -1627,7 +1671,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
                 type="text"
                 className="composer-shortcut-button"
                 icon={<ThunderboltOutlined />}
-                onClick={openSlashPalette}
+                onClick={toggleQuickActions}
                 aria-label="打开快捷指令"
               >
                 快捷指令

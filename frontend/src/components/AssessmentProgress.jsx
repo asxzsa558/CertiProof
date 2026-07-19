@@ -191,6 +191,7 @@ const VERIFICATION_RUN_STATUS = {
   completed: '已完成', partial: '部分完成', failed: '失败', cancelled: '已停止',
   queued: '排队中', running: '执行中', paused: '已暂停',
 }
+const keepIfUnchanged = (previous, next) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next
 
 function AssessmentProgress({ projectId, projectName, variant = 'default', openIssues }) {
   const [assessment, setAssessment] = useState(null)
@@ -416,7 +417,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
           fetchAssessment({ silent: true }),
         ])
         const newTasks = tasksRes.data
-        setTasks(newTasks)
+        setTasks(previous => keepIfUnchanged(previous, newTasks))
         
         // 检查是否还有进行中的任务
         const hasInProgress = newTasks.some(t => t.status === 'in_progress')
@@ -449,10 +450,10 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
       const response = await api.get(`/assessments/projects/${projectId}`)
       if (response.data && response.data.length > 0) {
         const latestAssessment = response.data[0]
-        setAssessment(latestAssessment)
+        setAssessment(previous => keepIfUnchanged(previous, latestAssessment))
         
         const phasesResponse = await api.get(`/assessments/${latestAssessment.id}/phases`)
-        setPhases(phasesResponse.data)
+        setPhases(previous => keepIfUnchanged(previous, phasesResponse.data))
         return { assessment: latestAssessment, phases: phasesResponse.data }
       } else {
         setAssessment(null)
@@ -1779,8 +1780,9 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
         }}
         open={drawerVisible}
         className="phase-detail-drawer"
+        destroyOnHidden
       >
-        {selectedPhase && (
+        {drawerVisible && selectedPhase && (
           <div className="phase-detail-content">
             {/* Phase Info */}
             <div className="phase-info-card">

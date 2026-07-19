@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime
 
 
@@ -54,19 +54,19 @@ class OrganizationMemberResponse(BaseModel):
 
 class OrganizationMemberCreate(BaseModel):
     user_email: str
-    role: str = "member"
+    role: Literal["admin", "manager", "member", "viewer"] = "member"
     custom_role_id: Optional[int] = None
 
 
 class OrganizationMemberUpdate(BaseModel):
-    role: str
+    role: Literal["admin", "manager", "member", "viewer"]
     custom_role_id: Optional[int] = None
 
 
 class OrganizationRoleCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     description: Optional[str] = None
-    permissions: List[str] = []
+    permissions: List[str] = Field(default_factory=list)
 
 
 class OrganizationRoleUpdate(BaseModel):

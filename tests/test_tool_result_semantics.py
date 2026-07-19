@@ -4,6 +4,8 @@ import sys
 from types import SimpleNamespace
 from pathlib import Path
 
+import pytest
+
 from app.services.execution_engine import ExecutionEngine
 from app.mcp.gateway_client import MCPGatewayClient
 from app.services.task_executor import TaskExecutor
@@ -61,6 +63,23 @@ def test_closed_service_is_skipped_but_timeout_is_warning():
         "scan_completed": False,
         "tool_error": "Timeout: No Response",
     }) == "warning"
+
+
+def test_network_capability_enforces_scan_execute_permission(monkeypatch):
+    engine = ExecutionEngine()
+
+    async def denied(*_args, **_kwargs):
+        return None
+
+    async def must_not_scan(*_args, **_kwargs):
+        raise AssertionError("tool must not run without scan:execute")
+
+    monkeypatch.setattr(engine, "_project_for_user_id", denied)
+    monkeypatch.setattr(engine, "_scan_ports", must_not_scan)
+    with pytest.raises(ValueError, match="无权"):
+        asyncio.run(engine._execute_capability(
+            "scan_ports", {"target": "192.0.2.10"}, user_id=1, project_id=7, db=object(),
+        ))
 
 
 def test_redis_and_memcached_checks_use_matching_gateway_routes(monkeypatch):
@@ -179,6 +198,7 @@ def test_top_level_timeout_is_warning_not_clean_success(monkeypatch):
     assert "成功 0，未完成/不可判定 1，失败 0" in description
     assert scan_results["quality"]["verdict"] == "conditional"
     assert scan_results["quality"]["warning"] == 1
+    assert scan_results["quality"]["failed"] == 0
     assert scan_results["asset_results"]["192.0.2.10"]["error"] == "Web 漏洞扫描在 120 秒后超时"
 
 
@@ -223,6 +243,174 @@ def test_list_assets_returns_deterministic_summary_and_query_result():
     assert len(scan_results["query_result"]["assets"]) == 2
     assert scan_results["asset_results"] == {}
     assert scan_results["quality"]["total_assets"] == 2
+
+
+def test_project_status_returns_deterministic_summary_and_query_result():
+    execution = {
+        "results": [{
+            "capability": "view_project_status",
+            "status": "success",
+            "result": {
+                "found": True,
+                "project_name": "真实材料验收",
+                "workflow_progress": 100.0,
+                "compliance_score": 66.7,
+                "grade": "一般",
+                "coverage": 92.5,
+                "current_phase": {"name": "生成报告", "status": "completed"},
+                "findings": {"total": 30, "open": 20, "fixed": 8, "unable": 2},
+                "report": {"available": True, "version": 2, "status": "current"},
+                "phases": [],
+            },
+        }],
+        "success_count": 1,
+        "warning_count": 0,
+        "failed_count": 0,
+    }
+    orchestrator = Orchestrator()
+
+    description = orchestrator._generate_fallback_description(execution)
+    scan_results = orchestrator._extract_scan_results_from_execution(execution)
+
+    assert "流程进度：100.0%" in description
+    assert "合规评分：66.7 分（一般）" in description
+    assert "待处理 20" in description
+    assert "报告：已生成 v2" in description
+    assert scan_results["query_result"]["capability"] == "view_project_status"
+    assert scan_results["query_result"]["data"]["compliance_score"] == 66.7
+    assert scan_results["asset_results"] == {}
+
+
+def _project_status_result(view, **overrides):
+    data = {
+        "found": True,
+        "view": view,
+        "project_name": "真实材料验收",
+        "assessment_id": 9,
+        "workflow_progress": 80.0,
+        "compliance_score": 66.7,
+        "grade": "一般",
+        "coverage": 92.5,
+        "current_phase": {"name": "整改与复测", "status": "active"},
+        "findings": {"total": 30, "open": 20, "fixed": 8, "unable": 2},
+        "finding_breakdown": {"severity": {"critical": 1, "high": 4}},
+        "major_gaps": [{
+            "id": 1, "title": "访问控制策略不完整", "severity": "high",
+            "source_type": "document", "judgment": "fail",
+        }],
+        "report": {"available": False, "version": None, "status": None},
+        "phases": [],
+    }
+    data.update(overrides)
+    return {
+        "results": [{"capability": "view_project_status", "status": "success", "result": data}],
+        "success_count": 1, "warning_count": 0, "failed_count": 0,
+    }
+
+
+def test_readiness_query_gives_direct_conclusion_and_caveat():
+    description = Orchestrator()._generate_fallback_description(_project_status_result("readiness"))
+    assert description.startswith("当前不具备可靠的通过判断条件")
+    assert "仍有 2 项无法验证" in description
+    assert "不替代测评机构" in description
+    assert "【汇总】" not in description
+
+
+def test_major_gaps_query_lists_real_finding_instead_of_only_counts():
+    description = Orchestrator()._generate_fallback_description(_project_status_result("gaps"))
+    assert "访问控制策略不完整" in description
+    assert "[高]" in description
+    assert "另有 2 项无法验证" in description
+
+
+def test_major_gaps_query_explains_group_count_scope_and_evidence():
+    result = _project_status_result("gaps", major_gaps=[{
+        "id": 1,
+        "title": "SSL/TLS 检测",
+        "severity": "critical",
+        "source_type": "technical",
+        "judgment": "fail",
+        "count": 7,
+        "scopes": ["192.0.2.10"],
+        "descriptions": ["总体评级为 T，仍提供已废弃密码套件"],
+    }])
+
+    description = Orchestrator()._generate_fallback_description(result)
+
+    assert "按问题类型" in description
+    assert "7 项" in description
+    assert "范围：192.0.2.10" in description
+    assert "总体评级为 T" in description
+
+
+def test_major_gaps_query_does_not_expose_internal_task_scope():
+    result = _project_status_result("gaps", major_gaps=[{
+        "title": "审计保护与留存",
+        "severity": "medium",
+        "source_type": "document",
+        "count": 1,
+        "scopes": [],
+        "descriptions": ["安全审计管理制度：留存时间表述不一致"],
+    }])
+
+    description = Orchestrator()._generate_fallback_description(result)
+
+    assert "安全审计管理制度" in description
+    assert "task:" not in description
+
+
+def test_executive_query_has_judgment_risk_and_next_step():
+    description = Orchestrator()._generate_fallback_description(_project_status_result("executive"))
+    assert "管理层摘要" in description
+    assert "风险存量" in description
+    assert "建议" in description
+    assert "高危 4" in description
+
+
+def test_findings_query_renders_titles_and_states_without_generic_tool_name():
+    execution = {
+        "results": [{
+            "capability": "view_findings", "status": "success", "result": {
+                "total": 2,
+                "findings": [
+                    {"id": 1, "clause_name": "日志留存周期不足", "severity": "high", "status": "open", "judgment": "fail", "source_type": "technical"},
+                    {"id": 2, "clause_name": "制度已补充", "severity": "medium", "status": "fixed", "judgment": "pass", "source_type": "document"},
+                ],
+            },
+        }],
+        "success_count": 1, "warning_count": 0, "failed_count": 0,
+    }
+    description = Orchestrator()._generate_fallback_description(execution)
+    assert "日志留存周期不足" in description
+    assert "制度已补充" in description
+    assert "view_findings" not in description
+    assert "unknown" not in description
+
+
+def test_composite_summary_counts_child_outcomes_not_successful_wrapper():
+    execution = {
+        "results": [{
+            "capability": "tech_assessment", "target": "192.0.2.10", "status": "success",
+            "result": {
+                "summary": {"success": 1, "warning": 1, "failed": 1, "skipped": 1},
+                "sub_results": [
+                    {"capability": "scan_ports", "status": "success", "target": "192.0.2.10", "data": {"open_ports": [{"port": 22}]}},
+                    {"capability": "scan_vulnerabilities", "status": "warning", "target": "192.0.2.10", "data": {"scan_completed": False, "tool_error": "timeout"}},
+                    {"capability": "nikto_scan", "status": "failed", "target": "192.0.2.10", "error": "connection failed", "data": {}},
+                    {"capability": "baseline_check", "status": "skipped", "target": "192.0.2.10", "error": "missing credentials", "data": {}},
+                ],
+            },
+        }],
+        "success_count": 1, "warning_count": 0, "failed_count": 0,
+    }
+    orchestrator = Orchestrator()
+    description = orchestrator._generate_fallback_description(execution)
+    scan_results = orchestrator._extract_scan_results_from_execution(execution)
+    assert "共 4 个执行项，成功 1，未完成/不可判定 1，失败 1，跳过 1" in description
+    assert scan_results["quality"]["verdict"] == "partial"
+    assert scan_results["quality"]["warning"] == 2
+    assert scan_results["quality"]["failed"] == 1
+    assert "组合检测未完整覆盖" in scan_results["asset_results"]["192.0.2.10"]["error"]
 
 
 def test_web_tool_timeout_contract_is_warning():

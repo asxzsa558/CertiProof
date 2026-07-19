@@ -537,6 +537,7 @@
   height: 100vh;
   min-height: 720px;
   overflow: hidden;
+  overscroll-behavior: none;
   background: #05090f;
 }
 
@@ -1406,6 +1407,9 @@
 
 .workspace-body-layout .assessment-drawer-scroll {
   padding: 8px 8px 14px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  contain: paint;
 }
 
 .workspace-body-layout .assessment-drawer-flow {
@@ -1781,6 +1785,43 @@
   color: #dcecf3;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-profile-permissions {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.workspace-profile-permissions > strong {
+  color: #effbff;
+  font-size: 12px;
+}
+
+.workspace-profile-permissions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 132px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid rgba(116, 176, 199, 0.14);
+  background: rgba(7, 23, 35, 0.72);
+  scrollbar-width: thin;
+}
+
+.workspace-profile-permissions span {
+  padding: 4px 7px;
+  color: #c7edf4;
+  border: 1px solid rgba(76, 195, 226, 0.17);
+  background: rgba(23, 93, 112, 0.2);
+  font-size: 10px;
+}
+
+.workspace-profile-permissions em {
+  color: rgba(178, 207, 219, 0.62);
+  font-size: 11px;
+  font-style: normal;
 }
 
 .workspace-profile-grid .profile-active {

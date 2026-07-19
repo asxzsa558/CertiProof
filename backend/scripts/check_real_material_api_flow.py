@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import mimetypes
 import os
 import time
@@ -21,7 +22,7 @@ EMAIL = os.getenv("CP_E2E_EMAIL")
 PASSWORD = os.getenv("CP_E2E_PASSWORD")
 ACCESS_TOKEN = os.getenv("CP_E2E_TOKEN")
 ORG_ID = int(os.getenv("CP_E2E_ORG_ID", "1"))
-TARGET = os.getenv("CP_E2E_TARGET", "172.23.0.17")
+TARGET = os.getenv("CP_E2E_TARGET", "e2e-target")
 TARGET_USER = os.getenv("CP_E2E_TARGET_USER", "audit")
 TARGET_PASSWORD = os.getenv("CP_E2E_TARGET_PASSWORD", "CertiProof-E2E-2026!")
 TERMINAL_TASKS = {"completed", "failed", "cancelled"}
@@ -311,8 +312,13 @@ def main() -> None:
     save_state(project_id=project_id, project_name=project["name"], status="project_created", target=TARGET)
     print(f"[项目] {project_id} {project['name']}", flush=True)
 
+    try:
+        ipaddress.ip_address(TARGET)
+        asset_type = "ip"
+    except ValueError:
+        asset_type = "domain"
     asset = api.request("POST", f"/projects/{project_id}/assets/", json={
-        "asset_type": "ip", "value": TARGET, "name": "Docker 内网受控验收靶机",
+        "asset_type": asset_type, "value": TARGET, "name": "Docker 内网受控验收靶机",
     })
     api.request("POST", f"/projects/{project_id}/assets/{asset['id']}/confirm-scope", json={"confirmed": True})
     assessment = api.request("POST", f"/assessments/projects/{project_id}", json={

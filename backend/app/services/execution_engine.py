@@ -14,7 +14,7 @@ from app.services.capability_registry import CapabilityRegistry, capability_regi
 from app.services.context_manager import ContextManager
 from app.core.rbac import require_org_permission_for_user_id
 from app.core.redaction import redact_sensitive
-from app.services.execution_policy import validate_execution_parameters
+from app.services.execution_policy import NETWORK_CAPABILITIES, validate_execution_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -754,6 +754,9 @@ class ExecutionEngine:
         根据能力类型调用不同的处理器
         """
         capability_name = self._normalize_capability_name(capability_name)
+        if capability_name in NETWORK_CAPABILITIES and project_id and db:
+            if not await self._project_for_user_id(db, project_id, user_id, "scan:execute"):
+                raise ValueError("当前用户无权在该项目执行安全检测")
         parameters = await validate_execution_parameters(
             capability_name,
             parameters,
@@ -881,11 +884,17 @@ class ExecutionEngine:
         elif capability_name == "view_findings":
             return await self._view_findings(parameters, user_id, project_id, db)
 
+        elif capability_name == "view_project_status":
+            return await self._view_project_status(parameters, user_id, project_id, db)
+
         elif capability_name == "view_compliance_score":
             return await self._view_compliance_score(parameters, user_id, project_id, db)
 
         elif capability_name == "view_scan_history":
             return await self._view_scan_history(parameters, user_id, project_id, db)
+
+        elif capability_name == "assessment_flow_action":
+            return await self._assessment_flow_action(parameters, user_id, project_id, db)
 
         # 项目管理类能力
         elif capability_name == "create_project":
@@ -1465,11 +1474,14 @@ class ExecutionEngine:
         return await self._call_ssh_checker("mac_check", parameters)
 
     async def _view_open_ports(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
-        """查看开放端口 - 如果没有缓存则自动触发全端口扫描"""
+        """Read persisted port observations; a query must never start a scan."""
         from app.models.context import ResultCache
         from sqlalchemy import select
 
-        result = await db.execute(
+        if not await self._project_for_user_id(db, project_id, user_id, "scan:read"):
+            return {"observations": [], "message": "项目不存在或无权查看检测结果"}
+
+        rows = list((await db.execute(
             select(ResultCache)
             .where(
                 ResultCache.user_id == user_id,
@@ -1477,48 +1489,40 @@ class ExecutionEngine:
                 ResultCache.cache_key.like("scan_ports:%")
             )
             .order_by(ResultCache.created_at.desc())
-            .limit(1)
-        )
-        cache = result.scalar_one_or_none()
-
-        if cache:
-            result_data = cache.result_data
-            # 检查是否是全端口扫描结果
-            metadata = result_data.get("metadata", {})
-            port_range = metadata.get("port_range", "")
-
-            # 如果没有 metadata（旧缓存）或端口范围是 1-65535，视为全端口扫描
-            if not port_range or port_range == "1-65535":
-                return result_data
-
-            # 部分端口扫描，提示需要重新扫描
-            return {
-                "message": f"最近的扫描只覆盖了端口范围 {port_range}，不是全端口扫描。建议重新执行全端口扫描以获取完整结果。",
-                "partial_result": True,
-                "current_port_range": port_range,
-                "data": result_data.get("data", result_data),
-            }
-
-        # 没有缓存，自动触发全端口扫描
-        target = parameters.get("target", "host.docker.internal")
-        if target in ["localhost", "127.0.0.1", "本机", "本地"]:
-            target = "host.docker.internal"
-
-        # 执行全端口扫描
-        scan_result = await self._scan_ports({"target": target}, user_id, project_id, db)
+            .limit(100)
+        )).scalars().all())
+        observations = []
+        seen = set()
+        for cache in rows:
+            target = cache.cache_key.split("target=", 1)[-1]
+            if target in seen:
+                continue
+            seen.add(target)
+            data = cache.result_data or {}
+            if isinstance(data.get("data"), dict):
+                data = data["data"]
+            observations.append({
+                "target": target,
+                "open_ports": data.get("open_ports") or [],
+                "filtered_count": data.get("filtered_count") or len(data.get("filtered_ports") or []),
+                "port_range": (data.get("metadata") or {}).get("port_range"),
+                "observed_at": cache.created_at.isoformat() if cache.created_at else None,
+            })
         return {
-            **scan_result,
-            "auto_scanned": True,
-            "message": "没有找到之前的扫描结果，已自动执行全端口扫描。",
+            "observations": observations,
+            "total_assets": len(observations),
+            "message": "没有已保存的端口扫描结果，请先执行端口扫描" if not observations else "已读取最近的端口扫描结果",
         }
 
     async def _view_vulnerabilities(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
-        """查看漏洞"""
-        # 从缓存获取最近的漏洞扫描结果
+        """Read the latest persisted vulnerability observations per target."""
         from app.models.context import ResultCache
         from sqlalchemy import select
 
-        result = await db.execute(
+        if not await self._project_for_user_id(db, project_id, user_id, "scan:read"):
+            return {"observations": [], "message": "项目不存在或无权查看检测结果"}
+
+        rows = list((await db.execute(
             select(ResultCache)
             .where(
                 ResultCache.user_id == user_id,
@@ -1526,27 +1530,54 @@ class ExecutionEngine:
                 ResultCache.cache_key.like("scan_vulnerabilities:%")
             )
             .order_by(ResultCache.created_at.desc())
-            .limit(1)
-        )
-        cache = result.scalar_one_or_none()
-
-        if cache:
-            return cache.result_data
-        else:
-            return {"message": "没有找到漏洞扫描结果，请先执行漏洞扫描"}
+            .limit(100)
+        )).scalars().all())
+        observations = []
+        seen = set()
+        for cache in rows:
+            target = cache.cache_key.split("target=", 1)[-1]
+            if target in seen:
+                continue
+            seen.add(target)
+            data = cache.result_data or {}
+            if isinstance(data.get("data"), dict):
+                data = data["data"]
+            observations.append({
+                "target": target,
+                "findings": data.get("findings") or data.get("vulnerabilities") or [],
+                "scan_completed": data.get("scan_completed"),
+                "tool_error": data.get("tool_error"),
+                "observed_at": cache.created_at.isoformat() if cache.created_at else None,
+            })
+        return {
+            "observations": observations,
+            "total_assets": len(observations),
+            "message": "没有已保存的漏洞扫描结果，请先执行漏洞扫描" if not observations else "已读取最近的漏洞扫描结果",
+        }
 
     async def _view_findings(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """查看发现"""
         from app.models.finding import Finding
-        from sqlalchemy import select
+        from sqlalchemy import func, select
+
+        if not await self._project_for_user_id(db, project_id, user_id, "assessment:read"):
+            return {"findings": [], "total": 0, "message": "项目不存在或无权查看问题"}
 
         query = select(Finding).where(Finding.project_id == project_id)
+        count_query = select(func.count(Finding.id)).where(Finding.project_id == project_id)
 
         if "status" in parameters:
             query = query.where(Finding.status == parameters["status"])
+            count_query = count_query.where(Finding.status == parameters["status"])
 
-        result = await db.execute(query.limit(20))
+        result = await db.execute(query.order_by(Finding.updated_at.desc(), Finding.id.desc()).limit(100))
         findings = result.scalars().all()
+        severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        findings.sort(key=lambda finding: (
+            0 if getattr(finding.status, "value", finding.status) == "open" else 1,
+            severity_rank.get(getattr(finding.severity, "value", finding.severity), 9),
+            -finding.id,
+        ))
 
         return {
             "findings": [
@@ -1556,39 +1587,259 @@ class ExecutionEngine:
                     "clause_name": f.clause_name,
                     "severity": f.severity.value if f.severity else None,
                     "status": f.status.value if f.status else None,
+                    "judgment": f.judgment.value if f.judgment else None,
+                    "source_type": f.source_type,
                     "description": f.description,
+                    "remediation_suggestion": f.remediation_suggestion,
                 }
                 for f in findings
             ],
-            "total": len(findings),
+            "total": int((await db.execute(count_query)).scalar_one() or 0),
+            "returned": len(findings),
+            "message": "项目问题清单已更新",
         }
 
     async def _view_compliance_score(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
-        """查看合规评分"""
-        from app.models.project import Project
-        from sqlalchemy import select
+        """评分查询复用完整状态快照，防止把评分和流程完成度混为一谈。"""
+        return await self._view_project_status(parameters, user_id, project_id, db)
 
-        pid = parameters.get("project_id", project_id)
+    async def _view_project_status(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """返回不经模型改写的项目合规状态快照。"""
+        from sqlalchemy import func, select
+        from app.models.asset import Asset
+        from app.models.assessment import Assessment, PhaseInstance
+        from app.models.finding import Finding, FindingStatus, Judgment
+        from app.models.report import ReportArtifact
+        from app.services.flow_engine import get_flow_engine
 
-        result = await db.execute(
-            select(Project).where(Project.id == pid)
+        pid = parameters.get("project_id") or project_id
+        if not pid:
+            return {"found": False, "message": "当前未选择项目"}
+        project = await self._project_for_user_id(db, int(pid), user_id, "project:read")
+        if not project:
+            return {"found": False, "message": "项目不存在或无权访问"}
+
+        assessment = (await db.execute(
+            select(Assessment)
+            .where(Assessment.project_id == project.id)
+            .order_by(Assessment.created_at.desc(), Assessment.id.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        phases = []
+        score_metrics = {"score": None, "coverage": 0.0, "reliable": 0, "unable": 0, "not_applicable": 0}
+        if assessment:
+            phase_rows = list((await db.execute(
+                select(PhaseInstance)
+                .where(PhaseInstance.assessment_id == assessment.id)
+                .order_by(PhaseInstance.order)
+            )).scalars().all())
+            phases = [{
+                "id": phase.id,
+                "phase_id": phase.phase_id,
+                "name": phase.name,
+                "status": phase.status,
+                "progress": round(float(phase.progress or 0), 1),
+            } for phase in phase_rows]
+            score_metrics = await get_flow_engine(db)._calculate_compliance_metrics(assessment)
+
+        finding_rows = (await db.execute(
+            select(Finding.status, Finding.judgment, func.count(Finding.id))
+            .where(
+                Finding.project_id == project.id,
+                Finding.status != FindingStatus.FALSE_POSITIVE,
+            )
+            .group_by(Finding.status, Finding.judgment)
+        )).all()
+        findings = {"total": 0, "open": 0, "fixed": 0, "unable": 0}
+        for status, judgment, count in finding_rows:
+            count = int(count or 0)
+            findings["total"] += count
+            if status == FindingStatus.OPEN:
+                findings["open"] += count
+            if status == FindingStatus.FIXED:
+                findings["fixed"] += count
+            if judgment == Judgment.NOT_TESTED:
+                findings["unable"] += count
+
+        open_findings = list((await db.execute(
+            select(Finding).where(
+                Finding.project_id == project.id,
+                Finding.status == FindingStatus.OPEN,
+            ).limit(200)
+        )).scalars().all())
+        severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        open_findings.sort(key=lambda finding: (
+            severity_rank.get(getattr(finding.severity, "value", finding.severity), 9),
+            0 if finding.judgment != Judgment.NOT_TESTED else 1,
+            -finding.id,
+        ))
+        severity_counts = {}
+        source_counts = {}
+        for finding in open_findings:
+            severity = getattr(finding.severity, "value", finding.severity) or "unknown"
+            source = finding.source_type or "unknown"
+            severity_counts[severity] = severity_counts.get(severity, 0) + 1
+            source_counts[source] = source_counts.get(source, 0) + 1
+
+        gap_groups = {}
+        for finding in open_findings:
+            title = finding.clause_name or finding.clause_id or "未命名问题"
+            key = (title, finding.source_type or "unknown")
+            group = gap_groups.setdefault(key, {
+                "id": finding.id,
+                "title": title,
+                "severity": getattr(finding.severity, "value", finding.severity),
+                "judgment": getattr(finding.judgment, "value", finding.judgment),
+                "source_type": finding.source_type,
+                "count": 0,
+                "scopes": [],
+                "descriptions": [],
+                "remediation_suggestion": finding.remediation_suggestion,
+            })
+            group["count"] += 1
+            if (
+                finding.scope_key
+                and not finding.scope_key.startswith("task:")
+                and finding.scope_key not in group["scopes"]
+            ):
+                group["scopes"].append(finding.scope_key)
+            if finding.description and finding.description not in group["descriptions"] and len(group["descriptions"]) < 2:
+                group["descriptions"].append(finding.description)
+
+        current_phase = next((phase for phase in phases if phase["status"] == "active"), None)
+        if not current_phase:
+            current_phase = next((phase for phase in phases if phase["status"] not in {"completed", "skipped"}), None)
+        if not current_phase and phases:
+            current_phase = phases[-1]
+        report = (await db.execute(
+            select(ReportArtifact)
+            .where(ReportArtifact.project_id == project.id)
+            .order_by(ReportArtifact.version.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        asset_count = int((await db.execute(
+            select(func.count(Asset.id)).where(Asset.project_id == project.id)
+        )).scalar_one())
+        score = score_metrics.get("score")
+        grade = "未形成评分" if score is None else (
+            "优秀" if score >= 90 else "良好" if score >= 75 else "一般" if score >= 60 else "风险较高"
         )
-        project = result.scalar_one_or_none()
+        return {
+            "found": True,
+            "project_id": project.id,
+            "project_name": project.name,
+            "compliance_level": project.compliance_level.value if project.compliance_level else None,
+            "asset_count": asset_count,
+            "assessment_id": assessment.id if assessment else None,
+            "assessment_status": assessment.status if assessment else "not_started",
+            "workflow_progress": round(float(assessment.progress or 0), 1) if assessment else 0.0,
+            "compliance_score": score,
+            "grade": grade,
+            "coverage": round(float(score_metrics.get("coverage") or 0), 1),
+            "score_metrics": score_metrics,
+            "current_phase": current_phase,
+            "phases": phases,
+            "findings": findings,
+            "finding_breakdown": {
+                "severity": severity_counts,
+                "source": source_counts,
+            },
+            "major_gaps": list(gap_groups.values())[:8],
+            "report": {
+                "available": bool(report and report.status == "current"),
+                "version": report.version if report else None,
+                "status": report.status if report else None,
+            },
+            "view": parameters.get("view") if parameters.get("view") in {"status", "readiness", "gaps", "executive"} else "status",
+            "message": "项目合规状态已更新",
+        }
 
-        if project:
+    async def _assessment_flow_action(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        """Perform only state-safe current-project assessment actions."""
+        from sqlalchemy import func, select
+        from app.models.assessment import Assessment
+        from app.models.finding import Finding, FindingStatus
+        from app.services.flow_engine import get_flow_engine
+
+        if not project_id or not await self._project_for_user_id(db, project_id, user_id, "assessment:manage"):
+            return {"success": False, "message": "项目不存在或无权管理测评", "action": parameters.get("action")}
+        assessment = (await db.execute(
+            select(Assessment).where(Assessment.project_id == project_id)
+            .order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1)
+        )).scalar_one_or_none()
+        if not assessment:
+            return {"success": False, "message": "当前项目尚未创建等保测评", "action": parameters.get("action")}
+
+        action = parameters.get("action")
+        flow = get_flow_engine(db)
+        if action == "start":
+            if assessment.status == "not_started":
+                assessment = await flow.start_assessment(assessment.id)
+                return {"success": True, "action": action, "assessment_id": assessment.id, "status": assessment.status, "message": "测评已启动，当前进入差距分析阶段"}
+            if assessment.status == "paused":
+                assessment = await flow.resume_assessment(assessment.id)
+                return {"success": True, "action": action, "assessment_id": assessment.id, "status": assessment.status, "message": "测评已恢复执行"}
+            if assessment.status == "in_progress":
+                return {"success": True, "action": action, "assessment_id": assessment.id, "status": assessment.status, "message": "测评已经在进行中，无需重复启动"}
+            return {"success": False, "action": action, "assessment_id": assessment.id, "status": assessment.status, "message": "当前测评已完成；如需重新评估，请明确选择重新打开或完全重置"}
+
+        if action == "reset":
+            if parameters.get("confirm") is not True:
+                return {
+                    "success": True,
+                    "action": action,
+                    "requires_confirmation": True,
+                    "assessment_id": assessment.id,
+                    "message": "完全重置会清除测评阶段、任务、文档分析、证据、问题、复测记录和报告，但保留项目与资产。请回复“确认彻底重置测评”后执行。",
+                }
+            assessment, cleanup = await flow.restart_assessment(assessment.id, mode="reset")
+            await db.commit()
             return {
-                "project_id": project.id,
-                "project_name": project.name,
-                "compliance_score": project.compliance_score,
-                "compliance_level": project.compliance_level.value if project.compliance_level else None,
+                "success": True,
+                "action": action,
+                "assessment_id": assessment.id,
+                "status": assessment.status,
+                "cleanup": cleanup,
+                "message": "测评数据已彻底清除，项目与资产保持不变",
             }
-        else:
-            return {"message": "项目不存在"}
+
+        if action == "retest":
+            rows = (await db.execute(
+                select(Finding.source_type, func.count(Finding.id)).where(
+                    Finding.project_id == project_id,
+                    Finding.status == FindingStatus.OPEN,
+                ).group_by(Finding.source_type)
+            )).all()
+            counts = {str(source or "unknown"): int(count or 0) for source, count in rows}
+            technical = counts.get("technical", 0)
+            document = counts.get("document", 0)
+            if not technical and not document:
+                message = "当前没有待复测的技术或文档问题"
+            else:
+                parts = []
+                if technical:
+                    parts.append(f"{technical} 个技术问题可在整改与复测中选择后重新检测")
+                if document:
+                    parts.append(f"{document} 个文档问题需要先提交改进后的材料，再对对应文档类别重新分析")
+                message = "；".join(parts) + "。系统不会在缺少目标、凭据或改进材料时伪造复测结论。"
+            return {
+                "success": True,
+                "action": action,
+                "assessment_id": assessment.id,
+                "started": False,
+                "counts": {"technical": technical, "document": document},
+                "message": message,
+            }
+
+        return {"success": False, "action": action, "message": "不支持的测评流程操作"}
 
     async def _view_scan_history(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """查看扫描历史"""
         from app.models.scan_task import ScanTask
         from sqlalchemy import select
+
+        if not await self._project_for_user_id(db, project_id, user_id, "scan:read"):
+            return {"scan_history": [], "total": 0, "message": "项目不存在或无权查看检测历史"}
 
         limit = parameters.get("limit", 10)
 

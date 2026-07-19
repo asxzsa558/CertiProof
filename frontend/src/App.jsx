@@ -14,6 +14,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'))
 const ProjectsList = lazy(() => import('./pages/ProjectsList'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const OrganizationSettings = lazy(() => import('./pages/OrganizationSettings'))
+const DataLifecycleSettings = lazy(() => import('./pages/DataLifecycleSettings'))
 
 function AppLoading() {
   return (
@@ -165,10 +166,18 @@ function App() {
               }
             />
             <Route
-              path="/settings/organization"
+              path="/settings/access"
               element={
                 <ProtectedRoute>
                   <OrganizationSettings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings/data-lifecycle"
+              element={
+                <ProtectedRoute>
+                  <DataLifecycleSettings />
                 </ProtectedRoute>
               }
             />

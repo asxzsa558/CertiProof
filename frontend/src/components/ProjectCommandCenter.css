@@ -2,6 +2,10 @@ body.command-center-active::before {
   display: none !important;
 }
 
+body.command-center-active {
+  overflow: hidden;
+}
+
 .command-center-shell {
   position: relative;
   height: 100%;
@@ -1777,7 +1781,22 @@ body.command-center-active::before {
   border: 1px solid rgba(77, 178, 219, 0.24);
   border-radius: 6px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 0 45px rgba(0, 0, 0, 0.32);
-  backdrop-filter: blur(12px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  isolation: isolate;
+}
+
+.chat-glass-frame,
+.workspace-messages,
+.detail-workbench-body {
+  isolation: isolate;
+}
+
+.workspace-messages,
+.detail-workbench-body {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  contain: paint;
 }
 
 .ai-command-core::before,

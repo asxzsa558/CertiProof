@@ -53,6 +53,9 @@ const renderResultMessage = (msg, options = {}) => {
   const scanResults = msg.scanResults || {}
   const queryResult = scanResults.query_result || null
   const listedAssets = queryResult?.capability === 'list_assets' ? (queryResult.assets || []) : []
+  const projectStatus = ['view_project_status', 'view_compliance_score'].includes(queryResult?.capability)
+    ? (queryResult.data || {})
+    : null
   const openPorts = scanResults.open_ports || []
   const filteredPorts = scanResults.filtered_ports || []
   const vulnerabilities = scanResults.vulnerabilities || []
@@ -119,6 +122,48 @@ const renderResultMessage = (msg, options = {}) => {
             <div className="summary-value">{listedAssets.length} 个</div>
           </div>
         </div>
+      )}
+      {projectStatus && (
+        <>
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(14, 165, 233, 0.2)' }}>
+              <MonitorOutlined style={{ color: '#38bdf8' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">测评进度</div>
+              <div className="summary-value">{Number(projectStatus.workflow_progress || 0).toFixed(1)}%</div>
+            </div>
+          </div>
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(16, 185, 129, 0.18)' }}>
+              <SafetyCertificateOutlined style={{ color: '#34d399' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">合规评分</div>
+              <div className="summary-value">
+                {projectStatus.compliance_score == null ? '未形成' : `${Number(projectStatus.compliance_score).toFixed(1)} 分`}
+              </div>
+            </div>
+          </div>
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(245, 158, 11, 0.18)' }}>
+              <ExclamationCircleFilled style={{ color: '#f59e0b' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">待处理问题</div>
+              <div className="summary-value">{projectStatus.findings?.open || 0} 项</div>
+            </div>
+          </div>
+          <div className="summary-item">
+            <div className="summary-icon" style={{ background: 'rgba(99, 102, 241, 0.18)' }}>
+              <InfoCircleFilled style={{ color: '#818cf8' }} />
+            </div>
+            <div className="summary-content">
+              <div className="summary-title">有效覆盖率</div>
+              <div className="summary-value">{Number(projectStatus.coverage || 0).toFixed(1)}%</div>
+            </div>
+          </div>
+        </>
       )}
       {openPorts.length > 0 && (
         <div className="summary-item">
@@ -274,7 +319,39 @@ const renderResultMessage = (msg, options = {}) => {
         </div>
       )}
 
-      {(resultTarget || tool) && (
+      {projectStatus && (
+        <div className="result-details-section project-status-detail">
+          <div className="section-title">当前项目状态</div>
+          <div className="baseline-target-item">
+            <span>项目</span>
+            <span className="text-muted">{projectStatus.project_name || '当前项目'} · {projectStatus.compliance_level || '未设置等级'}</span>
+          </div>
+          <div className="baseline-target-item">
+            <span>当前阶段</span>
+            <span className="text-muted">{projectStatus.current_phase?.name || '尚未开始'}</span>
+          </div>
+          <div className="baseline-target-item">
+            <span>问题分布</span>
+            <span className="text-muted">
+              全部 {projectStatus.findings?.total || 0} · 待处理 {projectStatus.findings?.open || 0} · 已修复 {projectStatus.findings?.fixed || 0} · 无法验证 {projectStatus.findings?.unable || 0}
+            </span>
+          </div>
+          <div className="baseline-target-item">
+            <span>报告</span>
+            <span className="text-muted">
+              {projectStatus.report?.available ? `已生成 v${projectStatus.report.version}` : '尚未生成有效报告'}
+            </span>
+          </div>
+          {(projectStatus.phases || []).map(phase => (
+            <div className="baseline-target-item" key={phase.id || phase.phase_id}>
+              <span>{phase.name}</span>
+              <span className="text-muted">{Number(phase.progress || 0).toFixed(1)}% · {phase.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(resultTarget || (tool && !queryResult)) && (
         <div className="result-details-section result-identity-section">
           {resultTarget && (
             <div className="baseline-target-item">

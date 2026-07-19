@@ -37,6 +37,15 @@ export const CAPABILITY_NAMES = TOOL_CATALOG.reduce((acc, tool) => {
   acc[tool.capability] = tool.name
   return acc
 }, {
+  view_project_status: '项目合规状态',
+  view_compliance_score: '项目合规状态',
+  view_findings: '项目问题清单',
+  view_open_ports: '已保存端口结果',
+  view_vulnerabilities: '已保存漏洞结果',
+  view_scan_history: '检测历史',
+  assessment_flow_action: '等保自查流程',
+  generate_html_report: '生成 HTML 报告',
+  list_assets: '项目资产清单',
   linux_baseline: '安全基线核查',
   ping_asset: 'Ping 检测',
   testssl_scan: 'SSL/TLS 检测',

@@ -8,6 +8,7 @@ import time
 import re
 import json
 import os
+import shutil
 import tempfile
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -322,18 +323,10 @@ async def root():
 
 @app.get("/health")
 async def health():
-    tools_status = {}
-    for tool in ["samrdump.py", "smbclient.py", "lookupsid.py"]:
-        try:
-            process = await asyncio.create_subprocess_exec(
-                tool, "-h",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(process.communicate(), timeout=5)
-            tools_status[tool] = True
-        except Exception:
-            tools_status[tool] = False
+    tools_status = {
+        tool: shutil.which(tool) is not None
+        for tool in ("samrdump.py", "smbclient.py", "lookupsid.py")
+    }
     impacket_available = all(tools_status.values())
     
     return {

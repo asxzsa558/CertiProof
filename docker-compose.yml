@@ -208,8 +208,7 @@ services:
       retries: 12
     restart: "no"
     networks:
-      certiproof-net:
-        ipv4_address: 172.23.0.17
+      - certiproof-net
 
   # MCP Gateway
   mcp-gateway:

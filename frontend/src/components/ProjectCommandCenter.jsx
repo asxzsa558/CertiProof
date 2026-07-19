@@ -37,6 +37,7 @@ const TOOL_GROUPS = [
 ]
 
 const statusCopy = { success: '正常', warning: '待判定', failed: '失败', skipped: '不适用', idle: '待执行' }
+const keepIfUnchanged = (previous, next) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next
 
 const normalizeCapability = (capability = '') => {
   if (['ping_asset', 'ping_host'].includes(capability)) return 'ping_host'
@@ -97,17 +98,18 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
         api.get(`/projects/${project.id}/reports`),
       ])
       if (!mounted) return
-      setScanTasks(scansResult.status === 'fulfilled' ? scansResult.value.data || [] : [])
+      const nextScans = scansResult.status === 'fulfilled' ? scansResult.value.data || [] : []
+      setScanTasks(previous => keepIfUnchanged(previous, nextScans))
       const assessments = assessmentResult.status === 'fulfilled' ? assessmentResult.value.data : null
       const latestAssessment = Array.isArray(assessments) ? assessments[0] || null : assessments
-      setAssessment(latestAssessment)
-      setVerification(verificationResult.status === 'fulfilled' ? verificationResult.value.data : null)
-      setDetectedChanges(changesResult.status === 'fulfilled' ? changesResult.value.data || [] : [])
-      setReportHistory(reportsResult.status === 'fulfilled' ? reportsResult.value.data || [] : [])
+      setAssessment(previous => keepIfUnchanged(previous, latestAssessment))
+      setVerification(previous => keepIfUnchanged(previous, verificationResult.status === 'fulfilled' ? verificationResult.value.data : null))
+      setDetectedChanges(previous => keepIfUnchanged(previous, changesResult.status === 'fulfilled' ? changesResult.value.data || [] : []))
+      setReportHistory(previous => keepIfUnchanged(previous, reportsResult.status === 'fulfilled' ? reportsResult.value.data || [] : []))
       if (latestAssessment?.id) {
         try {
           const summaryResult = await api.get(`/assessments/${latestAssessment.id}/summary`)
-          if (mounted) setScoreSummary(summaryResult.data)
+          if (mounted) setScoreSummary(previous => keepIfUnchanged(previous, summaryResult.data))
         } catch {
           if (mounted) setScoreSummary(null)
         }
@@ -417,11 +419,13 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, modelId,
         destroyOnClose
         rootClassName="verification-detail-drawer"
       >
-        <VerificationWorkspace
-          key={`${project?.id || 'project'}-${verificationFilter}`}
-          projectId={project?.id}
-          initialFilter={verificationFilter}
-        />
+        {verificationVisible && (
+          <VerificationWorkspace
+            key={project?.id || 'project'}
+            projectId={project?.id}
+            initialFilter={verificationFilter}
+          />
+        )}
       </Drawer>
     </div>
   )

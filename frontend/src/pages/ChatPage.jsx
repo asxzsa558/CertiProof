@@ -15,7 +15,6 @@ import {
   EditOutlined,
   ArrowLeftOutlined,
   DashboardOutlined,
-  ApartmentOutlined,
   ControlOutlined,
   FileTextOutlined,
   MenuFoldOutlined,
@@ -30,6 +29,30 @@ import api from '../services/api'
 import './ChatPage.css'
 
 const { Header, Sider, Content } = Layout
+
+const PERMISSION_LABELS = {
+  'project:read': '查看项目',
+  'project:create': '创建项目',
+  'project:update': '编辑项目',
+  'project:delete': '删除项目',
+  'asset:read': '查看资产',
+  'asset:create': '添加资产',
+  'asset:update': '编辑资产',
+  'asset:delete': '删除资产',
+  'scan:execute': '执行检测',
+  'scan:read': '查看检测',
+  'scan:cancel': '取消检测',
+  'assessment:read': '查看测评',
+  'assessment:manage': '管理测评',
+  'evidence:manage': '管理证据',
+  'report:read': '查看报告',
+  'report:export': '导出报告',
+  'role:read': '查看角色',
+  'role:manage': '管理角色',
+  'member:manage': '管理成员',
+  'system:config': '系统配置',
+  'tool:diagnose': '工具诊断',
+}
 
 function ChatPage() {
   const navigate = useNavigate()
@@ -53,10 +76,21 @@ function ChatPage() {
   const [batchAssets, setBatchAssets] = useState('')
   const [workspaceSummary, setWorkspaceSummary] = useState({})
   const [profileVisible, setProfileVisible] = useState(false)
+  const [currentPermissions, setCurrentPermissions] = useState([])
 
   useEffect(() => {
     fetchProjects()
   }, [urlProjectId, currentOrgId])
+
+  useEffect(() => {
+    if (!currentOrgId) {
+      setCurrentPermissions([])
+      return
+    }
+    api.get('/dashboard/organization-command', { params: { organization_id: currentOrgId } })
+      .then((response) => setCurrentPermissions(response.data?.current_role?.permissions || []))
+      .catch(() => setCurrentPermissions([]))
+  }, [currentOrgId])
 
   useEffect(() => {
     if (selectedProject) {
@@ -474,17 +508,6 @@ function ChatPage() {
               <span>设置</span>
             </Button>
           </Tooltip>
-          <Tooltip title="组织与权限" placement="right">
-            <Button
-              type="text"
-              icon={<ApartmentOutlined />}
-              onClick={() => navigate('/settings/organization')}
-              className="workspace-rail-button"
-              aria-label="组织与权限"
-            >
-              <span>权限</span>
-            </Button>
-          </Tooltip>
         </div>
       </Sider>
 
@@ -656,9 +679,6 @@ function ChatPage() {
         open={profileVisible}
         onCancel={() => setProfileVisible(false)}
         footer={[
-          <Button key="permissions" onClick={() => { setProfileVisible(false); navigate('/settings/organization') }}>
-            查看权限
-          </Button>,
           <Button key="close" type="primary" onClick={() => setProfileVisible(false)}>
             完成
           </Button>,
@@ -675,10 +695,20 @@ function ChatPage() {
         </div>
         <dl className="workspace-profile-grid">
           <div><dt>用户名</dt><dd>{user?.username || '—'}</dd></div>
-          <div><dt>账户角色</dt><dd>{user?.role || '组织成员'}</dd></div>
+          <div><dt>组织角色</dt><dd>{organizations.find(org => org.id === currentOrgId)?.role || '组织成员'}</dd></div>
           <div><dt>当前组织</dt><dd>{organizations.find(org => org.id === currentOrgId)?.name || '—'}</dd></div>
-          <div><dt>账户状态</dt><dd className="profile-active"><i />正常</dd></div>
+          <div><dt>有效权限</dt><dd>{currentPermissions.length} 项</dd></div>
         </dl>
+        <div className="workspace-profile-permissions">
+          <strong>我的有效权限</strong>
+          <div>
+            {currentPermissions.length
+              ? currentPermissions.map((permission) => (
+                <span key={permission}>{PERMISSION_LABELS[permission] || permission}</span>
+              ))
+              : <em>当前组织未授予可用权限</em>}
+          </div>
+        </div>
       </Modal>
 
       {/* Asset Modal */}

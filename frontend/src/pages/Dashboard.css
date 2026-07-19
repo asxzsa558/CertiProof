@@ -254,7 +254,8 @@
 .member-role-list div { display: flex; align-items: center; justify-content: space-between; gap: 7px; min-height: 31px; padding: 6px 7px; border: 1px solid rgba(137, 185, 207, 0.11); background: rgba(2, 10, 24, 0.34); }
 .role-list span,
 .member-role-list span { min-width: 0; overflow: hidden; color: #dfeef7; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.role-list em { flex: 0 0 auto; color: #f6cb6a; font-size: 10px; font-style: normal; }
+.role-list em,
+.member-role-list em { flex: 0 0 auto; color: #f6cb6a; font-size: 10px; font-style: normal; }
 .member-role-list .ant-select { min-width: 124px; }
 .empty-panel { padding: 12px 4px; color: var(--muted); font-size: 12px; }
 

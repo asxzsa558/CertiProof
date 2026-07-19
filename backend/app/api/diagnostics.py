@@ -191,7 +191,7 @@ async def test_mcp_health(
         "embedding_server": settings.EMBEDDING_SERVER_URL,
     }
     
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=15.0) as client:
         async def check_service(name: str, base_url: str) -> tuple[str, dict]:
             try:
                 response = await client.get(f"{base_url}/health")

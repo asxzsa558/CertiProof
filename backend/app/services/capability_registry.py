@@ -690,8 +690,38 @@ class CapabilityRegistry:
         ))
         
         self.register(Capability(
+            name="view_project_status",
+            description="查看当前项目完整事实快照，并按状态、通过准备度、主要差距或管理层摘要输出。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "view": {
+                        "type": "string",
+                        "description": "输出视角：status、readiness、gaps 或 executive",
+                    },
+                },
+                "required": []
+            },
+            category="query"
+        ))
+
+        self.register(Capability(
+            name="assessment_flow_action",
+            description="对当前项目执行测评流程操作：开始、检查复测条件或完全重置。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "description": "start、retest 或 reset"},
+                    "confirm": {"type": "boolean", "description": "完全重置时是否已明确确认清空"},
+                },
+                "required": ["action"],
+            },
+            category="assessment",
+        ))
+
+        self.register(Capability(
             name="view_compliance_score",
-            description="查看项目合规评分，显示当前合规分数和等级。",
+            description="查看项目合规评分；同时返回测评进度、问题分布和覆盖率，避免把完成度与评分混淆。",
             parameters={
                 "type": "object",
                 "properties": {

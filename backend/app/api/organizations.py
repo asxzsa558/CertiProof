@@ -59,10 +59,19 @@ async def get_user_org_role(db: AsyncSession, org_id: int, user_id: int) -> str:
     return member.role
 
 
-async def ensure_org_admin(db: AsyncSession, org_id: int, user_id: int) -> None:
-    role = await get_user_org_role(db, org_id, user_id)
-    if role != OrgRole.ADMIN:
-        raise HTTPException(status_code=403, detail="Only admin can manage organization settings")
+def validate_permissions(permissions: List[str]) -> List[str]:
+    allowed = {permission for values in PERMISSION_GROUPS.values() for permission in values}
+    unknown = sorted(set(permissions) - allowed)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"未知权限：{', '.join(unknown)}")
+    return sorted(set(permissions))
+
+
+async def organization_admin_count(db: AsyncSession, org_id: int) -> int:
+    return int((await db.execute(select(func.count(OrganizationMember.id)).where(
+        OrganizationMember.organization_id == org_id,
+        OrganizationMember.role == OrgRole.ADMIN,
+    ))).scalar() or 0)
 
 
 async def write_role_audit(
@@ -116,7 +125,7 @@ async def get_organization_storage(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await ensure_org_admin(db, org_id, current_user.id)
+    await require_org_permission(db, org_id, current_user, "system:config")
     project_ids = list((await db.execute(select(Project.id).where(
         Project.organization_id == org_id
     ))).scalars().all())
@@ -130,7 +139,7 @@ async def initialize_organization_business_data(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await ensure_org_admin(db, org_id, current_user.id)
+    await require_org_permission(db, org_id, current_user, "system:config")
     organization = await db.get(Organization, org_id)
     if not organization:
         raise HTTPException(status_code=404, detail="组织不存在")
@@ -359,7 +368,7 @@ async def list_members(
     current_user: User = Depends(get_current_user),
 ):
     """获取组织成员列表"""
-    await get_user_org_role(db, org_id, current_user.id)
+    await require_org_permission(db, org_id, current_user, "role:read")
 
     result = await db.execute(
         select(OrganizationMember, User)
@@ -397,8 +406,10 @@ async def add_member(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """添加成员（仅 admin）"""
-    await require_org_permission(db, org_id, current_user, "member:manage")
+    """添加组织成员。"""
+    actor = await require_org_permission(db, org_id, current_user, "member:manage")
+    if member_data.role == OrgRole.ADMIN and actor.role != OrgRole.ADMIN:
+        raise HTTPException(status_code=403, detail="只有组织管理员可以授予管理员身份")
 
     result = await db.execute(select(User).where(User.email == member_data.user_email))
     user = result.scalar_one_or_none()
@@ -415,10 +426,11 @@ async def add_member(
         raise HTTPException(status_code=400, detail="User already a member")
 
     role_name = None
-    if member_data.custom_role_id:
+    custom_role_id = None if member_data.role == OrgRole.ADMIN else member_data.custom_role_id
+    if custom_role_id:
         role_result = await db.execute(
             select(OrganizationRole).where(
-                OrganizationRole.id == member_data.custom_role_id,
+                OrganizationRole.id == custom_role_id,
                 OrganizationRole.organization_id == org_id,
             )
         )
@@ -431,7 +443,7 @@ async def add_member(
         organization_id=org_id,
         user_id=user.id,
         role=member_data.role,
-        custom_role_id=member_data.custom_role_id,
+        custom_role_id=custom_role_id,
     )
     db.add(member)
     await db.flush()
@@ -468,8 +480,8 @@ async def update_member_role(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """修改成员角色（仅 admin）"""
-    await require_org_permission(db, org_id, current_user, "member:manage")
+    """修改成员基础身份和权限模板。"""
+    actor = await require_org_permission(db, org_id, current_user, "member:manage")
 
     result = await db.execute(
         select(OrganizationMember).where(
@@ -481,10 +493,22 @@ async def update_member_role(
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
 
-    if member_data.custom_role_id:
+    if member.role == OrgRole.ADMIN and actor.role != OrgRole.ADMIN:
+        raise HTTPException(status_code=403, detail="只有组织管理员可以修改管理员")
+    if member_data.role == OrgRole.ADMIN and actor.role != OrgRole.ADMIN:
+        raise HTTPException(status_code=403, detail="只有组织管理员可以授予管理员身份")
+    if (
+        member.role == OrgRole.ADMIN
+        and member_data.role != OrgRole.ADMIN
+        and await organization_admin_count(db, org_id) <= 1
+    ):
+        raise HTTPException(status_code=409, detail="组织必须至少保留一名管理员")
+
+    custom_role_id = None if member_data.role == OrgRole.ADMIN else member_data.custom_role_id
+    if custom_role_id:
         role_result = await db.execute(
             select(OrganizationRole).where(
-                OrganizationRole.id == member_data.custom_role_id,
+                OrganizationRole.id == custom_role_id,
                 OrganizationRole.organization_id == org_id,
             )
         )
@@ -492,7 +516,7 @@ async def update_member_role(
             raise HTTPException(status_code=404, detail="Custom role not found")
 
     member.role = member_data.role
-    member.custom_role_id = member_data.custom_role_id
+    member.custom_role_id = custom_role_id
     await write_role_audit(
         db,
         org_id,
@@ -534,8 +558,8 @@ async def remove_member(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """移除成员（仅 admin）"""
-    await require_org_permission(db, org_id, current_user, "member:manage")
+    """移除组织成员。"""
+    actor = await require_org_permission(db, org_id, current_user, "member:manage")
 
     result = await db.execute(
         select(OrganizationMember).where(
@@ -546,7 +570,22 @@ async def remove_member(
     member = result.scalar_one_or_none()
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
+    if member.user_id == current_user.id:
+        raise HTTPException(status_code=409, detail="不能在访问控制页移除自己")
+    if member.role == OrgRole.ADMIN and actor.role != OrgRole.ADMIN:
+        raise HTTPException(status_code=403, detail="只有组织管理员可以移除管理员")
+    if member.role == OrgRole.ADMIN and await organization_admin_count(db, org_id) <= 1:
+        raise HTTPException(status_code=409, detail="不能移除组织最后一名管理员")
 
+    await write_role_audit(
+        db,
+        org_id,
+        current_user.id,
+        "remove_member",
+        "member",
+        member.id,
+        f"Removed member {member.id} user_id={member.user_id}",
+    )
     await db.delete(member)
     await db.commit()
     return None
@@ -595,11 +634,12 @@ async def create_role(
     current_user: User = Depends(get_current_user),
 ):
     await require_org_permission(db, org_id, current_user, "role:manage")
+    permissions = validate_permissions(role_data.permissions)
     role = OrganizationRole(
         organization_id=org_id,
         name=role_data.name,
         description=role_data.description,
-        permissions=json.dumps(role_data.permissions, ensure_ascii=False),
+        permissions=json.dumps(permissions, ensure_ascii=False),
         is_system=False,
         created_by=current_user.id,
     )
@@ -624,12 +664,14 @@ async def update_role(
     role = result.scalar_one_or_none()
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
+    if role.is_system:
+        raise HTTPException(status_code=409, detail="系统角色模板不可编辑，请创建自定义角色")
     if role_data.name is not None:
         role.name = role_data.name
     if role_data.description is not None:
         role.description = role_data.description
     if role_data.permissions is not None:
-        role.permissions = json.dumps(role_data.permissions, ensure_ascii=False)
+        role.permissions = json.dumps(validate_permissions(role_data.permissions), ensure_ascii=False)
     await write_role_audit(db, org_id, current_user.id, "update_role", "role", role.id, f"Updated role {role.name}")
     await db.commit()
     await db.refresh(role)

@@ -189,7 +189,7 @@ async def health():
     """
     async def check_server(server_name: str, server_url: str):
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.get(f"{server_url}/health")
             if response.status_code == 200:
                 details = response.json()
@@ -200,7 +200,11 @@ async def health():
                 }
             return server_name, {"status": "unhealthy", "error": f"HTTP {response.status_code}"}
         except Exception as exc:
-            return server_name, {"status": "unhealthy", "error": str(exc)}
+            detail = str(exc).strip()
+            return server_name, {
+                "status": "unhealthy",
+                "error": f"{type(exc).__name__}: {detail or '请求超时或连接被中断'}",
+            }
 
     checked = await asyncio.gather(
         *(check_server(server_name, server_url) for server_name, server_url in SERVER_ROUTES.items())

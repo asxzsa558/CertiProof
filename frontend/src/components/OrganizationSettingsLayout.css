@@ -1,0 +1,49 @@
+.settings-dashboard {
+  overflow: hidden;
+}
+
+.settings-main {
+  padding-bottom: 28px;
+}
+
+.settings-shell-content {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding-bottom: 28px;
+}
+
+.settings-access-denied {
+  display: grid;
+  place-items: center;
+  min-height: 360px;
+  padding: 36px;
+  color: rgba(207, 224, 237, 0.78);
+  border: 1px solid rgba(244, 189, 79, 0.28);
+  background: rgba(69, 45, 8, 0.18);
+  text-align: center;
+}
+
+.settings-access-denied .anticon {
+  margin-bottom: 14px;
+  color: #f4bd4f;
+  font-size: 34px;
+}
+
+.settings-access-denied h2 {
+  margin: 0 0 8px;
+  color: #fff3ce;
+  font-size: 19px;
+}
+
+.settings-access-denied p {
+  max-width: 520px;
+  margin: 0;
+  line-height: 1.7;
+}
+
+@media (max-width: 960px) {
+  .settings-dashboard {
+    overflow: visible;
+  }
+}

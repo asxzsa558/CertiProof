@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Avatar, Button, Checkbox, Dropdown, Form, Input, Modal, Select, Tag, Tooltip, message } from 'antd'
+import { Avatar, Button, Dropdown, Select, Tag, Tooltip, message } from 'antd'
 import {
   AlertOutlined,
   ApiOutlined,
@@ -33,23 +33,14 @@ import './Dashboard.css'
 
 const NAV_ITEMS = [
   { key: 'overview', group: '组织态势', label: '全局 Dashboard', icon: <DashboardOutlined />, path: '/dashboard' },
-  { key: 'projects', group: '项目执行', label: '项目工作台', icon: <ProjectOutlined />, path: '/projects' },
-  { key: 'assets', group: '项目执行', label: '资产矩阵', icon: <DatabaseOutlined />, path: '/projects?view=assets' },
-  { key: 'assessment', group: '测评中心', label: '等保测评', icon: <SafetyCertificateOutlined />, path: '/projects' },
-  { key: 'password-assessment', group: '测评中心', label: '密码测评', icon: <LockOutlined />, upcoming: true },
-  { key: 'reports', group: '治理中心', label: '报告中心', icon: <FileTextOutlined />, path: '/reports' },
-  { key: 'roles', group: '治理中心', label: '角色权限', icon: <TeamOutlined />, path: '/settings/organization' },
-  { key: 'settings', group: '系统', label: '系统设置', icon: <SettingOutlined />, path: '/settings/models' },
-]
-
-const PERMISSION_GROUPS = [
-  { key: 'project', label: '项目管理', permissions: ['project:read', 'project:create', 'project:update', 'project:delete'] },
-  { key: 'asset', label: '资产管理', permissions: ['asset:read', 'asset:create', 'asset:update', 'asset:delete'] },
-  { key: 'scan', label: '执行检测', permissions: ['scan:execute', 'scan:read', 'scan:cancel'] },
-  { key: 'assessment', label: '测评证据', permissions: ['assessment:read', 'assessment:manage', 'evidence:manage'] },
-  { key: 'report', label: '报告中心', permissions: ['report:read', 'report:export'] },
-  { key: 'rbac', label: '角色授权', permissions: ['role:read', 'role:manage', 'member:manage'] },
-  { key: 'system', label: '系统配置', permissions: ['system:config', 'tool:diagnose'] },
+  { key: 'projects', group: '项目执行', label: '项目工作台', icon: <ProjectOutlined />, path: '/projects', permission: 'project:read' },
+  { key: 'assets', group: '项目执行', label: '资产矩阵', icon: <DatabaseOutlined />, path: '/projects?view=assets', permission: 'asset:read' },
+  { key: 'assessment', group: '测评中心', label: '等保测评', icon: <SafetyCertificateOutlined />, path: '/projects', permission: 'assessment:read' },
+  { key: 'password-assessment', group: '测评中心', label: '密码测评', icon: <LockOutlined />, upcoming: true, permission: 'assessment:read' },
+  { key: 'reports', group: '治理中心', label: '报告中心', icon: <FileTextOutlined />, path: '/reports', permission: 'report:read' },
+  { key: 'access', group: '治理中心', label: '角色权限', icon: <TeamOutlined />, path: '/settings/access', permission: 'role:read' },
+  { key: 'data', group: '系统', label: '数据与生命周期', icon: <DatabaseOutlined />, path: '/settings/data-lifecycle', permission: 'system:config' },
+  { key: 'settings', group: '系统', label: '系统设置', icon: <SettingOutlined />, path: '/settings/models', permission: 'system:config' },
 ]
 
 const statusLabel = {
@@ -111,18 +102,14 @@ function errorMessage(error, fallback) {
 
 function Dashboard() {
   const navigate = useNavigate()
-  const [form] = Form.useForm()
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
   const organizations = useAuthStore((state) => state.organizations)
   const currentOrgId = useAuthStore((state) => state.currentOrgId)
   const setCurrentOrg = useAuthStore((state) => state.setCurrentOrg)
   const [dashboard, setDashboard] = useState(emptyDashboard())
-  const [roles, setRoles] = useState([])
-  const [members, setMembers] = useState([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
-  const [roleModalOpen, setRoleModalOpen] = useState(false)
   const [selectedToolIndex, setSelectedToolIndex] = useState(0)
   const [riskFilter, setRiskFilter] = useState('all')
   const [riskActionId, setRiskActionId] = useState(null)
@@ -134,32 +121,28 @@ function Dashboard() {
 
   const currentPermissions = dashboard.current_role?.permissions || []
   const permissionScope = dashboard.current_role?.permission_scope || (currentOrg?.role === 'admin' ? '全局权限' : '受限权限')
-  const canManageRoles = currentPermissions.includes('role:manage') || currentOrg?.role === 'admin'
-  const canManageMembers = currentPermissions.includes('member:manage') || currentOrg?.role === 'admin'
   const canManageAssessments = currentPermissions.includes('assessment:manage') || currentOrg?.role === 'admin'
+  const canReadRoles = currentPermissions.includes('role:read') || currentOrg?.role === 'admin'
+  const visibleNavItems = NAV_ITEMS.filter((item) => (
+    !item.permission || currentOrg?.role === 'admin' || currentPermissions.includes(item.permission)
+  ))
 
   const fetchDashboard = async ({ silent = false } = {}) => {
     if (!currentOrg?.id) return
     setLoading(true)
-    const [dashboardResult, rolesResult, membersResult] = await Promise.allSettled([
-      api.get('/dashboard/organization-command', { params: { organization_id: currentOrg.id } }),
-      api.get(`/organizations/${currentOrg.id}/roles`),
-      api.get(`/organizations/${currentOrg.id}/members`),
-    ])
-    if (dashboardResult.status === 'fulfilled') {
-      setDashboard({ ...emptyDashboard(), ...dashboardResult.value.data })
+    try {
+      const response = await api.get('/dashboard/organization-command', {
+        params: { organization_id: currentOrg.id },
+      })
+      setDashboard({ ...emptyDashboard(), ...response.data })
       setLoadError('')
-    } else {
-      const detail = errorMessage(dashboardResult.reason, '组织态势数据暂时不可用')
+    } catch (error) {
+      const detail = errorMessage(error, '组织态势数据暂时不可用')
       setLoadError(detail)
       if (!silent) message.error(detail)
+    } finally {
+      setLoading(false)
     }
-    if (rolesResult.status === 'fulfilled') setRoles(rolesResult.value.data || [])
-    if (membersResult.status === 'fulfilled') setMembers(membersResult.value.data || [])
-    if (!silent && dashboardResult.status === 'fulfilled' && (rolesResult.status === 'rejected' || membersResult.status === 'rejected')) {
-      message.warning('部分权限数据未同步，当前态势数据不受影响')
-    }
-    setLoading(false)
   }
 
   useEffect(() => {
@@ -178,39 +161,10 @@ function Dashboard() {
     navigate('/login')
   }
 
-  const handleCreateRole = async (values) => {
-    if (!currentOrg?.id) return
-    try {
-      await api.post(`/organizations/${currentOrg.id}/roles`, {
-        name: values.name,
-        description: values.description,
-        permissions: values.permissions || [],
-      })
-      message.success('角色已创建')
-      setRoleModalOpen(false)
-      form.resetFields()
-      fetchDashboard()
-    } catch (error) {
-      message.error(errorMessage(error, '创建角色失败'))
-    }
-  }
-
-  const handleAssignRole = async (member, customRoleId) => {
-    if (!currentOrg?.id) return
-    try {
-      await api.put(`/organizations/${currentOrg.id}/members/${member.id}`, {
-        role: member.role,
-        custom_role_id: customRoleId || null,
-      })
-      message.success('成员权限已更新')
-      fetchDashboard()
-    } catch (error) {
-      message.error(errorMessage(error, '更新成员权限失败'))
-    }
-  }
-
   const summary = dashboard.summary || emptyDashboard().summary
   const topology = dashboard.exposure_topology || emptyDashboard().exposure_topology
+  const roles = dashboard.rbac?.roles || []
+  const members = dashboard.rbac?.members || []
   const selectedTool = dashboard.tool_health[selectedToolIndex] || dashboard.tool_health[0]
   const riskFilters = [
     { key: 'all', label: '全部', count: dashboard.risk_queue.length },
@@ -242,7 +196,7 @@ function Dashboard() {
           </div>
         </div>
         <nav className="org-nav">
-          {Object.entries(NAV_ITEMS.reduce((groups, item) => {
+          {Object.entries(visibleNavItems.reduce((groups, item) => {
             groups[item.group] = [...(groups[item.group] || []), item]
             return groups
           }, {})).map(([group, items]) => (
@@ -390,14 +344,14 @@ function Dashboard() {
               </div>
             </Panel>
 
-          <Panel className="ops-rbac-panel" title="角色与权限治理" meta={canManageRoles || canManageMembers ? '可配置' : '只读'}>
+          {canReadRoles ? <Panel className="ops-rbac-panel" title="角色与权限治理" meta="组织级">
               <div className="rbac-head">
                 <div>
                   <strong>{roles.length} 个角色模板</strong>
                   <span>{members.length} 名成员已纳入组织权限管理</span>
                 </div>
-                <Button size="small" type="primary" disabled={!canManageRoles} onClick={() => setRoleModalOpen(true)}>
-                  新建角色
+                <Button size="small" type="primary" onClick={() => navigate('/settings/access')}>
+                  进入访问控制
                 </Button>
               </div>
               <div className="role-list">
@@ -411,20 +365,12 @@ function Dashboard() {
               <div className="member-role-list">
                 {members.slice(0, 3).map((member) => (
                   <div key={member.id}>
-                    <span>{member.username || member.email}</span>
-                    <Select
-                      size="small"
-                      value={member.custom_role_id}
-                      placeholder="选择角色"
-                      disabled={!canManageMembers}
-                      allowClear
-                      onChange={(value) => handleAssignRole(member, value)}
-                      options={roles.map((role) => ({ value: role.id, label: role.name }))}
-                    />
+                    <span>{member.name || member.email}</span>
+                    <em>{roles.find((role) => role.id === member.custom_role_id)?.name || member.role}</em>
                   </div>
                 ))}
               </div>
-            </Panel>
+            </Panel> : null}
 
             </div>
           </section>
@@ -470,35 +416,6 @@ function Dashboard() {
         </section>
       </main>
 
-      <Modal
-        title="新建角色"
-        open={roleModalOpen}
-        onCancel={() => setRoleModalOpen(false)}
-        onOk={() => form.submit()}
-        okText="创建角色"
-        cancelText="取消"
-      >
-        <Form form={form} layout="vertical" onFinish={handleCreateRole}>
-          <Form.Item name="name" label="角色名称" rules={[{ required: true, message: '请输入角色名称' }]}>
-            <Input placeholder="例如：整改负责人" />
-          </Form.Item>
-          <Form.Item name="description" label="角色说明">
-            <Input.TextArea rows={2} placeholder="描述该角色负责的工作范围" />
-          </Form.Item>
-          <Form.Item name="permissions" label="权限范围">
-            <Checkbox.Group className="permission-checks">
-              {PERMISSION_GROUPS.map((group) => (
-                <div key={group.key} className="permission-group">
-                  <strong>{group.label}</strong>
-                  {group.permissions.map((permission) => (
-                    <Checkbox key={permission} value={permission}>{permission}</Checkbox>
-                  ))}
-                </div>
-              ))}
-            </Checkbox.Group>
-          </Form.Item>
-        </Form>
-      </Modal>
     </div>
   )
 }

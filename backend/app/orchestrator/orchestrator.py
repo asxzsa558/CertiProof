@@ -46,6 +46,11 @@ class Orchestrator:
         "baseline_check", "linux_baseline", "ssh_config_check",
         "full_compliance_scan", "tech_assessment",
     }
+    QUERY_CAPABILITIES = {
+        "list_assets", "list_projects", "view_project_status", "view_compliance_score",
+        "view_findings", "view_open_ports", "view_vulnerabilities", "view_scan_history",
+        "assessment_flow_action", "generate_html_report",
+    }
     
     def __init__(self):
         self.skill_loader = SkillLoader()
@@ -169,6 +174,7 @@ class Orchestrator:
         thread_id: Optional[int] = None,
         ai_response: str = "",
         user_input: str = "",
+        ai_routing: Optional[Dict[str, Any]] = None,
         status: ScanTaskStatus = ScanTaskStatus.RUNNING,
         task_type: ScanTaskType = ScanTaskType.FULL,
         asset_id: Optional[int] = None,
@@ -190,6 +196,7 @@ class Orchestrator:
                 "thread_id": thread_id,
                 "ai_response": ai_response,
                 "user_input": user_input,
+                "ai_routing": ai_routing or {},
             },
             orchestrator_task_id=task_id,
             progress={
@@ -218,6 +225,7 @@ class Orchestrator:
         context_manager: Optional[ContextManager] = None,
         ai_response: str = "",
         user_input: str = "",
+        ai_routing: Optional[Dict[str, Any]] = None,
         thread_id: int = None,
         task_type: ScanTaskType = ScanTaskType.FULL,
         asset_id: Optional[int] = None,
@@ -237,6 +245,7 @@ class Orchestrator:
             thread_id=thread_id,
             ai_response=ai_response,
             user_input=user_input,
+            ai_routing=ai_routing,
             status=ScanTaskStatus.PENDING if worker_mode else ScanTaskStatus.RUNNING,
             task_type=task_type,
             asset_id=asset_id,
@@ -261,6 +270,7 @@ class Orchestrator:
             scan_task_id=scan_task_id,
             status="running",
             created_at=datetime.utcnow().isoformat(),
+            ai_routing=ai_routing or {},
         )
 
         if worker_mode and scan_task_id:
@@ -537,9 +547,9 @@ class Orchestrator:
         
         plan = plan_result.get("plan", [])
         response = plan_result.get("response", "")
+        ai_routing = plan_result.get("routing") if isinstance(plan_result.get("routing"), dict) else {}
         plan, response = self._normalize_explicit_asset_plan(plan, context, user_input, response)
         plan, response = self._normalize_project_asset_plan(plan, context, user_input, response)
-        plan, response = self._keep_current_command_targets(plan, user_input, response)
         plan = self._expand_project_asset_targets(plan, context)
         
         logger.info(f"AI plan: {plan}")
@@ -548,7 +558,7 @@ class Orchestrator:
         await context_manager.add_conversation("user", user_input)
         
         # 4. 记录助手回复到对话历史
-        await context_manager.add_conversation("assistant", response)
+        await context_manager.add_conversation("assistant", response, {"ai_routing": ai_routing})
         
         # 显式提交对话历史，确保持久化
         await db.commit()
@@ -578,6 +588,7 @@ class Orchestrator:
                 context_manager=context_manager,
                 ai_response=response,
                 user_input=user_input,
+                ai_routing=ai_routing,
                 thread_id=thread_id,
             )
             task_id = task_info["task_id"]
@@ -606,9 +617,9 @@ class Orchestrator:
         user_input: str,
         response: str = "",
     ) -> tuple[List[Dict], str]:
-        """Use the current command as the source of truth for an explicitly named project asset."""
-        capability = self._requested_scan_capability(user_input)
-        if not capability:
+        """Retarget planned scan steps to assets explicitly named in this turn."""
+        scan_steps = [step for step in plan if step.get("capability") in self.SCAN_CAPABILITIES]
+        if not scan_steps:
             return plan, response
 
         text = (user_input or "").lower()
@@ -621,15 +632,26 @@ class Orchestrator:
         if not matched:
             return plan, response
 
-        normalized = [{
-            "capability": capability,
-            "parameters": self._explicit_asset_parameters_for(capability, target, user_input),
-        } for target in matched]
-        return normalized, self._project_asset_scan_response(
-            capability,
-            [{"value": target} for target in matched],
-            current_project=False,
-        )
+        normalized = [step for step in plan if step.get("capability") not in self.SCAN_CAPABILITIES]
+        for step in scan_steps:
+            capability = step["capability"]
+            for target in matched:
+                normalized.append({
+                    "capability": capability,
+                    "parameters": self._explicit_asset_parameters_for(
+                        capability,
+                        target,
+                        user_input,
+                        step.get("parameters") or {},
+                    ),
+                })
+        if len(scan_steps) == 1:
+            response = self._project_asset_scan_response(
+                scan_steps[0]["capability"],
+                [{"value": target} for target in matched],
+                current_project=False,
+            )
+        return normalized, response
 
     def _normalize_project_asset_plan(
         self,
@@ -655,14 +677,6 @@ class Orchestrator:
             return plan, response
 
         normalized = []
-        requested_capability = self._requested_scan_capability(user_input)
-        if requested_capability and not any(step.get("capability") in self.SCAN_CAPABILITIES for step in plan):
-            parameters = self._project_asset_parameters_for(requested_capability, text)
-            return (
-                [{"capability": requested_capability, "parameters": parameters}],
-                self._project_asset_scan_response(requested_capability, assets),
-            )
-
         for step in plan:
             capability = step.get("capability")
             if capability not in self.SCAN_CAPABILITIES:
@@ -670,88 +684,51 @@ class Orchestrator:
                 continue
 
             next_step = dict(step)
-            if requested_capability:
-                next_step["capability"] = requested_capability
-                capability = requested_capability
-            parameters = dict(next_step.get("parameters") or {})
-            parameters.update(self._project_asset_parameters_for(capability, text))
-            next_step["parameters"] = parameters
+            next_step["parameters"] = self._project_asset_parameters_for(
+                capability,
+                next_step.get("parameters") or {},
+            )
             normalized.append(next_step)
-
-        if requested_capability:
-            response = self._project_asset_scan_response(requested_capability, assets)
 
         return normalized, response
 
-    def _keep_current_command_targets(
-        self,
-        plan: List[Dict],
-        user_input: str,
-        response: str,
-    ) -> tuple[List[Dict], str]:
-        """Drop targets copied from earlier turns when this command names a target."""
-        capability = self._requested_scan_capability(user_input)
-        if not capability or not plan:
-            return plan, response
-
-        current_text = (user_input or "").lower()
-        retained = []
-        retained_targets = []
-        seen = set()
-        for step in plan:
-            parameters = step.get("parameters") if isinstance(step, dict) else None
-            if not isinstance(parameters, dict):
-                retained.append(step)
-                continue
-            raw_targets = [parameters.get("target"), parameters.get("url"), parameters.get("network")]
-            if isinstance(parameters.get("targets"), list):
-                raw_targets.extend(parameters["targets"])
-            identities = [target_identity(value) for value in raw_targets if value]
-            concrete = [value for value in identities if value and value not in {"项目资产", "项目资产网段"}]
-            if concrete and not any(value in current_text for value in concrete):
-                continue
-            key = (step.get("capability"), json.dumps(parameters, sort_keys=True, ensure_ascii=False))
-            if key in seen:
-                continue
-            seen.add(key)
-            retained.append(step)
-            retained_targets.extend(value for value in concrete if value not in retained_targets)
-
-        if not retained or len(retained) == len(plan):
-            return retained or plan, response
-        if retained_targets:
-            display_name = self._project_asset_scan_response(
-                capability,
-                [{"value": value} for value in retained_targets],
-            ).split("执行", 1)[-1].split("：", 1)[0]
-            response = f"好的，我将对 {', '.join(retained_targets)} 执行{display_name}。"
-        return retained, response
-
-    def _project_asset_parameters_for(self, capability: str, user_input: str) -> Dict:
+    def _project_asset_parameters_for(self, capability: str, parameters: Dict) -> Dict:
+        parameters = dict(parameters or {})
         if capability == "fping_scan":
-            return {"network": "项目资产网段"}
+            parameters.pop("targets", None)
+            parameters.pop("target", None)
+            parameters["network"] = "项目资产网段"
+            return parameters
 
-        parameters = {"target": "项目资产"}
+        parameters["target"] = "项目资产"
         if capability == "scan_ports":
-            parameters["port_range"] = "1-65535" if any(
-                token in user_input for token in ("全端口", "全部端口", "1-65535")
-            ) else "high-risk"
+            parameters.setdefault("port_range", "high-risk")
         return parameters
 
-    def _explicit_asset_parameters_for(self, capability: str, target: str, user_input: str) -> Dict:
+    def _explicit_asset_parameters_for(
+        self,
+        capability: str,
+        target: str,
+        user_input: str,
+        parameters: Dict,
+    ) -> Dict:
+        parameters = dict(parameters or {})
         if capability == "fping_scan":
-            return {"targets": [target]}
+            parameters.pop("network", None)
+            parameters.pop("target", None)
+            parameters["targets"] = [target]
+            return parameters
         if capability in {"sqlmap_scan", "gobuster_scan", "ffuf_scan", "web_discovery_scan"}:
             match = re.search(r"https?://[^\s，。；]+", user_input or "", flags=re.IGNORECASE)
-            url = match.group(0) if match else f"http://{target}"
+            url = match.group(0) if match else parameters.get("url") or f"http://{target}"
             if capability == "ffuf_scan" and "FUZZ" not in url:
                 url = f"{url.rstrip('/')}/FUZZ"
-            return {"url": url}
-        parameters = {"target": target}
+            parameters.pop("target", None)
+            parameters["url"] = url
+            return parameters
+        parameters["target"] = target
         if capability == "scan_ports":
-            parameters["port_range"] = "1-65535" if any(
-                token in user_input for token in ("全端口", "全部端口", "1-65535")
-            ) else "high-risk"
+            parameters.setdefault("port_range", "high-risk")
         return parameters
 
     def _project_asset_scan_response(
@@ -780,36 +757,6 @@ class Orchestrator:
             return f"好的，我将对当前项目的 {len(names)} 个资产执行{display_name}：{', '.join(names)}"
         return f"好的，我将对 {', '.join(names)} 执行{display_name}。"
 
-    def _requested_scan_capability(self, user_input: str) -> Optional[str]:
-        text = user_input or ""
-        if "/scan" in text or "端口" in text:
-            return "scan_ports"
-        if "弱口令" in text or "密码" in text:
-            return "scan_weak_passwords"
-        if "数据库" in text:
-            return "database_security_scan"
-        if "基线" in text:
-            return "baseline_check"
-        if "SSL" in text or "ssl" in text or "TLS" in text or "tls" in text:
-            return "scan_ssl"
-        if "SNMP" in text or "snmp" in text or "网络设备" in text:
-            return "network_device_scan"
-        if "Windows" in text or "windows" in text or "SMB" in text or "smb" in text or "AD" in text:
-            return "windows_security_scan"
-        if "目录" in text or "爆破" in text or "模糊" in text:
-            return "web_discovery_scan"
-        if "SQL 注入" in text or "sql注入" in text.lower() or "/sqlmap" in text.lower():
-            return "sqlmap_scan"
-        if "Web" in text or "web" in text:
-            return "nikto_scan"
-        if "漏洞" in text:
-            return "scan_vulnerabilities"
-        if "存活" in text or "fping" in text or "批量 Ping" in text:
-            return "fping_scan"
-        if "Ping" in text or "ping" in text:
-            return "ping_asset"
-        return None
-    
     async def _execute_plan_async(
         self,
         task_id: str,
@@ -1258,8 +1205,10 @@ class Orchestrator:
             "view_open_ports": "查看开放端口",
             "view_vulnerabilities": "查看漏洞",
             "view_findings": "查看合规发现",
+            "view_project_status": "查看项目合规状态",
             "view_compliance_score": "查看合规评分",
             "view_scan_history": "查看扫描历史",
+            "assessment_flow_action": "等保自查流程操作",
             "create_project": "创建项目",
             "list_projects": "列出项目",
             "update_project": "更新项目",
@@ -1599,7 +1548,7 @@ class Orchestrator:
         """用 AI 根据执行结果生成自然语言描述"""
         try:
             if self._has_security_tool_result(execution_result) or any(
-                result.get("capability") == "list_assets"
+                result.get("capability") in self.QUERY_CAPABILITIES | {"assessment_flow_action", "generate_html_report"}
                 for result in self._iter_execution_results(execution_result)
             ):
                 return self._generate_fallback_description(execution_result)
@@ -1630,7 +1579,7 @@ class Orchestrator:
             
             # 调用 LLM 生成描述
             messages = [
-                {"role": "system", "content": "你是 VeriSure 智能合规验证助手，负责描述任务执行结果。"},
+                {"role": "system", "content": "你是 CertiProof 企业等保合规自查助手，只根据提供的结构化结果生成简洁说明。"},
                 {"role": "user", "content": prompt},
             ]
             
@@ -1702,6 +1651,7 @@ class Orchestrator:
                     "error": sub.get("error"),
                     "error_detail": sub.get("error_detail"),
                     "label": sub.get("label"),
+                    "_is_sub_result": True,
                 }
 
     def _describe_result_line(self, capability: str, target: str, status: str, data: Dict, error: str = None) -> str:
@@ -1749,6 +1699,66 @@ class Orchestrator:
                 )
                 asset_lines.append(f"{name or '未命名资产'}（{asset_type}）：{value}，{verification}")
             return f"资产清单: 当前项目共有 {len(assets)} 个资产：\n- " + "\n- ".join(asset_lines)
+
+        if capability in {"view_project_status", "view_compliance_score"}:
+            return self._describe_project_status(data)
+
+        if capability == "view_findings":
+            findings = data.get("findings") or []
+            total = int(data.get("total") or len(findings))
+            if not findings:
+                return data.get("message") or "当前项目没有已记录的问题。"
+            open_count = sum(1 for item in findings if item.get("status") == "open")
+            fixed_count = sum(1 for item in findings if item.get("status") == "fixed")
+            unable_count = sum(1 for item in findings if item.get("judgment") == "not_tested")
+            severity_labels = {"critical": "严重", "high": "高", "medium": "中", "low": "低", "info": "提示"}
+            source_labels = {"technical": "技术", "document": "文档", "manual": "人工"}
+            lines = [f"项目问题：全部 {total}，当前列表中待处理 {open_count}，已修复 {fixed_count}，无法验证 {unable_count}。"]
+            for item in findings[:10]:
+                title = item.get("clause_name") or item.get("clause_id") or item.get("description") or "未命名问题"
+                lines.append(
+                    f"- [{severity_labels.get(item.get('severity'), item.get('severity') or '未分级')}] "
+                    f"{title}（{source_labels.get(item.get('source_type'), item.get('source_type') or '未知来源')}，"
+                    f"{'待处理' if item.get('status') == 'open' else '已修复'}）"
+                )
+            if total > len(findings[:10]):
+                lines.append(f"- 其余 {total - len(findings[:10])} 项请在“问题与复测”中查看。")
+            return "\n".join(lines)
+
+        if capability == "view_open_ports":
+            observations = data.get("observations") or []
+            if not observations:
+                return data.get("message") or "当前没有已保存的端口扫描结果。"
+            lines = [f"最近端口结果覆盖 {len(observations)} 个资产："]
+            for item in observations:
+                ports = item.get("open_ports") or []
+                port_text = ", ".join(str(port.get("port")) for port in ports[:15] if isinstance(port, dict)) or "未发现明确开放端口"
+                lines.append(f"- {item.get('target')}: {port_text}")
+            return "\n".join(lines)
+
+        if capability == "view_vulnerabilities":
+            observations = data.get("observations") or []
+            if not observations:
+                return data.get("message") or "当前没有已保存的漏洞扫描结果。"
+            lines = [f"最近漏洞结果覆盖 {len(observations)} 个资产："]
+            for item in observations:
+                if item.get("scan_completed") is False:
+                    lines.append(f"- {item.get('target')}: 未完成，{item.get('tool_error') or '无法形成漏洞结论'}")
+                else:
+                    lines.append(f"- {item.get('target')}: 发现 {len(item.get('findings') or [])} 个漏洞")
+            return "\n".join(lines)
+
+        if capability == "view_scan_history":
+            history = data.get("scan_history") or []
+            if not history:
+                return data.get("message") or "当前项目没有检测历史。"
+            lines = [f"最近 {len(history)} 条检测记录："]
+            for item in history:
+                lines.append(f"- #{item.get('id')} {item.get('task_type') or '检测'}：{item.get('status') or '未知'}，问题 {item.get('findings_count') or 0} 个")
+            return "\n".join(lines)
+
+        if capability in {"assessment_flow_action", "generate_html_report"}:
+            return data.get("message") or "流程操作已完成。"
 
         if capability in ("scan_ports", "masscan_scan"):
             open_ports = data.get("open_ports", [])
@@ -1836,6 +1846,93 @@ class Orchestrator:
             return f"{labels[capability]}{target_str}: 子任务成功 {summary.get('success', 0)}{warning_text}，失败 {summary.get('failed', 0)}，跳过 {summary.get('skipped', 0)}"
         return f"{capability}{target_str}: 执行完成"
 
+    def _describe_project_status(self, data: Dict) -> str:
+        if not data.get("found", True):
+            return f"项目合规状态：{data.get('message') or '当前项目不可用'}"
+        score = data.get("compliance_score")
+        score_text = "尚未形成有效评分" if score is None else f"{score:.1f} 分（{data.get('grade') or '未分级'}）"
+        findings = data.get("findings") or {}
+        current_phase = data.get("current_phase") or {}
+        report = data.get("report") or {}
+        progress = float(data.get("workflow_progress") or 0)
+        coverage = float(data.get("coverage") or 0)
+        open_count = int(findings.get("open") or 0)
+        unable_count = int(findings.get("unable") or 0)
+        view = data.get("view") or "status"
+
+        if view == "readiness":
+            if not data.get("assessment_id"):
+                conclusion = "当前无法判断是否具备通过条件：项目尚未开始等保自查。"
+            elif unable_count:
+                conclusion = f"当前不具备可靠的通过判断条件：仍有 {unable_count} 项无法验证。"
+            elif open_count:
+                conclusion = f"当前不建议认定已具备通过准备度：仍有 {open_count} 项待处理。"
+            elif progress < 100 or coverage < 100:
+                conclusion = "当前自查尚未完整闭环，不能据此判断已具备通过条件。"
+            else:
+                conclusion = "当前内部自查已闭环且没有待处理问题，具备进入正式测评准备阶段的基础条件。"
+            return (
+                f"{conclusion}\n"
+                f"- 合规评分：{score_text}；有效覆盖率：{coverage:.1f}%\n"
+                f"- 流程进度：{progress:.1f}%；待处理 {open_count}；无法验证 {unable_count}\n"
+                "- 说明：这是企业内部自查结论，不替代测评机构的正式结论。"
+            )
+
+        if view == "gaps":
+            gaps = data.get("major_gaps") or []
+            if not gaps:
+                if unable_count:
+                    return f"当前没有可可靠列出的已确认差距，但仍有 {unable_count} 项无法验证，应先补齐检测条件。"
+                return "当前没有待处理的已确认差距。"
+            severity_labels = {"critical": "严重", "high": "高", "medium": "中", "low": "低", "info": "提示"}
+            source_labels = {"technical": "技术", "document": "文档", "manual": "人工"}
+            lines = [f"当前主要差距（待处理 {open_count} 项，按问题类型展示前 {min(5, len(gaps))} 类）："]
+            for gap in gaps[:5]:
+                title = gap.get("title") or gap.get("description") or "未命名问题"
+                count = int(gap.get("count") or 1)
+                scopes = [str(value) for value in (gap.get("scopes") or []) if value]
+                scope_text = f"；范围：{', '.join(scopes[:3])}" if scopes else ""
+                descriptions = gap.get("descriptions") or ([gap.get("description")] if gap.get("description") else [])
+                detail = str(descriptions[0]).strip()[:160] if descriptions else ""
+                detail_text = f"；依据：{detail}" if detail else ""
+                lines.append(
+                    f"- [{severity_labels.get(gap.get('severity'), gap.get('severity') or '未分级')}] "
+                    f"{title}（{source_labels.get(gap.get('source_type'), gap.get('source_type') or '未知来源')}，{count} 项{scope_text}{detail_text}）"
+                )
+            if unable_count:
+                lines.append(f"- 另有 {unable_count} 项无法验证，不应视为通过。")
+            return "\n".join(lines)
+
+        if view == "executive":
+            severity = (data.get("finding_breakdown") or {}).get("severity") or {}
+            if unable_count:
+                judgment = "当前结论可信度受检测缺口影响"
+                next_step = "优先补齐无法验证项所需的网络、凭据或材料，再推进整改。"
+            elif open_count:
+                judgment = "项目自查已形成结果，但尚未完成风险闭环"
+                next_step = "按严重度处理主要差距，完成文档替换和技术复测后再生成正式报告。"
+            elif progress < 100:
+                judgment = "项目当前未完成全部自查流程"
+                next_step = "完成当前阶段和剩余检查，形成完整覆盖后再作最终判断。"
+            else:
+                judgment = "项目内部自查已完成闭环"
+                next_step = "保持资产和端口变化监测，并使用当前报告作为管理审阅依据。"
+            return (
+                f"管理层摘要：{judgment}。\n"
+                f"- 量化状态：流程 {progress:.1f}%，评分 {score_text}，有效覆盖率 {coverage:.1f}%\n"
+                f"- 风险存量：待处理 {open_count}，严重 {severity.get('critical', 0)}，高危 {severity.get('high', 0)}，无法验证 {unable_count}\n"
+                f"- 建议：{next_step}"
+            )
+
+        report_text = f"已生成 v{report.get('version')}" if report.get("available") else "尚未生成有效报告"
+        return (
+            f"项目合规状态：{data.get('project_name') or '当前项目'}\n"
+            f"- 流程进度：{progress:.1f}%，当前阶段：{current_phase.get('name') or '尚未开始'}\n"
+            f"- 合规评分：{score_text}，有效覆盖率：{coverage:.1f}%\n"
+            f"- 问题：全部 {findings.get('total', 0)}，待处理 {open_count}，已修复 {findings.get('fixed', 0)}，无法验证 {unable_count}\n"
+            f"- 报告：{report_text}"
+        )
+
     def _capability_label(self, capability: str) -> str:
         labels = {
             "scan_ports": "端口扫描",
@@ -1884,10 +1981,12 @@ class Orchestrator:
     def _generate_fallback_description(self, execution_result: Dict) -> str:
         """降级方案：硬编码的结果描述"""
         results = execution_result.get("results", [])
-        success_count = execution_result.get("success_count", 0)
-        failed_count = execution_result.get("failed_count", 0)
-        warning_count = execution_result.get("warning_count", 0)
-        total_count = len(results)
+        outcome_counts = self._execution_outcome_counts(execution_result)
+        success_count = outcome_counts["success"]
+        warning_count = outcome_counts["warning"]
+        failed_count = outcome_counts["failed"]
+        skipped_count = outcome_counts["skipped"]
+        total_count = sum(outcome_counts.values())
 
         parts = []
         for result in self._iter_execution_results(execution_result):
@@ -1898,7 +1997,16 @@ class Orchestrator:
             parts.append(self._describe_result_line(capability, target, status, data, result.get("error")))
 
         if parts:
-            summary = f"\n\n【汇总】共 {total_count} 个任务，成功 {success_count}，未完成/不可判定 {warning_count}，失败 {failed_count}"
+            deterministic = all(
+                result.get("capability") in self.QUERY_CAPABILITIES | {"assessment_flow_action", "generate_html_report"}
+                for result in results
+            )
+            if deterministic:
+                return "\n".join(parts)
+            summary = (
+                f"\n\n【汇总】共 {total_count} 个执行项，成功 {success_count}，"
+                f"未完成/不可判定 {warning_count}，失败 {failed_count}，跳过 {skipped_count}"
+            )
             return "\n".join(parts) + summary
 
         for result in results:
@@ -2047,6 +2155,25 @@ class Orchestrator:
 
         summary = f"\n\n【汇总】共 {total_count} 个任务，成功 {success_count}，未完成/不可判定 {warning_count}，失败 {failed_count}"
         return "\n".join(parts) + summary
+
+    def _execution_outcome_counts(self, execution_result: Dict) -> Dict[str, int]:
+        """Count terminal child outcomes instead of a composite wrapper status."""
+        counts = {"success": 0, "warning": 0, "failed": 0, "skipped": 0}
+        for result in execution_result.get("results", []):
+            data = self._result_payload(result)
+            sub_results = data.get("sub_results") if isinstance(data, dict) else None
+            terminal = sub_results if isinstance(sub_results, list) and sub_results else [result]
+            for item in terminal:
+                status = item.get("status") if isinstance(item, dict) else "failed"
+                if status in {"success", "completed"}:
+                    counts["success"] += 1
+                elif status == "skipped":
+                    counts["skipped"] += 1
+                elif status in {"failed", "cancelled"}:
+                    counts["failed"] += 1
+                else:
+                    counts["warning"] += 1
+        return counts
     
     def _format_history(self, history: List[Dict]) -> str:
         """格式化对话历史"""
@@ -2097,9 +2224,9 @@ class Orchestrator:
             error_detail = result.get("error_detail")
             if not error_detail and isinstance(data, dict):
                 error_detail = data.get("error_detail")
-            is_sub_result = bool(result.get("label"))
+            is_sub_result = bool(result.get("_is_sub_result") or result.get("label"))
 
-            if capability == "list_assets":
+            if capability in self.QUERY_CAPABILITIES:
                 display_status = "success" if status in ("success", "completed") else (
                     "warning" if status == "warning" else "failed"
                 )
@@ -2109,6 +2236,7 @@ class Orchestrator:
                     "display_status": display_status,
                     "message": data.get("message") or "",
                     "assets": data.get("assets") or [],
+                    "data": data,
                     "error": error,
                 }
                 continue
@@ -2141,6 +2269,16 @@ class Orchestrator:
                 # 判断显示状态 - 根据工具类型区分
                 if is_sub_result:
                     pass
+                elif isinstance(data.get("sub_results"), list) and data.get("sub_results"):
+                    child_statuses = [item.get("status") for item in data["sub_results"] if isinstance(item, dict)]
+                    if all(child in {"success", "completed"} for child in child_statuses):
+                        results["asset_results"][target]["display_status"] = "success"
+                    else:
+                        results["asset_results"][target]["display_status"] = "warning"
+                        counts = self._execution_outcome_counts({"results": [result]})
+                        results["asset_results"][target]["error"] = (
+                            f"组合检测未完整覆盖：未完成 {counts['warning']}，失败 {counts['failed']}，跳过 {counts['skipped']}"
+                        )
                 elif data.get("scan_completed") is False or data.get("success") is False or data.get("reachable") is False:
                     results["asset_results"][target]["display_status"] = "warning"
                     results["asset_results"][target]["error"] = (
@@ -2322,10 +2460,10 @@ class Orchestrator:
                     results["asset_results"][target]["error_detail"] = error_detail
 
         asset_values = list(results["asset_results"].values())
-        quality_values = asset_values or ([results["query_result"]] if results["query_result"] else [])
-        success_count = sum(1 for item in quality_values if item.get("display_status") == "success")
-        warning_count = sum(1 for item in quality_values if item.get("display_status") == "warning")
-        failed_count = sum(1 for item in quality_values if item.get("display_status") == "failed")
+        outcome_counts = self._execution_outcome_counts(execution_result)
+        success_count = outcome_counts["success"]
+        warning_count = outcome_counts["warning"] + outcome_counts["skipped"]
+        failed_count = outcome_counts["failed"]
         incomplete_targets = [
             target
             for target, item in results["asset_results"].items()
@@ -2347,6 +2485,7 @@ class Orchestrator:
             "success": success_count,
             "warning": warning_count,
             "failed": failed_count,
+            "skipped": outcome_counts["skipped"],
             "incomplete_targets": incomplete_targets,
             "note": note,
         }

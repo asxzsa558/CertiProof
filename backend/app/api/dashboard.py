@@ -68,6 +68,64 @@ async def resolve_organization_id(
     return first.organization_id
 
 
+async def organization_rbac_snapshot(
+    db: AsyncSession,
+    org_id: int,
+    permissions: set[str],
+) -> dict:
+    if "role:read" not in permissions:
+        return {"roles": [], "members": [], "audits": []}
+
+    role_result = await db.execute(
+        select(OrganizationRole)
+        .where(OrganizationRole.organization_id == org_id)
+        .order_by(OrganizationRole.is_system.desc(), OrganizationRole.created_at.asc())
+    )
+    member_result = await db.execute(
+        select(OrganizationMember, User)
+        .join(User, User.id == OrganizationMember.user_id)
+        .where(OrganizationMember.organization_id == org_id)
+        .order_by(OrganizationMember.joined_at.asc())
+    )
+    audit_result = await db.execute(
+        select(OrganizationRoleAudit)
+        .where(OrganizationRoleAudit.organization_id == org_id)
+        .order_by(OrganizationRoleAudit.created_at.desc())
+        .limit(5)
+    )
+    return {
+        "roles": [
+            {
+                "id": role.id,
+                "name": role.name,
+                "description": role.description,
+                "permission_count": len(json.loads(role.permissions or "[]")),
+                "is_system": role.is_system,
+            }
+            for role in role_result.scalars().all()
+        ],
+        "members": [
+            {
+                "id": member.id,
+                "name": user.full_name or user.username,
+                "email": user.email,
+                "role": member.role,
+                "custom_role_id": member.custom_role_id,
+            }
+            for member, user in member_result.all()
+        ],
+        "audits": [
+            {
+                "id": audit.id,
+                "action": audit.action,
+                "detail": audit.detail,
+                "created_at": audit.created_at.isoformat(),
+            }
+            for audit in audit_result.scalars().all()
+        ],
+    }
+
+
 @router.get("/overview", response_model=DashboardResponse)
 async def get_dashboard_overview(
     organization_id: Optional[int] = Query(
@@ -286,6 +344,53 @@ def _enum_value(value):
     return getattr(value, "value", value)
 
 
+TOPOLOGY_RISK_SEVERITIES = ("critical", "high", "medium")
+
+
+def _is_incomplete_technical_finding(finding) -> bool:
+    return (
+        finding.clause_name == "自动化技术检测"
+        and "检测未完成（不代表通过）" in (finding.description or "")
+    )
+
+
+def _actionable_risk_summary(findings) -> dict:
+    counts = {"critical": 0, "high": 0, "medium": 0}
+    for finding in findings:
+        severity = _enum_value(finding.severity)
+        if (
+            _enum_value(finding.status) == FindingStatus.OPEN.value
+            and severity in counts
+            and not _is_incomplete_technical_finding(finding)
+        ):
+            counts[severity] += 1
+    return {
+        "risk_count": sum(counts.values()),
+        "critical_count": counts["critical"],
+        "high_count": counts["high"],
+        "medium_count": counts["medium"],
+    }
+
+
+def _risk_level(stats: dict) -> str:
+    if stats.get("critical_count", 0):
+        return "critical"
+    if stats.get("high_count", 0):
+        return "high"
+    if stats.get("risk_count", 0):
+        return "warning"
+    return "normal"
+
+
+def _asset_topology_status(stats: dict, verification, has_observation: bool) -> str:
+    risk_level = _risk_level(stats)
+    if risk_level != "normal":
+        return risk_level
+    if _enum_value(verification) != "verified" or not has_observation:
+        return "unverified"
+    return "normal"
+
+
 def _topology_services(summary):
     """Extract only observed open services from normalized scan summaries."""
     services = []
@@ -311,7 +416,13 @@ def _topology_services(summary):
             key = f"{number}/{protocol}"
             if key not in seen:
                 seen.add(key)
-                services.append({"id": key, "label": key, "service": service or None})
+                services.append({
+                    "id": key,
+                    "label": key,
+                    "port": number,
+                    "protocol": protocol,
+                    "service": service or None,
+                })
         for key in ("data", "result", "results", "scan_results"):
             visit(value.get(key), depth + 1)
 
@@ -430,6 +541,7 @@ async def get_organization_command_dashboard(
     )
 
     if not project_ids:
+        rbac = await organization_rbac_snapshot(db, org_id, current_permissions)
         return {
             "summary": {
                 "project_count": 0,
@@ -449,7 +561,7 @@ async def get_organization_command_dashboard(
             "exposure_topology": {"nodes": [], "edges": [], "top_risky_assets": [], "risk_intelligence": []},
             "tool_health": [],
             "risk_queue": [],
-            "rbac": {"roles": [], "members": [], "audits": []},
+            "rbac": rbac,
         }
 
     asset_count_result = await db.execute(select(func.count(Asset.id)).where(Asset.project_id.in_(project_ids)))
@@ -460,6 +572,7 @@ async def get_organization_command_dashboard(
             Finding.project_id.in_(project_ids),
             Finding.severity.in_(["critical", "high"]),
             Finding.status.in_(current_risk_statuses),
+            ~incomplete_technical_finding,
         )
     )
     high_risk_count = high_risk_result.scalar() or 0
@@ -482,6 +595,7 @@ async def get_organization_command_dashboard(
 
     progress_values = []
     project_matrix = []
+    project_risk_stats = {}
     report_artifacts = (await db.execute(
         select(ReportArtifact)
         .where(ReportArtifact.project_id.in_(project_ids))
@@ -516,15 +630,9 @@ async def get_organization_command_dashboard(
 
         project_findings_result = await db.execute(select(Finding).where(Finding.project_id == project.id))
         project_findings = project_findings_result.scalars().all()
-        risk_count = len([
-            finding for finding in project_findings
-            if _enum_value(finding.severity) in ("critical", "high", "medium")
-            and finding.status in current_risk_statuses
-            and not (
-                finding.clause_name == "自动化技术检测"
-                and "检测未完成（不代表通过）" in (finding.description or "")
-            )
-        ])
+        risk_stats = _actionable_risk_summary(project_findings)
+        project_risk_stats[project.id] = risk_stats
+        risk_count = risk_stats["risk_count"]
 
         evidence_result = await db.execute(select(func.count(Evidence.id)).where(Evidence.project_id == project.id))
         evidence_count = evidence_result.scalar() or 0
@@ -586,11 +694,18 @@ async def get_organization_command_dashboard(
             func.coalesce(func.sum(case((and_(
                 Finding.status.in_(current_risk_statuses),
                 Finding.severity == "critical",
+                ~incomplete_technical_finding,
             ), 1), else_=0)), 0).label("critical_count"),
             func.coalesce(func.sum(case((and_(
                 Finding.status.in_(current_risk_statuses),
                 Finding.severity == "high",
+                ~incomplete_technical_finding,
             ), 1), else_=0)), 0).label("high_count"),
+            func.coalesce(func.sum(case((and_(
+                Finding.status.in_(current_risk_statuses),
+                Finding.severity == "medium",
+                ~incomplete_technical_finding,
+            ), 1), else_=0)), 0).label("medium_count"),
         )
         .select_from(ScanTask)
         .outerjoin(Finding, Finding.scan_task_id == ScanTask.id)
@@ -603,13 +718,14 @@ async def get_organization_command_dashboard(
             "risk_count": int(row.risk_count or 0),
             "critical_count": int(row.critical_count or 0),
             "high_count": int(row.high_count or 0),
+            "medium_count": int(row.medium_count or 0),
         }
         for row in risk_stats_result.all()
         if row.asset_id is not None
     }
 
     asset_summary_result = await db.execute(
-        select(ScanTask.asset_id, ScanTask.result_summary)
+        select(ScanTask.asset_id, ScanTask.result_summary, ScanTask.status, ScanTask.completed_at, ScanTask.created_at)
         .where(
             ScanTask.project_id.in_(project_ids),
             ScanTask.asset_id.is_not(None),
@@ -618,45 +734,96 @@ async def get_organization_command_dashboard(
         .order_by(ScanTask.completed_at.desc().nullslast(), ScanTask.id.desc())
     )
     asset_services = {}
-    for asset_id, result_summary in asset_summary_result.all():
-        if asset_id in asset_services:
-            continue
-        services = _topology_services(result_summary)
-        if services:
-            asset_services[asset_id] = services
+    asset_scan_meta = {}
+    for asset_id, result_summary, scan_status, completed_at, created_at in asset_summary_result.all():
+        observed_at = (completed_at or created_at).isoformat() if completed_at or created_at else None
+        if asset_id not in asset_scan_meta:
+            asset_scan_meta[asset_id] = {
+                "status": _enum_value(scan_status),
+                "observed_at": observed_at,
+            }
+        if asset_id not in asset_services:
+            services = _topology_services(result_summary)
+            if services:
+                asset_services[asset_id] = [
+                    {**service, "observed_at": observed_at}
+                    for service in services
+                ]
 
     assets_by_project = {}
     for asset, project in asset_rows:
         assets_by_project.setdefault(project.id, []).append((asset, project))
 
-    nodes = [{"id": f"org-{org_id}", "label": "当前组织", "type": "organization", "status": "normal"}]
+    project_matrix_by_id = {item["project_id"]: item for item in project_matrix}
+    project_topology = {}
+    for project in projects:
+        project_assets = assets_by_project.get(project.id, [])
+        total_stats = project_risk_stats.get(project.id, {"risk_count": 0})
+        asset_risk_count = sum(
+            asset_risk_stats.get(asset.id, {}).get("risk_count", 0)
+            for asset, _ in project_assets
+        )
+        matrix = project_matrix_by_id.get(project.id, {})
+        project_topology[project.id] = {
+            **total_stats,
+            "asset_risk_count": asset_risk_count,
+            "unassigned_risk_count": max(total_stats.get("risk_count", 0) - asset_risk_count, 0),
+            "verified_asset_count": sum(
+                1 for asset, _ in project_assets
+                if _enum_value(asset.verification_status) == "verified"
+            ),
+            "observed_service_count": sum(
+                len(asset_services.get(asset.id, [])) for asset, _ in project_assets
+            ),
+            "progress": matrix.get("progress", 0),
+            "stage": matrix.get("stage", "差距分析"),
+            "evidence_count": matrix.get("evidence_count", 0),
+            "report": matrix.get("report", {"available": False}),
+        }
+
+    organization_stats = {
+        "risk_count": sum(item.get("risk_count", 0) for item in project_topology.values()),
+        "asset_risk_count": sum(item.get("asset_risk_count", 0) for item in project_topology.values()),
+        "unassigned_risk_count": sum(item.get("unassigned_risk_count", 0) for item in project_topology.values()),
+        "critical_count": sum(item.get("critical_count", 0) for item in project_topology.values()),
+        "high_count": sum(item.get("high_count", 0) for item in project_topology.values()),
+        "medium_count": sum(item.get("medium_count", 0) for item in project_topology.values()),
+    }
+    nodes = [{
+        "id": f"org-{org_id}",
+        "label": "当前组织",
+        "type": "organization",
+        "status": _risk_level(organization_stats),
+        "project_count": len(projects),
+        "asset_count": int(asset_count),
+        "verified_asset_count": sum(item.get("verified_asset_count", 0) for item in project_topology.values()),
+        "observed_service_count": sum(item.get("observed_service_count", 0) for item in project_topology.values()),
+        **organization_stats,
+    }]
     edges = []
     for project in projects:
         project_assets = assets_by_project.get(project.id, [])
-        project_risk_count = sum(asset_risk_stats.get(asset.id, {}).get("risk_count", 0) for asset, _ in project_assets)
+        stats = project_topology[project.id]
         project_node = f"project-{project.id}"
         nodes.append({
             "id": project_node,
             "project_id": project.id,
             "label": project.name,
             "type": "project",
-            "status": "warning" if project_risk_count else "normal",
+            "status": _risk_level(stats),
             "asset_count": len(project_assets),
-            "risk_count": project_risk_count,
+            **stats,
         })
         edges.append({"source": f"org-{org_id}", "target": project_node, "kind": "contains"})
     top_risky_assets = []
     for asset, project in asset_rows:
         stats = asset_risk_stats.get(asset.id, {})
         risk_count = stats.get("risk_count", 0)
-        if stats.get("critical_count", 0):
-            status_name = "critical"
-        elif stats.get("high_count", 0):
-            status_name = "high"
-        elif risk_count:
-            status_name = "warning"
-        else:
-            status_name = "normal"
+        status_name = _asset_topology_status(
+            stats,
+            asset.verification_status,
+            asset.id in asset_scan_meta,
+        )
         asset_node = f"asset-{asset.id}"
         nodes.append({
             "id": asset_node,
@@ -664,11 +831,22 @@ async def get_organization_command_dashboard(
             "project_id": project.id,
             "project_name": project.name,
             "label": asset.value,
+            "asset_name": asset.name,
+            "value": asset.value,
             "type": _enum_value(asset.asset_type),
             "status": status_name,
             "verification": _enum_value(asset.verification_status),
+            "verification_method": _enum_value(asset.verification_method),
+            "verified_at": asset.verified_at.isoformat() if asset.verified_at else None,
+            "is_active": bool(asset.is_active),
+            "created_at": asset.created_at.isoformat() if asset.created_at else None,
+            "updated_at": asset.updated_at.isoformat() if asset.updated_at else None,
+            "last_scan": asset_scan_meta.get(asset.id),
             "risk_count": risk_count,
             "finding_count": stats.get("finding_count", 0),
+            "critical_count": stats.get("critical_count", 0),
+            "high_count": stats.get("high_count", 0),
+            "medium_count": stats.get("medium_count", 0),
             "services": asset_services.get(asset.id, []),
         })
         edges.append({"source": f"project-{project.id}", "target": asset_node, "kind": "contains"})
@@ -689,10 +867,10 @@ async def get_organization_command_dashboard(
         .where(
             Finding.project_id.in_(project_ids),
             Finding.status.in_(current_risk_statuses),
+            Finding.severity.in_(TOPOLOGY_RISK_SEVERITIES),
             ~incomplete_technical_finding,
         )
         .order_by(Finding.updated_at.desc())
-        .limit(24)
     )
     risk_intelligence = [
         {
@@ -742,24 +920,7 @@ async def get_organization_command_dashboard(
         for finding, project in risk_result.all()
     ]
 
-    role_result = await db.execute(
-        select(OrganizationRole)
-        .where(OrganizationRole.organization_id == org_id)
-        .order_by(OrganizationRole.is_system.desc(), OrganizationRole.created_at.asc())
-    )
-    roles = role_result.scalars().all()
-    member_result = await db.execute(
-        select(OrganizationMember, User)
-        .join(User, User.id == OrganizationMember.user_id)
-        .where(OrganizationMember.organization_id == org_id)
-        .order_by(OrganizationMember.joined_at.asc())
-    )
-    audit_result = await db.execute(
-        select(OrganizationRoleAudit)
-        .where(OrganizationRoleAudit.organization_id == org_id)
-        .order_by(OrganizationRoleAudit.created_at.desc())
-        .limit(5)
-    )
+    rbac = await organization_rbac_snapshot(db, org_id, current_permissions)
 
     return {
         "summary": {
@@ -785,37 +946,7 @@ async def get_organization_command_dashboard(
         },
         "tool_health": tool_health,
         "risk_queue": risk_queue,
-        "rbac": {
-            "roles": [
-                {
-                    "id": role.id,
-                    "name": role.name,
-                    "description": role.description,
-                    "permission_count": len(json.loads(role.permissions or "[]")),
-                    "is_system": role.is_system,
-                }
-                for role in roles
-            ],
-            "members": [
-                {
-                    "id": member.id,
-                    "name": user.full_name or user.username,
-                    "email": user.email,
-                    "role": member.role,
-                    "custom_role_id": member.custom_role_id,
-                }
-                for member, user in member_result.all()
-            ],
-            "audits": [
-                {
-                    "id": audit.id,
-                    "action": audit.action,
-                    "detail": audit.detail,
-                    "created_at": audit.created_at.isoformat(),
-                }
-                for audit in audit_result.scalars().all()
-            ],
-        },
+        "rbac": rbac,
     }
 
 

@@ -6,7 +6,8 @@
   background: linear-gradient(145deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.04));
   border: 1px solid rgba(99, 102, 241, 0.15);
   border-radius: 16px;
-  backdrop-filter: blur(10px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   transition: all 0.3s ease;
 }
 

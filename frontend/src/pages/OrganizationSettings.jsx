@@ -1,49 +1,47 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
 import {
-  Spin,
-  Tag,
-  Tooltip,
+  Avatar,
+  Button,
+  Checkbox,
   Empty,
-  Modal,
   Form,
   Input,
-  Select,
-  message,
+  Modal,
   Popconfirm,
-  Avatar,
+  Select,
+  Spin,
+  Tag,
+  message,
 } from 'antd'
 import {
-  ArrowLeftOutlined,
-  BankOutlined,
-  UserOutlined,
-  MailOutlined,
+  CrownOutlined,
   DeleteOutlined,
   EditOutlined,
+  ExclamationCircleOutlined,
+  LockOutlined,
+  MailOutlined,
   PlusOutlined,
-  ReloadOutlined,
-  CheckOutlined,
-  CrownOutlined,
-  HddOutlined,
-  WarningOutlined,
+  SafetyCertificateOutlined,
+  TeamOutlined,
+  UserOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
 import { useAuthStore } from '../store/authStore'
-import VeriSureLogo from '../components/VeriSureLogo'
+import OrganizationSettingsLayout from '../components/OrganizationSettingsLayout'
 import './OrganizationSettings.css'
 
-const ROLE_COLORS = {
-  admin: '#d4af37',
-  manager: '#00b4d8',
-  member: '#52c41a',
-  viewer: '#666',
+const ROLE_LABELS = {
+  admin: '组织管理员',
+  manager: '组织经理',
+  member: '组织成员',
+  viewer: '只读成员',
 }
 
-const ROLE_LABELS = {
-  admin: 'ADMIN',
-  manager: 'MANAGER',
-  member: 'MEMBER',
-  viewer: 'VIEWER',
+const ROLE_COLORS = {
+  admin: 'gold',
+  manager: 'cyan',
+  member: 'green',
+  viewer: 'default',
 }
 
 const PERMISSION_LABELS = {
@@ -70,486 +68,498 @@ const PERMISSION_LABELS = {
   'tool:diagnose': '工具诊断',
 }
 
-const formatBytes = (value = 0) => {
-  if (!value) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
-  return `${(value / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`
+const PERMISSION_GROUP_LABELS = {
+  project: '项目管理',
+  asset: '资产管理',
+  scan: '安全检测',
+  assessment: '测评与证据',
+  report: '报告中心',
+  rbac: '角色授权',
+  system: '系统配置',
 }
 
-function OrgPanel({ label, value, sub, accentColor }) {
-  return (
-    <div className="org-panel" style={{ '--accent': accentColor }}>
-      <div className="org-panel-corner-tl" />
-      <div className="org-panel-corner-tr" />
-      <div className="org-panel-corner-bl" />
-      <div className="org-panel-corner-br" />
-      <div className="org-panel-scanline" />
-      <div className="org-panel-label">{label}</div>
-      <div className="org-panel-value">{value}</div>
-      {sub && <div className="org-panel-sub">{sub}</div>}
-    </div>
-  )
+const AUDIT_LABELS = {
+  create_role: '创建角色',
+  update_role: '更新角色',
+  delete_role: '删除角色',
+  add_member: '添加成员',
+  assign_member_role: '调整成员权限',
+  remove_member: '移除成员',
 }
 
 export default function OrganizationSettings() {
-  const navigate = useNavigate()
-  const lastProjectId = localStorage.getItem('lastProjectId')
-  const [loading, setLoading] = useState(true)
-  const [org, setOrg] = useState(null)
-  const [members, setMembers] = useState([])
-  const [roles, setRoles] = useState([])
-  const [editMode, setEditMode] = useState(false)
-  const [editForm] = Form.useForm()
-  const [addMemberModalOpen, setAddMemberModalOpen] = useState(false)
-  const [addMemberForm] = Form.useForm()
-  const [storage, setStorage] = useState(null)
-  const [initializing, setInitializing] = useState(false)
-
   const currentOrgId = useAuthStore((state) => state.currentOrgId)
   const organizations = useAuthStore((state) => state.organizations)
-  const currentOrg = organizations.find((o) => o.id === currentOrgId)
+  const user = useAuthStore((state) => state.user)
+  const currentOrg = organizations.find((org) => org.id === currentOrgId)
+  const [loading, setLoading] = useState(true)
+  const [org, setOrg] = useState(null)
+  const [roles, setRoles] = useState([])
+  const [members, setMembers] = useState([])
+  const [audits, setAudits] = useState([])
+  const [permissionGroups, setPermissionGroups] = useState({})
+  const [permissions, setPermissions] = useState([])
+  const [permissionScope, setPermissionScope] = useState('受限权限')
+  const [roleModalOpen, setRoleModalOpen] = useState(false)
+  const [editingRole, setEditingRole] = useState(null)
+  const [memberModalOpen, setMemberModalOpen] = useState(false)
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [roleForm] = Form.useForm()
+  const [memberForm] = Form.useForm()
+  const [profileForm] = Form.useForm()
 
-  const loadOrg = async () => {
+  const permissionSet = useMemo(() => new Set(permissions), [permissions])
+  const canReadRoles = currentOrg?.role === 'admin' || permissionSet.has('role:read')
+  const canManageRoles = currentOrg?.role === 'admin' || permissionSet.has('role:manage')
+  const canManageMembers = currentOrg?.role === 'admin' || permissionSet.has('member:manage')
+  const canEditOrganization = currentOrg?.role === 'admin'
+  const adminCount = members.filter((member) => member.role === 'admin').length
+
+  const loadData = async () => {
     if (!currentOrgId) return
+    setLoading(true)
     try {
-      const res = await api.get(`/organizations/${currentOrgId}`)
-      setOrg(res.data)
-      editForm.setFieldsValue({
-        name: res.data.name,
-        description: res.data.description,
+      const [dashboardResult, orgResult] = await Promise.all([
+        api.get('/dashboard/organization-command', { params: { organization_id: currentOrgId } }),
+        api.get(`/organizations/${currentOrgId}`),
+      ])
+      const currentPermissions = dashboardResult.data?.current_role?.permissions || []
+      const mayReadRoles = currentOrg?.role === 'admin' || currentPermissions.includes('role:read')
+      setPermissions(currentPermissions)
+      setPermissionScope(dashboardResult.data?.current_role?.permission_scope || '受限权限')
+      setOrg(orgResult.data)
+      profileForm.setFieldsValue({
+        name: orgResult.data.name,
+        description: orgResult.data.description,
       })
-    } catch (err) {
-      message.error('加载组织信息失败')
-    }
-  }
 
-  const loadMembers = async () => {
-    if (!currentOrgId) return
-    try {
-      const res = await api.get(`/organizations/${currentOrgId}/members`)
-      setMembers(res.data)
-    } catch (err) {
-      message.error('加载成员列表失败')
-    }
-  }
+      if (!mayReadRoles) {
+        setRoles([])
+        setMembers([])
+        setAudits([])
+        setPermissionGroups({})
+        return
+      }
 
-  const loadRoles = async () => {
-    if (!currentOrgId) return
-    try {
-      const res = await api.get(`/organizations/${currentOrgId}/roles`)
-      setRoles(res.data || [])
-    } catch (err) {
-      setRoles([])
-    }
-  }
-
-  const loadStorage = async () => {
-    if (!currentOrgId || currentOrg?.role !== 'admin') return
-    try {
-      const res = await api.get(`/organizations/${currentOrgId}/storage`)
-      setStorage(res.data)
-    } catch (err) {
-      setStorage({ error: err.response?.data?.detail || '容量信息加载失败' })
+      const [rolesResult, membersResult, permissionsResult, auditsResult] = await Promise.all([
+        api.get(`/organizations/${currentOrgId}/roles`),
+        api.get(`/organizations/${currentOrgId}/members`),
+        api.get(`/organizations/${currentOrgId}/permissions`),
+        api.get(`/organizations/${currentOrgId}/role-audits`),
+      ])
+      setRoles(rolesResult.data || [])
+      setMembers(membersResult.data || [])
+      setPermissionGroups(permissionsResult.data?.permission_groups || {})
+      setAudits(auditsResult.data || [])
+    } catch (error) {
+      message.error(error.response?.data?.detail || '组织权限信息加载失败')
+    } finally {
+      setLoading(false)
     }
   }
 
   useEffect(() => {
-    Promise.all([loadOrg(), loadMembers(), loadRoles(), loadStorage()]).finally(() => setLoading(false))
-  }, [currentOrgId, currentOrg?.role])
+    loadData()
+  }, [currentOrgId])
 
-  const handleSave = async () => {
+  const openRoleModal = (role = null) => {
+    setEditingRole(role)
+    roleForm.setFieldsValue({
+      name: role?.name || '',
+      description: role?.description || '',
+      permissions: role?.permissions || [],
+    })
+    setRoleModalOpen(true)
+  }
+
+  const saveRole = async () => {
     try {
-      const values = await editForm.validateFields()
+      const values = await roleForm.validateFields()
+      if (editingRole) {
+        await api.put(`/organizations/${currentOrgId}/roles/${editingRole.id}`, values)
+        message.success('角色模板已更新')
+      } else {
+        await api.post(`/organizations/${currentOrgId}/roles`, values)
+        message.success('角色模板已创建')
+      }
+      setRoleModalOpen(false)
+      setEditingRole(null)
+      roleForm.resetFields()
+      await loadData()
+    } catch (error) {
+      if (error.response) message.error(error.response.data?.detail || '角色保存失败')
+    }
+  }
+
+  const deleteRole = async (role) => {
+    try {
+      await api.delete(`/organizations/${currentOrgId}/roles/${role.id}`)
+      message.success('角色模板已删除，相关成员已恢复为基础角色权限')
+      await loadData()
+    } catch (error) {
+      message.error(error.response?.data?.detail || '角色删除失败')
+    }
+  }
+
+  const updateMember = async (member, changes) => {
+    const role = changes.role ?? member.role
+    const customRoleId = role === 'admin'
+      ? null
+      : Object.prototype.hasOwnProperty.call(changes, 'custom_role_id')
+        ? changes.custom_role_id
+        : member.custom_role_id
+    try {
+      await api.put(`/organizations/${currentOrgId}/members/${member.id}`, {
+        role,
+        custom_role_id: customRoleId || null,
+      })
+      message.success('成员权限已更新')
+      await loadData()
+    } catch (error) {
+      message.error(error.response?.data?.detail || '成员权限更新失败')
+    }
+  }
+
+  const addMember = async () => {
+    try {
+      const values = await memberForm.validateFields()
+      await api.post(`/organizations/${currentOrgId}/members`, {
+        ...values,
+        custom_role_id: values.role === 'admin' ? null : values.custom_role_id || null,
+      })
+      message.success('成员已添加')
+      setMemberModalOpen(false)
+      memberForm.resetFields()
+      await loadData()
+    } catch (error) {
+      if (error.response) message.error(error.response.data?.detail || '成员添加失败')
+    }
+  }
+
+  const removeMember = async (member) => {
+    try {
+      await api.delete(`/organizations/${currentOrgId}/members/${member.id}`)
+      message.success('成员已移除')
+      await loadData()
+    } catch (error) {
+      message.error(error.response?.data?.detail || '成员移除失败')
+    }
+  }
+
+  const saveOrganization = async () => {
+    try {
+      const values = await profileForm.validateFields()
       await api.put(`/organizations/${currentOrgId}`, values)
       message.success('组织信息已更新')
-      setEditMode(false)
-      loadOrg()
-    } catch (err) {
-      if (err.response) {
-        message.error(err.response.data?.detail || '更新失败')
-      }
+      setProfileModalOpen(false)
+      await loadData()
+    } catch (error) {
+      if (error.response) message.error(error.response.data?.detail || '组织信息更新失败')
     }
   }
-
-  const handleAddMember = async () => {
-    try {
-      const values = await addMemberForm.validateFields()
-      await api.post(`/organizations/${currentOrgId}/members`, values)
-      message.success('成员已添加')
-      setAddMemberModalOpen(false)
-      addMemberForm.resetFields()
-      loadMembers()
-    } catch (err) {
-      if (err.response) {
-        message.error(err.response.data?.detail || '添加失败')
-      }
-    }
-  }
-
-  const handleUpdateRole = async (memberId, newRole) => {
-    try {
-      await api.put(`/organizations/${currentOrgId}/members/${memberId}`, {
-        role: newRole,
-      })
-      message.success('角色已更新')
-      loadMembers()
-    } catch (err) {
-      message.error(err.response?.data?.detail || '更新失败')
-    }
-  }
-
-  const handleRemoveMember = async (memberId) => {
-    try {
-      await api.delete(`/organizations/${currentOrgId}/members/${memberId}`)
-      message.success('成员已移除')
-      loadMembers()
-    } catch (err) {
-      message.error(err.response?.data?.detail || '移除失败')
-    }
-  }
-
-  const handleInitializeBusinessData = () => {
-    let confirmation = ''
-    Modal.confirm({
-      title: '初始化组织业务数据',
-      icon: <WarningOutlined />,
-      width: 560,
-      content: (
-        <div className="org-init-confirm">
-          <p>该操作会删除组织下全部项目、资产、测评、检测结果、对话、文档、向量和证据图谱。组织成员、角色模板和标准图谱会保留。</p>
-          <span>输入组织名称 <b>{org.name}</b> 确认：</span>
-          <Input onChange={(event) => { confirmation = event.target.value }} />
-        </div>
-      ),
-      okText: '初始化业务数据',
-      cancelText: '取消',
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        if (confirmation !== org.name) {
-          message.error('组织名称不匹配')
-          return Promise.reject(new Error('confirmation mismatch'))
-        }
-        setInitializing(true)
-        try {
-          const response = await api.post(`/organizations/${currentOrgId}/initialize`, { confirmation })
-          const failed = response.data?.failed_file_paths?.length || 0
-          message.success(failed ? `业务数据已初始化，${failed} 个物理文件待重试` : '组织业务数据已初始化')
-          await loadStorage()
-        } catch (err) {
-          message.error(err.response?.data?.detail || '组织业务数据初始化失败')
-          return Promise.reject(err)
-        } finally {
-          setInitializing(false)
-        }
-      },
-    })
-  }
-
-  if (loading || !org) {
-    return (
-      <div className="org-loading">
-        <Spin size="large" />
-        <div className="org-loading-text">LOADING ORG DATA...</div>
-      </div>
-    )
-  }
-
-  const adminCount = members.filter((m) => m.role === 'admin').length
-  const isAdmin = currentOrg?.role === 'admin'
 
   return (
-    <div className="org-root">
-      <div className="org-bg-grid" />
-      <div className="org-bg-logo">
-        <BankOutlined />
-      </div>
-      <div className="org-bg-vignette" />
+    <OrganizationSettingsLayout
+      activeKey="access"
+      eyebrow="治理中心 / 访问控制"
+      title="组织与角色权限"
+      description="统一管理角色模板、成员授权和权限变更记录。"
+      permissions={permissions}
+      permissionScope={permissionScope}
+      loading={loading}
+      onRefresh={loadData}
+    >
+      {loading ? (
+        <div className="access-loading"><Spin size="large" /></div>
+      ) : !canReadRoles ? (
+        <div className="settings-access-denied">
+          <ExclamationCircleOutlined />
+          <h2>无权访问角色权限</h2>
+          <p>当前角色缺少“查看角色”权限。你仍可在个人资料中查看自己的有效权限。</p>
+        </div>
+      ) : (
+        <>
+          <section className="access-kpis">
+            <div><TeamOutlined /><span><strong>{members.length}</strong><em>组织成员</em></span></div>
+            <div><SafetyCertificateOutlined /><span><strong>{roles.length}</strong><em>角色模板</em></span></div>
+            <div><LockOutlined /><span><strong>{permissions.length}</strong><em>我的有效权限</em></span></div>
+            <div><CrownOutlined /><span><strong>{adminCount}</strong><em>组织管理员</em></span></div>
+          </section>
 
-      <header className="org-header">
-        <button className="org-back-btn" onClick={() => navigate(lastProjectId ? `/projects/${lastProjectId}` : '/dashboard')}>
-          <ArrowLeftOutlined /> {lastProjectId ? '返回项目对话' : '返回 Dashboard'}
-        </button>
-        <div className="org-header-title">
-          <VeriSureLogo size={28} />
-          <div className="org-header-text">
-            <span className="org-header-name">ORGANIZATION SETTINGS</span>
-            <span className="org-header-sub">// {currentOrg?.name || org.name}</span>
-          </div>
-        </div>
-        <button className="org-icon-btn" onClick={() => { loadOrg(); loadMembers(); loadRoles(); }}>
-          <ReloadOutlined />
-        </button>
-      </header>
-
-      <section className="org-section">
-        <div className="org-section-header">
-          <span className="org-section-tag">// OVERVIEW</span>
-          <span className="org-section-title">组织概况</span>
-        </div>
-        <div className="org-stats-grid">
-          <OrgPanel label="ORG NAME" value={org.name} accentColor="#00d4ff" />
-          <OrgPanel label="ORG CODE" value={org.code} accentColor="#0ea5e9" />
-          <OrgPanel
-            label="MEMBERS"
-            value={members.length}
-            sub={`ADMINS ${adminCount}`}
-            accentColor="#fbbf24"
-          />
-          <OrgPanel
-            label="STATUS"
-            value={org.is_active ? 'ACTIVE' : 'INACTIVE'}
-            accentColor={org.is_active ? '#10b981' : '#ef4444'}
-          />
-        </div>
-      </section>
-
-      <section className="org-section">
-        <div className="org-section-header">
-          <span className="org-section-tag">// ACCESS MATRIX</span>
-          <span className="org-section-title">角色权限矩阵</span>
-          <span className="org-section-meta">{roles.length} ROLES</span>
-        </div>
-        <div className="org-role-matrix">
-          {roles.map((role) => (
-            <div className="org-role-card" key={role.id}>
-              <div className="org-role-head">
-                <div>
-                  <strong>{role.name}</strong>
-                  <span>{role.description || '未配置说明'}</span>
-                </div>
-                <Tag color={role.is_system ? 'cyan' : 'gold'}>{role.permissions.length} 权限</Tag>
-              </div>
-              <div className="org-permission-list">
-                {role.permissions.map((permission) => (
-                  <span key={permission}>{PERMISSION_LABELS[permission] || permission}</span>
-                ))}
-              </div>
-            </div>
-          ))}
-          {!roles.length && (
-            <div className="org-empty">
-              <Empty description="暂无可查看角色权限" />
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="org-section">
-        <div className="org-section-header">
-          <span className="org-section-tag">// PROFILE</span>
-          <span className="org-section-title">组织信息</span>
-          {isAdmin && !editMode && (
-            <button className="org-edit-btn" onClick={() => setEditMode(true)}>
-              <EditOutlined /> 编辑
-            </button>
-          )}
-          {editMode && (
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-              <button
-                className="org-cancel-btn"
-                onClick={() => {
-                  setEditMode(false)
-                  editForm.setFieldsValue({ name: org.name, description: org.description })
-                }}
+          <section className="org-panel access-organization-panel">
+            <div className="org-panel-head">
+              <h2>当前组织</h2>
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                disabled={!canEditOrganization}
+                title={!canEditOrganization ? '只有组织管理员可以编辑组织信息' : undefined}
+                onClick={() => setProfileModalOpen(true)}
               >
-                取消
-              </button>
-              <button className="org-save-btn" onClick={handleSave}>
-                <CheckOutlined /> 保存
-              </button>
+                编辑组织
+              </Button>
             </div>
-          )}
-        </div>
-        <Form form={editForm} layout="vertical" className="org-info-form">
-          <Form.Item label="组织名称" name="name">
-            <Input disabled={!editMode} size="large" />
-          </Form.Item>
-          <Form.Item label="组织代码" name="code">
-            <Input disabled size="large" />
-          </Form.Item>
-          <Form.Item label="描述" name="description">
-            <Input.TextArea disabled={!editMode} rows={4} placeholder="组织描述（可选）" />
-          </Form.Item>
-        </Form>
-      </section>
-
-      <section className="org-section">
-        <div className="org-section-header">
-          <span className="org-section-tag">// ROSTER</span>
-          <span className="org-section-title">成员列表</span>
-          <span className="org-section-meta">{members.length} MEMBERS</span>
-          {isAdmin && (
-            <button
-              className="org-add-btn"
-              onClick={() => setAddMemberModalOpen(true)}
-              style={{ marginLeft: 'auto' }}
-            >
-              <PlusOutlined /> 添加成员
-            </button>
-          )}
-        </div>
-
-        <div className="org-members-grid">
-          {members.length === 0 ? (
-            <div className="org-empty">
-              <Empty description="暂无成员" />
+            <div className="access-org-summary">
+              <div><span>组织名称</span><strong>{org?.name}</strong></div>
+              <div><span>组织代码</span><strong>{org?.code}</strong></div>
+              <div><span>状态</span><Tag color={org?.is_active ? 'green' : 'red'}>{org?.is_active ? '正常' : '停用'}</Tag></div>
+              <div><span>我的角色</span><Tag color={ROLE_COLORS[currentOrg?.role]}>{ROLE_LABELS[currentOrg?.role] || currentOrg?.role}</Tag></div>
             </div>
-          ) : (
-            members.map((m) => (
-              <div className="org-member-card" key={m.id}>
-                <div className="org-member-corner-tl" />
-                <div className="org-member-corner-tr" />
-                <div className="org-member-corner-bl" />
-                <div className="org-member-corner-br" />
+          </section>
 
-                <Avatar size={42} icon={<UserOutlined />} className="org-member-avatar" />
-                <div className="org-member-info">
-                  <div className="org-member-name">
-                    {m.username}
-                    {m.role === 'admin' && <CrownOutlined className="org-crown" />}
+          <section className="org-panel access-role-panel">
+            <div className="org-panel-head">
+              <h2>角色与权限矩阵</h2>
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined />}
+                disabled={!canManageRoles}
+                onClick={() => openRoleModal()}
+              >
+                新建角色
+              </Button>
+            </div>
+            <div className="access-role-grid">
+              {roles.map((role) => (
+                <article className="access-role-card" key={role.id}>
+                  <header>
+                    <div>
+                      <strong>{role.name}</strong>
+                      <span>{role.description || '未配置角色说明'}</span>
+                    </div>
+                    <Tag color={role.is_system ? 'cyan' : 'gold'}>{role.is_system ? '系统模板' : '自定义'}</Tag>
+                  </header>
+                  <div className="access-role-meta">
+                    <span>{role.permissions.length} 项权限</span>
+                    <span>{role.member_count || 0} 名成员</span>
                   </div>
-                  <div className="org-member-email">
-                    <MailOutlined /> {m.email}
+                  <div className="access-permission-list">
+                    {role.permissions.map((permission) => (
+                      <span key={permission}>{PERMISSION_LABELS[permission] || permission}</span>
+                    ))}
                   </div>
-                  <div className="org-member-joined">
-                    加入于 {new Date(m.joined_at).toLocaleDateString('zh-CN')}
-                  </div>
-                </div>
+                  <footer>
+                    {role.is_system ? (
+                      <span>系统模板固定，只能分配给成员</span>
+                    ) : (
+                      <>
+                        <Button size="small" type="text" icon={<EditOutlined />} disabled={!canManageRoles} onClick={() => openRoleModal(role)}>
+                          编辑
+                        </Button>
+                        <Popconfirm
+                          title="删除该角色模板？"
+                          description="已分配成员将恢复为其基础角色权限。"
+                          okText="删除"
+                          cancelText="取消"
+                          okButtonProps={{ danger: true }}
+                          onConfirm={() => deleteRole(role)}
+                        >
+                          <Button size="small" type="text" danger icon={<DeleteOutlined />} disabled={!canManageRoles}>
+                            删除
+                          </Button>
+                        </Popconfirm>
+                      </>
+                    )}
+                  </footer>
+                </article>
+              ))}
+            </div>
+          </section>
 
-                <div className="org-member-actions">
-                  <Select
-                    size="small"
-                    value={m.role}
-                    disabled={!isAdmin}
-                    onChange={(v) => handleUpdateRole(m.id, v)}
-                    style={{ width: 110 }}
-                    options={[
-                      { value: 'admin', label: 'ADMIN' },
-                      { value: 'manager', label: 'MANAGER' },
-                      { value: 'member', label: 'MEMBER' },
-                      { value: 'viewer', label: 'VIEWER' },
-                    ]}
-                  />
-                  {isAdmin && m.user_id !== currentOrg?.id && (
+          <section className="org-panel access-member-panel">
+            <div className="org-panel-head">
+              <h2>成员授权</h2>
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined />}
+                disabled={!canManageMembers}
+                onClick={() => setMemberModalOpen(true)}
+              >
+                添加成员
+              </Button>
+            </div>
+            <div className="access-member-table">
+              <div className="access-member-head">
+                <span>成员</span><span>基础身份</span><span>权限模板</span><span>有效权限</span><span>操作</span>
+              </div>
+              {members.map((member) => {
+                const isSelf = member.user_id === user?.id
+                const isLastAdmin = member.role === 'admin' && adminCount <= 1
+                const assignedRole = roles.find((role) => role.id === member.custom_role_id)
+                return (
+                  <div className="access-member-row" key={member.id}>
+                    <div className="access-member-identity">
+                      <Avatar icon={<UserOutlined />} />
+                      <span><strong>{member.username}</strong><em><MailOutlined /> {member.email}</em></span>
+                      {isSelf ? <Tag color="blue">我</Tag> : null}
+                    </div>
+                    <Select
+                      size="small"
+                      value={member.role}
+                      disabled={!canManageMembers || isLastAdmin}
+                      onChange={(role) => updateMember(member, { role })}
+                      options={Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))}
+                    />
+                    {member.role === 'admin' ? (
+                      <span className="access-template-na">不使用权限模板</span>
+                    ) : (
+                      <Select
+                        size="small"
+                        value={member.custom_role_id}
+                        placeholder="使用基础角色权限"
+                        allowClear
+                        disabled={!canManageMembers}
+                        onChange={(customRoleId) => updateMember(member, { custom_role_id: customRoleId || null })}
+                        options={roles.map((role) => ({ value: role.id, label: role.name }))}
+                      />
+                    )}
+                    <span className="access-effective-role">
+                      {member.role === 'admin' ? '全部权限' : assignedRole ? `${assignedRole.permissions.length} 项` : '基础权限'}
+                    </span>
                     <Popconfirm
-                      title="确认移除该成员？"
-                      onConfirm={() => handleRemoveMember(m.id)}
+                      title="移除该组织成员？"
                       okText="移除"
                       cancelText="取消"
                       okButtonProps={{ danger: true }}
+                      onConfirm={() => removeMember(member)}
                     >
-                      <button className="org-member-remove">
-                        <DeleteOutlined />
-                      </button>
+                      <Button
+                        size="small"
+                        type="text"
+                        danger
+                        icon={<DeleteOutlined />}
+                        disabled={!canManageMembers || isSelf || isLastAdmin}
+                        title={isSelf ? '不能在此移除自己' : isLastAdmin ? '不能移除最后一名管理员' : undefined}
+                      />
                     </Popconfirm>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
 
-      {isAdmin && (
-        <section className="org-section org-data-lifecycle">
-          <div className="org-section-header">
-            <span className="org-section-tag">// DATA LIFECYCLE</span>
-            <span className="org-section-title">数据容量与初始化</span>
-            <span className="org-section-meta">{storage?.project_count || 0} PROJECTS</span>
-          </div>
-          {storage?.error ? (
-            <div className="org-storage-error">{storage.error}</div>
-          ) : (
-            <div className="org-storage-grid">
-              <div className="org-storage-total">
-                <HddOutlined />
-                <span>当前逻辑占用</span>
-                <strong>{formatBytes(storage?.total_bytes || 0)}</strong>
-              </div>
-              {Object.entries(storage?.categories || {}).map(([key, item]) => (
-                <div key={key}>
-                  <span>{item.label}</span>
-                  <strong>{formatBytes(item.bytes)}</strong>
-                  <em>{item.transient ? '临时' : item.on_demand ? '按需' : `${item.count || 0} 项`}</em>
+          <section className="org-panel access-audit-panel">
+            <div className="org-panel-head">
+              <h2>权限变更审计</h2>
+              <span>最近 {audits.length} 条</span>
+            </div>
+            <div className="access-audit-list">
+              {audits.length ? audits.map((audit) => (
+                <div key={audit.id}>
+                  <span>{AUDIT_LABELS[audit.action] || audit.action}</span>
+                  <strong>{audit.detail || '未记录详情'}</strong>
+                  <time>{new Date(audit.created_at).toLocaleString('zh-CN')}</time>
                 </div>
-              ))}
+              )) : <Empty description="暂无权限变更记录" />}
             </div>
-          )}
-          <div className="org-danger-row">
-            <div>
-              <strong>初始化组织业务数据</strong>
-              <span>保留组织、成员、权限角色和全局标准图谱，删除全部项目业务数据。</span>
-            </div>
-            <button className="org-danger-btn" onClick={handleInitializeBusinessData} disabled={initializing}>
-              <DeleteOutlined /> {initializing ? '处理中...' : '初始化'}
-            </button>
-          </div>
-        </section>
+          </section>
+        </>
       )}
 
       <Modal
-        title={
-          <div className="org-modal-title">
-            <span className="org-modal-tag">// ADD MEMBER</span>
-            <span>添加组织成员</span>
-          </div>
-        }
-        open={addMemberModalOpen}
+        title={editingRole ? '编辑角色模板' : '新建角色模板'}
+        open={roleModalOpen}
         onCancel={() => {
-          setAddMemberModalOpen(false)
-          addMemberForm.resetFields()
+          setRoleModalOpen(false)
+          setEditingRole(null)
+          roleForm.resetFields()
         }}
-        footer={null}
-        width={480}
-        className="org-add-modal"
+        onOk={saveRole}
+        okText="保存"
+        cancelText="取消"
+        width={720}
+        className="access-modal"
       >
-        <Form form={addMemberForm} layout="vertical" onFinish={handleAddMember}>
+        <Form form={roleForm} layout="vertical">
+          <Form.Item name="name" label="角色名称" rules={[{ required: true, message: '请输入角色名称' }]}>
+            <Input maxLength={80} placeholder="例如：项目安全负责人" />
+          </Form.Item>
+          <Form.Item name="description" label="角色说明">
+            <Input placeholder="说明该角色的职责边界" />
+          </Form.Item>
+          <Form.Item name="permissions" label="权限范围">
+            <Checkbox.Group className="access-permission-groups">
+              {Object.entries(permissionGroups).map(([group, values]) => (
+                <div key={group}>
+                  <strong>{PERMISSION_GROUP_LABELS[group] || group}</strong>
+                  <section>
+                    {values.map((permission) => (
+                      <Checkbox key={permission} value={permission}>
+                        {PERMISSION_LABELS[permission] || permission}
+                      </Checkbox>
+                    ))}
+                  </section>
+                </div>
+              ))}
+            </Checkbox.Group>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="添加组织成员"
+        open={memberModalOpen}
+        onCancel={() => {
+          setMemberModalOpen(false)
+          memberForm.resetFields()
+        }}
+        onOk={addMember}
+        okText="添加"
+        cancelText="取消"
+        className="access-modal"
+      >
+        <Form form={memberForm} layout="vertical">
           <Form.Item
             name="user_email"
             label="用户邮箱"
             rules={[
               { required: true, message: '请输入邮箱' },
-              { type: 'email', message: '请输入有效的邮箱' },
+              { type: 'email', message: '请输入有效邮箱' },
             ]}
           >
-            <Input placeholder="用户注册的邮箱" size="large" />
+            <Input placeholder="已注册用户的邮箱" />
+          </Form.Item>
+          <Form.Item name="role" label="基础身份" initialValue="member" rules={[{ required: true }]}>
+            <Select options={Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))} />
           </Form.Item>
           <Form.Item
-            name="role"
-            label="角色"
-            initialValue="member"
-            rules={[{ required: true, message: '请选择角色' }]}
+            noStyle
+            shouldUpdate={(previous, current) => previous.role !== current.role}
           >
-            <Select
-              size="large"
-              options={[
-                { value: 'admin', label: 'ADMIN - 管理员' },
-                { value: 'manager', label: 'MANAGER - 经理' },
-                { value: 'member', label: 'MEMBER - 成员' },
-                { value: 'viewer', label: 'VIEWER - 查看者' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item>
-            <div className="org-add-actions">
-              <button
-                type="button"
-                className="org-cancel-btn"
-                onClick={() => {
-                  setAddMemberModalOpen(false)
-                  addMemberForm.resetFields()
-                }}
-              >
-                取消
-              </button>
-              <button type="submit" className="org-save-btn">
-                <PlusOutlined /> 添加
-              </button>
-            </div>
+            {({ getFieldValue }) => (
+              <Form.Item name="custom_role_id" label="权限模板">
+                <Select
+                  allowClear
+                  disabled={getFieldValue('role') === 'admin'}
+                  placeholder={getFieldValue('role') === 'admin' ? '管理员自动拥有全部权限' : '可选，不选择则使用基础角色权限'}
+                  options={roles.map((role) => ({ value: role.id, label: role.name }))}
+                />
+              </Form.Item>
+            )}
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+
+      <Modal
+        title="编辑组织信息"
+        open={profileModalOpen}
+        onCancel={() => setProfileModalOpen(false)}
+        onOk={saveOrganization}
+        okText="保存"
+        cancelText="取消"
+        className="access-modal"
+      >
+        <Form form={profileForm} layout="vertical">
+          <Form.Item name="name" label="组织名称" rules={[{ required: true, message: '请输入组织名称' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="description" label="组织说明">
+            <Input.TextArea rows={4} />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </OrganizationSettingsLayout>
   )
 }

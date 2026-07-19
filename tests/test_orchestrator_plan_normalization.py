@@ -4,24 +4,9 @@ from app.orchestrator.orchestrator import Orchestrator
 from app.services.flow_engine import FlowEngine
 
 
-def test_current_command_target_removes_target_copied_from_history():
-    plan, response = Orchestrator()._keep_current_command_targets(
-        [
-            {"capability": "nikto_scan", "parameters": {"target": "139.224.104.187"}},
-            {"capability": "nikto_scan", "parameters": {"target": "172.23.0.17"}},
-        ],
-        "对 172.23.0.17 进行Web 扫描",
-        "扫描两个目标",
-    )
-
-    assert plan == [{"capability": "nikto_scan", "parameters": {"target": "172.23.0.17"}}]
-    assert "172.23.0.17" in response
-    assert "139.224.104.187" not in response
-
-
-def test_explicit_project_asset_web_scan_recovers_from_invalid_ai_plan():
+def test_explicit_asset_retargets_selected_skill_plan_without_keyword_tool_override():
     plan, response = Orchestrator()._normalize_explicit_asset_plan(
-        [{"capability": "chat", "parameters": {"message": "缺少必要参数：url"}}],
+        [{"capability": "nikto_scan", "parameters": {"target": "项目资产"}}],
         {
             "project_assets": [
                 {"value": "139.224.104.187"},
@@ -29,7 +14,7 @@ def test_explicit_project_asset_web_scan_recovers_from_invalid_ai_plan():
             ],
         },
         "对 139.224.104.187 进行Web 扫描",
-        "参数不完整或不合法：缺少必要参数：url。请补充后重试。",
+        "开始 Web 扫描",
     )
 
     assert plan == [{"capability": "nikto_scan", "parameters": {"target": "139.224.104.187"}}]
@@ -38,8 +23,18 @@ def test_explicit_project_asset_web_scan_recovers_from_invalid_ai_plan():
     assert "121.40.95.31" not in response
 
 
-def test_web_vulnerability_wording_uses_nikto_not_generic_nuclei():
-    assert Orchestrator()._requested_scan_capability("重新进行 Web 漏洞扫描") == "nikto_scan"
+def test_project_asset_scope_preserves_skill_selected_capability_and_parameters():
+    plan, _response = Orchestrator()._normalize_project_asset_plan(
+        [{"capability": "scan_ports", "parameters": {"target": "old", "port_range": "30-3000"}}],
+        {"project_assets": [{"value": "192.0.2.10"}]},
+        "对当前项目所有资产执行检测",
+        "开始检测",
+    )
+
+    assert plan == [{
+        "capability": "scan_ports",
+        "parameters": {"target": "项目资产", "port_range": "30-3000"},
+    }]
 
 
 def test_scan_score_recalculation_delegates_to_flow_engine(monkeypatch):
