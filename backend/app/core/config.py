@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    ALLOW_PUBLIC_REGISTRATION: bool = True
+    LOGIN_RATE_LIMIT_ATTEMPTS: int = 5
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 300
     
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
@@ -38,6 +41,15 @@ class Settings(BaseSettings):
     AI_ENABLE_CACHE: bool = True  # 是否启用 prompt cache
     AI_ENABLE_ASSESSMENT_CONTEXT: bool = True  # 是否注入测评流程状态到 prompt
     AI_CACHE_MIN_TOKENS: int = 1024  # 触发 cache 的最小 token 数（Anthropic 限制）
+    OLLAMA_REQUEST_TIMEOUT_SECONDS: float = 300.0
+    OLLAMA_KEEP_ALIVE: str = "30m"
+    OLLAMA_THINK: bool = False
+    LLM_RUNTIME_POLICY: str = "auto"  # auto/cloud/local/vllm/llama_cpp/ollama
+    LLM_GPU_AVAILABLE: str = "auto"
+    VLLM_API_BASE: str = "http://vllm:8000/v1"
+    VLLM_MODEL: str = ""
+    LLAMA_CPP_API_BASE: str = "http://llama-cpp:8080/v1"
+    LLAMA_CPP_MODEL: str = ""
 
     # 测评流程配置
     ASSESSMENT_AUTO_START: bool = False  # 创建后是否自动开始
@@ -81,6 +93,12 @@ class Settings(BaseSettings):
             raise RuntimeError("Invalid configuration: unsupported WORKER_ROLE")
         if self.INTERACTIVE_SCAN_MAX_CONCURRENT < 1:
             raise RuntimeError("Invalid configuration: INTERACTIVE_SCAN_MAX_CONCURRENT must be positive")
+        if self.LOGIN_RATE_LIMIT_ATTEMPTS < 1 or self.LOGIN_RATE_LIMIT_WINDOW_SECONDS < 1:
+            raise RuntimeError("Invalid configuration: login rate limits must be positive")
+        if self.LLM_RUNTIME_POLICY not in {"auto", "cloud", "local", "vllm", "llama_cpp", "ollama"}:
+            raise RuntimeError("Invalid configuration: unsupported LLM_RUNTIME_POLICY")
+        if self.LLM_GPU_AVAILABLE.lower() not in {"auto", "true", "false"}:
+            raise RuntimeError("Invalid configuration: LLM_GPU_AVAILABLE must be auto, true, or false")
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", self.GRAPH_NAME):
             raise RuntimeError("Invalid configuration: GRAPH_NAME must be a safe PostgreSQL identifier")
         if self.DOCUMENT_EMBEDDING_DIMENSION != 1024:

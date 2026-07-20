@@ -2,12 +2,18 @@
 WebSocket API - 实时推送 Agent 状态
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 from typing import Dict, List
 import json
 import logging
 
 from app.orchestrator import orchestrator
+from app.core.database import AsyncSessionLocal
+from app.core.rbac import get_project_for_user
+from app.core.security import decode_token
+from app.models.scan_task import ScanTask
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +31,7 @@ class ConnectionManager:
     
     async def connect(self, websocket: WebSocket, task_id: str):
         """接受新的 WebSocket 连接"""
-        await websocket.accept()
+        await websocket.accept(subprotocol="certiproof")
         if task_id not in self.active_connections:
             self.active_connections[task_id] = []
         self.active_connections[task_id].append(websocket)
@@ -72,6 +78,44 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+def _websocket_token(websocket: WebSocket) -> str | None:
+    protocols = websocket.headers.get("sec-websocket-protocol", "")
+    for protocol in (item.strip() for item in protocols.split(",")):
+        if protocol.startswith("auth."):
+            return protocol[5:]
+    return None
+
+
+async def _authorize_task_socket(websocket: WebSocket, task_id: str) -> bool:
+    payload = decode_token(_websocket_token(websocket) or "")
+    if not payload or payload.get("type") != "access" or not payload.get("sub"):
+        await websocket.close(code=4401, reason="Authentication required")
+        return False
+    try:
+        user_id = int(payload["sub"])
+    except (TypeError, ValueError):
+        await websocket.close(code=4401, reason="Invalid token")
+        return False
+
+    async with AsyncSessionLocal() as db:
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if not user or not user.is_active:
+            await websocket.close(code=4401, reason="Invalid account")
+            return False
+        scan_task = (await db.execute(select(ScanTask).where(
+            ScanTask.orchestrator_task_id == task_id
+        ))).scalar_one_or_none()
+        if not scan_task:
+            await websocket.close(code=4404, reason="Task not found")
+            return False
+        try:
+            await get_project_for_user(db, scan_task.project_id, user, "scan:read")
+        except HTTPException:
+            await websocket.close(code=4403, reason="Task access denied")
+            return False
+    return True
+
+
 @router.websocket("/agents/{task_id}")
 async def agent_websocket(websocket: WebSocket, task_id: str):
     """
@@ -82,6 +126,8 @@ async def agent_websocket(websocket: WebSocket, task_id: str):
     - 进度更新
     - 扫描进度（端口扫描）
     """
+    if not await _authorize_task_socket(websocket, task_id):
+        return
     await manager.connect(websocket, task_id)
     
     try:

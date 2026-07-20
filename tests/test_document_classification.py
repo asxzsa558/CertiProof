@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from app.services.document_control_engine import DocumentControlEngine
+from app.services.document_control_engine import DocumentClassificationContract, DocumentControlEngine
 from app.services.llm_service import llm_service
 
 
@@ -12,6 +12,14 @@ LIBRARY_PATH = Path(__file__).resolve().parents[1] / "reference" / "compliance" 
 
 def _engine():
     return DocumentControlEngine(yaml.safe_load(LIBRARY_PATH.read_text(encoding="utf-8")))
+
+
+def test_document_classification_schema_matches_standard_library():
+    library = yaml.safe_load(LIBRARY_PATH.read_text(encoding="utf-8"))
+    primary_key = DocumentClassificationContract.model_json_schema()["properties"]["primary_key"]
+    enum_values = next(item["enum"] for item in primary_key["anyOf"] if "enum" in item)
+
+    assert set(enum_values) == set(library["documents"])
 
 
 def test_llm_can_classify_clear_content_when_filename_is_nonstandard(monkeypatch):

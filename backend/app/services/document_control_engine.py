@@ -13,9 +13,41 @@ import logging
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Optional
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
+
+
+DocumentKey = Literal[
+    "security_management_policy", "security_org_setup", "personnel_security_policy",
+    "secure_construction_policy", "security_operations_policy", "incident_response_plan",
+    "incident_management_policy", "security_audit_policy", "system_security_plan", "security_strategy",
+]
+
+
+class DocumentClassificationContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    primary_key: Optional[DocumentKey]
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+
+
+class EvidenceDecisionContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    control_id: str
+    point_id: str
+    decision: Literal["pass", "partial", "fail", "contradict"]
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+
+
+class DocumentEvidenceReviewContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decisions: list[EvidenceDecisionContract]
 
 
 class DocumentControlEngine:
@@ -399,10 +431,10 @@ class DocumentControlEngine:
                 timeout=40,
                 temperature=0,
                 max_tokens=1600,
-                response_format={"type": "json_object"},
-                response_validator=lambda value: self._parse_llm_object(value.get("content", "")),
+                response_model=DocumentClassificationContract,
+                business_validator=self._validate_classification_contract,
             )
-            payload = self._parse_llm_object(response.get("content", ""))
+            payload = response.get("validated") or self._parse_llm_object(response.get("content", ""))
             document_key = payload.get("primary_key")
             confidence = max(0.0, min(float(payload.get("confidence") or 0), 1.0))
             document = self.documents.get(document_key)
@@ -578,10 +610,10 @@ class DocumentControlEngine:
                 timeout=90,
                 temperature=0,
                 max_tokens=4096,
-                response_format={"type": "json_object"},
-                response_validator=lambda value: self._parse_llm_json(value.get("content", "")),
+                response_model=DocumentEvidenceReviewContract,
+                business_validator=lambda value: self._validate_evidence_contract(value, points),
             )
-            decisions = self._parse_llm_json(response.get("content", ""))
+            decisions = (response.get("validated") or {}).get("decisions") or self._parse_llm_json(response.get("content", ""))
         except Exception as exc:
             logger.info("document evidence LLM review skipped: %s", exc)
             analysis["evidence_engine"] = "unavailable"
@@ -637,6 +669,26 @@ class DocumentControlEngine:
         self._recompute_analysis(analysis)
         analysis["evidence_engine"] = "hybrid"
         return analysis
+
+    def _validate_classification_contract(self, value: DocumentClassificationContract) -> None:
+        if value.primary_key is not None and value.primary_key not in self.documents:
+            raise ValueError(f"文档类型 {value.primary_key} 不在标准库中")
+
+    @staticmethod
+    def _validate_evidence_contract(value: DocumentEvidenceReviewContract, points) -> None:
+        expected = {(str(control.get("id")), str(point.get("id"))) for control, point in points}
+        actual = {(item.control_id, item.point_id) for item in value.decisions}
+        if len(actual) != len(value.decisions):
+            raise ValueError("判证结果包含重复检查点")
+        if actual != expected:
+            missing = expected - actual
+            extra = actual - expected
+            detail = []
+            if missing:
+                detail.append(f"缺少 {len(missing)} 个检查点")
+            if extra:
+                detail.append(f"包含 {len(extra)} 个未知检查点")
+            raise ValueError("判证结果不完整：" + "，".join(detail))
 
     def chunk(self, text: str) -> list[str]:
         normalized = re.sub(r"\r\n?", "\n", text or "")

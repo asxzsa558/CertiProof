@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from app.services.ai_engine import AIEngine
+from app.services.ai_engine import AIEngine, INTENT_CATEGORIES, RouteContract
 from app.services.ai_skill_registry import prompt_skill_registry
 from app.services.capability_registry import capability_registry
 
@@ -53,6 +53,13 @@ def test_every_prompt_skill_capability_exists_in_registry():
     ]
 
     assert missing == []
+
+
+def test_route_schema_enums_match_registered_intents_and_skills():
+    schema = RouteContract.model_json_schema()["properties"]
+
+    assert set(schema["intents"]["items"]["enum"]) == set(INTENT_CATEGORIES)
+    assert set(schema["skills"]["items"]["enum"]) == set(prompt_skill_registry._skills)
 
 
 def test_route_json_extraction_ignores_model_preamble_and_extra_braces():
@@ -233,6 +240,16 @@ def test_out_of_scope_is_rejected_without_general_chat_or_planner_call():
     assert result["plan"][0]["capability"] == "chat"
     assert "不属于 CertiProof 当前支持范围" in result["response"]
     assert len(engine.calls) == 1
+
+
+def test_exhausted_models_return_explicit_non_execution_message():
+    engine = FakeAIEngine([ValueError("所有模型均未生成有效结果：结构化校验失败")])
+
+    result = asyncio.run(engine.decide("处理一下", context_with_history(), db=None, user_id=None))
+
+    assert result["plan"][0]["capability"] == "chat"
+    assert "连续未生成通过校验的执行计划" in result["response"]
+    assert "没有执行任何工具" in result["response"]
 
 
 def test_mismatched_model_category_is_corrected_from_valid_intent():

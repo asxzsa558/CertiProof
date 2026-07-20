@@ -9,6 +9,7 @@ import {
   SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
+import { useAuthStore } from '../store/authStore'
 import './AgentStatusCard.css'
 import './ScanAnimation.css'
 
@@ -50,7 +51,9 @@ function AgentStatusCard({ taskIds, onComplete }) {
     const wsUrl = `${protocol}//${window.location.host}/api/v1/ws/agents/${taskId}`
     
     try {
-      const ws = new WebSocket(wsUrl)
+      const token = useAuthStore.getState().token
+      if (!token) return
+      const ws = new WebSocket(wsUrl, ['certiproof', `auth.${token}`])
       wsRefs.current[taskId] = ws
 
       ws.onopen = () => {

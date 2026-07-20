@@ -13,6 +13,13 @@ class ProviderType(str, enum.Enum):
     CUSTOM = "custom"
 
 
+class InferenceRuntime(str, enum.Enum):
+    CLOUD = "cloud"
+    OLLAMA = "ollama"
+    VLLM = "vllm"
+    LLAMA_CPP = "llama_cpp"
+
+
 class ModelProvider(Base):
     __tablename__ = "model_providers"
     
@@ -21,6 +28,7 @@ class ModelProvider(Base):
     provider_type = Column(SQLEnum(ProviderType), nullable=False)
     api_key = Column(String(500), nullable=True)  # Encrypted API Key
     api_base = Column(String(500), nullable=True)  # API endpoint
+    runtime_kind = Column(String(20), default=InferenceRuntime.CLOUD.value, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -28,6 +36,10 @@ class ModelProvider(Base):
     
     # Relationships
     configs = relationship("ModelConfig", back_populates="provider", cascade="all, delete-orphan")
+
+    @property
+    def api_key_configured(self):
+        return bool(self.api_key)
     
     def __repr__(self):
         return f"<ModelProvider(id={self.id}, name={self.name}, type={self.provider_type})>"

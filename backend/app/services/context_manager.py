@@ -8,6 +8,7 @@ import logging
 import re
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta, timezone
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func, update
 
@@ -24,6 +25,30 @@ from app.models.context import (
 from app.core.redaction import redact_sensitive
 
 logger = logging.getLogger(__name__)
+
+
+class ArchiveCompletedTaskContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task: str
+    result: str
+
+
+class ArchiveCurrentTaskContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task: str
+    progress: str
+
+
+class ArchiveSummaryContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(min_length=1)
+    completed_tasks: List[ArchiveCompletedTaskContract] = Field(max_length=5)
+    current_task: Optional[ArchiveCurrentTaskContract]
+    interrupt_point: str
+    key_findings: List[str] = Field(max_length=5)
 
 
 class ContextManager:
@@ -892,28 +917,28 @@ class ContextManager:
 
         try:
             from app.services.llm_service import llm_service
-            import asyncio
 
-            response = await asyncio.wait_for(
-                llm_service.chat_with_fallback(
-                    db=self.db,
-                    user_id=self.user_id,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": """你是任务交接摘要助手。仅根据提供的原始对话生成 JSON：
+            response = await llm_service.chat_with_fallback(
+                db=self.db,
+                user_id=self.user_id,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """你是任务交接摘要助手。仅根据提供的原始对话生成 JSON：
 {"summary":"一句话状态","completed_tasks":[{"task":"任务","result":"结果"}],"current_task":{"task":"任务","progress":"进度"},"interrupt_point":"下一步","key_findings":["发现"]}
 不要补造事实；completed_tasks 和 key_findings 最多 5 项；无进行中任务时 current_task 为 null；不得输出密码、令牌、密钥或其他凭据。""",
-                        },
-                        {"role": "user", "content": self._format_messages_for_summary(histories)},
-                    ],
-                    task_type="chat",
-                ),
+                    },
+                    {"role": "user", "content": self._format_messages_for_summary(histories)},
+                ],
+                task_type="chat",
                 timeout=60.0,
+                response_model=ArchiveSummaryContract,
             )
-            content = re.sub(r"<think>.*?</think>", "", response.get("content", ""), flags=re.DOTALL).strip()
-            match = re.search(r"\{[\s\S]*\}", content)
-            parsed = json.loads(match.group()) if match else {}
+            parsed = response.get("validated")
+            if not parsed:
+                content = re.sub(r"<think>.*?</think>", "", response.get("content", ""), flags=re.DOTALL).strip()
+                match = re.search(r"\{[\s\S]*\}", content)
+                parsed = json.loads(match.group()) if match else {}
             summary = self._redact_summary_text(str(parsed.get("summary") or "").strip())
             if not summary:
                 raise ValueError("摘要服务未返回有效摘要")
@@ -968,18 +993,15 @@ class ContextManager:
             return False
         try:
             from app.services.llm_service import llm_service
-            import asyncio
 
-            response = await asyncio.wait_for(
-                llm_service.chat_with_fallback(
-                    db=self.db,
-                    user_id=self.user_id,
-                    messages=[
-                        {"role": "system", "content": "将以下同一线程的原始对话压缩为不超过 500 字的中文事实摘要。不得补造事实，且不得保留密码、令牌或密钥。"},
-                        {"role": "user", "content": self._format_messages_for_summary(histories, limit=self.SUMMARY_SEGMENT_MESSAGES)},
-                    ],
-                    task_type="chat",
-                ),
+            response = await llm_service.chat_with_fallback(
+                db=self.db,
+                user_id=self.user_id,
+                messages=[
+                    {"role": "system", "content": "将以下同一线程的原始对话压缩为不超过 500 字的中文事实摘要。不得补造事实，且不得保留密码、令牌或密钥。"},
+                    {"role": "user", "content": self._format_messages_for_summary(histories, limit=self.SUMMARY_SEGMENT_MESSAGES)},
+                ],
+                task_type="chat",
                 timeout=60.0,
             )
             content = self._redact_summary_text(str(response.get("content") or "").strip())

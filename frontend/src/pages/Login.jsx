@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Form, Input, Button, Checkbox, message } from 'antd'
 import { LockOutlined, MailOutlined } from '@ant-design/icons'
@@ -9,8 +9,15 @@ import './Auth.css'
 
 function Login() {
   const [loading, setLoading] = useState(false)
+  const [registrationEnabled, setRegistrationEnabled] = useState(false)
   const navigate = useNavigate()
   const setAuth = useAuthStore((state) => state.setAuth)
+
+  useEffect(() => {
+    api.get('/auth/registration-status')
+      .then(response => setRegistrationEnabled(Boolean(response.data?.enabled)))
+      .catch(() => setRegistrationEnabled(false))
+  }, [])
 
   const onFinish = async (values) => {
     setLoading(true)
@@ -127,12 +134,14 @@ function Login() {
               </Form.Item>
             </Form>
 
-            <div className="form-footer">
-              <span>还没有账户？</span>
-              <Link to="/register" className="auth-link">
-                立即注册
-              </Link>
-            </div>
+            {registrationEnabled && (
+              <div className="form-footer">
+                <span>还没有账户？</span>
+                <Link to="/register" className="auth-link">
+                  立即注册
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </div>

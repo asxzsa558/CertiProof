@@ -1,15 +1,19 @@
 FROM python:3.11-slim
 
+ARG TARGETARCH
+
 WORKDIR /app
 
 # 使用阿里云 Debian 镜像
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
     sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
 
-# 安装 nuclei 二进制 (arm64)
+# 安装与目标镜像架构一致的 nuclei 二进制
 RUN apt-get update && \
     apt-get install -y wget unzip && \
-    wget -q https://ghfast.top/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/nuclei_3.3.0_linux_arm64.zip -O /tmp/nuclei.zip && \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}" && \
+    test "$arch" = "amd64" -o "$arch" = "arm64" && \
+    wget -q "https://ghfast.top/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/nuclei_3.3.0_linux_${arch}.zip" -O /tmp/nuclei.zip && \
     unzip /tmp/nuclei.zip -d /usr/local/bin/ && \
     chmod +x /usr/local/bin/nuclei && \
     rm /tmp/nuclei.zip && \

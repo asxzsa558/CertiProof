@@ -1,5 +1,7 @@
 FROM python:3.11-slim
 
+ARG TARGETARCH
+
 # 使用阿里云 Debian 镜像
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
     sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
@@ -23,8 +25,10 @@ RUN curl -fsSL https://ghfast.top/https://github.com/drwetter/testssl.sh/archive
     mv /opt/testssl.sh-3.2 /testssl && \
     chmod +x /testssl/testssl.sh
 
-# 安装 nuclei (arm64)
-RUN wget -q https://ghfast.top/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/nuclei_3.3.0_linux_arm64.zip -O /tmp/nuclei.zip && \
+# 安装与目标镜像架构一致的 nuclei 二进制
+RUN arch="${TARGETARCH:-$(dpkg --print-architecture)}" && \
+    test "$arch" = "amd64" -o "$arch" = "arm64" && \
+    wget -q "https://ghfast.top/https://github.com/projectdiscovery/nuclei/releases/download/v3.3.0/nuclei_3.3.0_linux_${arch}.zip" -O /tmp/nuclei.zip && \
     unzip /tmp/nuclei.zip -d /usr/local/bin/ && \
     chmod +x /usr/local/bin/nuclei && \
     rm /tmp/nuclei.zip

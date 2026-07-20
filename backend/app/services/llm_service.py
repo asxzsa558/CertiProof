@@ -4,17 +4,30 @@ Unified LLM interface with multi-provider support and fallback strategy.
 """
 
 import asyncio
+import json
 import logging
-from typing import Optional, List, Dict, Any, Callable
+import re
+from typing import Optional, List, Dict, Any, Callable, Type, Literal
 from datetime import datetime
 from abc import ABC, abstractmethod
+from contextlib import asynccontextmanager
+from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models.model_config import ModelProvider, ModelConfig, ModelUsage, ProviderType
+from app.models.model_config import InferenceRuntime, ModelProvider, ModelConfig, ModelUsage, ProviderType
 from app.core.config import settings
+from app.core.secret_box import decrypt_secret
+from app.services.config_service import get_config_service
+from app.services.runtime_resources import gpu_available, runtime_status as resource_runtime_status
 
 logger = logging.getLogger(__name__)
+
+
+class ModelHealthContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["ok"]
 
 
 # --- Provider Adapters ---
@@ -234,30 +247,75 @@ class AnthropicProvider(BaseProvider):
 class OllamaProvider(BaseProvider):
     """Ollama local LLM adapter - 本地推理无 cache"""
 
+    @staticmethod
+    def _build_chat_payload(messages: List[Dict], model_name: str, **kwargs) -> Dict[str, Any]:
+        """Translate the shared generation options to Ollama's native API."""
+        options = dict(kwargs.pop("options", {}) or {})
+        aliases = {
+            "max_tokens": "num_predict",
+            "max_completion_tokens": "num_predict",
+            "temperature": "temperature",
+            "top_p": "top_p",
+            "top_k": "top_k",
+            "seed": "seed",
+            "stop": "stop",
+            "repeat_penalty": "repeat_penalty",
+            "num_ctx": "num_ctx",
+        }
+        for source, target in aliases.items():
+            value = kwargs.pop(source, None)
+            if value is not None:
+                options[target] = value
+
+        response_format = kwargs.pop("response_format", None)
+        output_format = kwargs.pop("format", None)
+        if isinstance(response_format, dict):
+            if response_format.get("type") == "json_object":
+                output_format = "json"
+            elif response_format.get("type") == "json_schema":
+                json_schema = response_format.get("json_schema") or {}
+                output_format = json_schema.get("schema") or json_schema
+
+        payload: Dict[str, Any] = {
+            "model": model_name,
+            "messages": messages,
+            "stream": False,
+            "think": kwargs.pop("think", settings.OLLAMA_THINK),
+            "keep_alive": kwargs.pop("keep_alive", settings.OLLAMA_KEEP_ALIVE),
+        }
+        if options:
+            payload["options"] = options
+        if output_format:
+            payload["format"] = output_format
+        for key in ("tools", "logprobs", "top_logprobs"):
+            value = kwargs.pop(key, None)
+            if value is not None:
+                payload[key] = value
+        return payload
+
     async def chat(self, messages: List[Dict], model_name: str, **kwargs) -> Dict[str, Any]:
         try:
             import httpx
 
-            api_base = self.api_base or "http://localhost:11434"
+            api_base = (self.api_base or "http://localhost:11434").rstrip("/")
 
             # 合并分层 system 消息
             processed = self._merge_layered_messages(messages)
 
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            payload = self._build_chat_payload(processed, model_name, **kwargs)
+            async with httpx.AsyncClient(timeout=settings.OLLAMA_REQUEST_TIMEOUT_SECONDS) as client:
                 response = await client.post(
                     f"{api_base}/api/chat",
-                    json={
-                        "model": model_name,
-                        "messages": processed,
-                        "stream": False,
-                        **kwargs
-                    }
+                    json=payload,
                 )
                 response.raise_for_status()
                 data = response.json()
+                message = data.get("message") or {}
+                content = message.get("content") or ""
 
                 return {
-                    "content": data["message"]["content"],
+                    "content": content,
+                    "thinking_only": not content.strip() and bool(str(message.get("thinking") or "").strip()),
                     "finish_reason": data.get("done_reason"),
                     "usage": {
                         "prompt_tokens": data.get("prompt_eval_count", 0),
@@ -290,10 +348,18 @@ class OllamaProvider(BaseProvider):
     async def test_connection(self, model_name: str = None) -> bool:
         try:
             import httpx
-            api_base = self.api_base or "http://localhost:11434"
+            api_base = (self.api_base or "http://localhost:11434").rstrip("/")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(f"{api_base}/api/tags")
-                return response.status_code == 200
+                if response.status_code != 200:
+                    return False
+                if not model_name:
+                    return True
+                installed = {
+                    str(item.get("name") or item.get("model") or "")
+                    for item in response.json().get("models", [])
+                }
+                return model_name in installed
         except Exception as e:
             logger.error(f"Ollama connection test failed: {e}")
             return False
@@ -318,24 +384,85 @@ class LLMService:
     
     def __init__(self):
         self.providers: Dict[str, BaseProvider] = {}
-    
+        self._model_active = 0
+        self._model_condition = asyncio.Condition()
+
+    @staticmethod
+    def _provider_runtime(provider: ModelProvider) -> str:
+        if provider.provider_type == ProviderType.OLLAMA:
+            return InferenceRuntime.OLLAMA.value
+        return getattr(provider, "runtime_kind", None) or InferenceRuntime.CLOUD.value
+
+    @staticmethod
+    def runtime_preference(policy: str) -> List[str]:
+        if policy == "auto":
+            primary = InferenceRuntime.VLLM.value if gpu_available() else InferenceRuntime.CLOUD.value
+        elif policy == "local":
+            primary = InferenceRuntime.VLLM.value if gpu_available() else InferenceRuntime.LLAMA_CPP.value
+        else:
+            primary = policy
+        fallback = ["cloud", "vllm", "llama_cpp", "ollama"]
+        return [primary, *(item for item in fallback if item != primary)]
+
+    async def _rank_models_for_runtime(
+        self,
+        db: AsyncSession,
+        models: List[ModelConfig],
+    ) -> List[ModelConfig]:
+        if not models:
+            return []
+        providers = (await db.execute(select(ModelProvider).where(
+            ModelProvider.id.in_({model.provider_id for model in models}),
+            ModelProvider.is_active.is_(True),
+        ))).scalars().all()
+        runtime_by_provider = {provider.id: self._provider_runtime(provider) for provider in providers}
+        policy = await get_config_service(db).get("runtime.model_policy", settings.LLM_RUNTIME_POLICY)
+        preference = {runtime: index for index, runtime in enumerate(self.runtime_preference(policy))}
+        return sorted(
+            (model for model in models if model.provider_id in runtime_by_provider),
+            key=lambda model: (
+                preference.get(runtime_by_provider[model.provider_id], len(preference)),
+                not bool(model.is_default),
+                model.priority,
+                model.id,
+            ),
+        )
+
+    @asynccontextmanager
+    async def _model_slot(self, limit: int):
+        async with self._model_condition:
+            await self._model_condition.wait_for(lambda: self._model_active < max(1, limit))
+            self._model_active += 1
+        try:
+            yield
+        finally:
+            async with self._model_condition:
+                self._model_active -= 1
+                self._model_condition.notify_all()
+
     def _get_provider(self, provider: ModelProvider) -> BaseProvider:
         """Get or create provider adapter"""
         cache_key = f"{provider.id}_{provider.provider_type.value}"
         
         if cache_key not in self.providers:
+            api_key = decrypt_secret(provider.api_key)
+            if not api_key and self._provider_runtime(provider) in {
+                InferenceRuntime.VLLM.value,
+                InferenceRuntime.LLAMA_CPP.value,
+            }:
+                api_key = "local"
             if provider.provider_type == ProviderType.OPENAI:
-                self.providers[cache_key] = OpenAIProvider(provider.api_key, provider.api_base)
+                self.providers[cache_key] = OpenAIProvider(api_key, provider.api_base)
             elif provider.provider_type == ProviderType.ANTHROPIC:
-                self.providers[cache_key] = AnthropicProvider(provider.api_key, provider.api_base)
+                self.providers[cache_key] = AnthropicProvider(api_key, provider.api_base)
             elif provider.provider_type == ProviderType.OLLAMA:
-                self.providers[cache_key] = OllamaProvider(provider.api_key or "", provider.api_base)
+                self.providers[cache_key] = OllamaProvider(api_key, provider.api_base)
             elif provider.provider_type == ProviderType.AZURE:
                 # Azure uses OpenAI SDK with different base URL
-                self.providers[cache_key] = OpenAIProvider(provider.api_key, provider.api_base)
+                self.providers[cache_key] = OpenAIProvider(api_key, provider.api_base)
             elif provider.provider_type == ProviderType.CUSTOM:
                 # Custom providers use OpenAI-compatible API
-                self.providers[cache_key] = OpenAIProvider(provider.api_key, provider.api_base)
+                self.providers[cache_key] = OpenAIProvider(api_key, provider.api_base)
             else:
                 raise ValueError(f"Unknown provider type: {provider.provider_type}")
         
@@ -349,14 +476,14 @@ class LLMService:
         return result.scalar_one_or_none()
     
     async def get_default_model(self, db: AsyncSession) -> Optional[ModelConfig]:
-        """Get default model configuration"""
+        """Get the highest-ranked model for the active deployment policy."""
         result = await db.execute(
             select(ModelConfig)
-            .where(ModelConfig.is_default == True, ModelConfig.is_active == True)
-            .order_by(ModelConfig.priority)
-            .limit(1)
+            .where(ModelConfig.is_active == True)
+            .order_by(ModelConfig.priority, ModelConfig.id)
         )
-        return result.scalar_one_or_none()
+        models = await self._rank_models_for_runtime(db, list(result.scalars().all()))
+        return models[0] if models else None
     
     async def get_available_models(
         self, 
@@ -438,7 +565,10 @@ class LLMService:
         messages: List[Dict],
         task_type: str = "chat",
         timeout: float = 60.0,
-        response_validator: Optional[Callable[[Dict[str, Any]], None]] = None,
+        response_validator: Optional[Callable[[Dict[str, Any]], Any]] = None,
+        response_model: Optional[Type[BaseModel]] = None,
+        business_validator: Optional[Callable[[BaseModel], None]] = None,
+        max_attempts_per_model: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -447,21 +577,162 @@ class LLMService:
         Args:
             timeout: 整体超时时间（秒），默认 60 秒
         """
-        try:
-            return await asyncio.wait_for(
-                self._chat_with_fallback_impl(
-                    db,
-                    user_id,
-                    messages,
-                    task_type,
-                    response_validator=response_validator,
-                    **kwargs,
-                ),
-                timeout=timeout
+        models = await self._candidate_models(db, task_type)
+        structured_schema = response_model.model_json_schema() if response_model else None
+        validator = response_validator
+        if response_model:
+            messages = self._with_schema_instruction(messages, structured_schema)
+            validator = self._structured_validator(response_model, business_validator, response_validator)
+        attempts = max_attempts_per_model or (3 if response_model else 1)
+        providers = (await db.execute(
+            select(ModelProvider).where(
+                ModelProvider.id.in_({model.provider_id for model in models}),
+                ModelProvider.is_active.is_(True),
             )
+        )).scalars().all() if models else []
+        local_cpu_runtime = any(
+            self._provider_runtime(provider) in {InferenceRuntime.OLLAMA.value, InferenceRuntime.LLAMA_CPP.value}
+            for provider in providers
+        )
+        resources = await resource_runtime_status(db)
+        retry_timeout = timeout * attempts if response_model else timeout
+        effective_timeout = (
+            max(retry_timeout, settings.OLLAMA_REQUEST_TIMEOUT_SECONDS)
+            if local_cpu_runtime
+            else retry_timeout
+        )
+        try:
+            async with self._model_slot(resources["limits"]["model"]):
+                return await asyncio.wait_for(
+                    self._chat_with_fallback_impl(
+                        db,
+                        user_id,
+                        messages,
+                        task_type,
+                        models=models,
+                        response_validator=validator,
+                        max_attempts_per_model=attempts,
+                        structured_schema=structured_schema,
+                        structured_name=response_model.__name__ if response_model else None,
+                        **kwargs,
+                    ),
+                    timeout=effective_timeout,
+                )
         except asyncio.TimeoutError:
-            logger.error(f"LLM call timed out after {timeout}s")
-            raise ValueError(f"LLM call timed out after {timeout}s")
+            logger.error(f"LLM call timed out after {effective_timeout}s")
+            raise ValueError(f"LLM call timed out after {effective_timeout}s")
+
+    @staticmethod
+    def _with_schema_instruction(messages: List[Dict], schema: Dict[str, Any]) -> List[Dict]:
+        instruction = (
+            "\n\n只返回一个符合以下 JSON Schema 的 JSON 对象，不得输出 Markdown、解释或思考过程：\n"
+            + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        )
+        result = [dict(message) for message in messages]
+        for message in result:
+            if message.get("role") != "system":
+                continue
+            content = message.get("content")
+            if isinstance(content, dict) and "stable" in content:
+                message["content"] = {**content, "variable": str(content.get("variable") or "") + instruction}
+            else:
+                message["content"] = str(content or "") + instruction
+            return result
+        return [{"role": "system", "content": instruction.strip()}, *result]
+
+    def _structured_validator(
+        self,
+        response_model: Type[BaseModel],
+        business_validator: Optional[Callable[[BaseModel], None]],
+        response_validator: Optional[Callable[[Dict[str, Any]], Any]],
+    ) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
+        def validate(response: Dict[str, Any]) -> Dict[str, Any]:
+            if response.get("thinking_only"):
+                raise ValueError("模型只返回了思考过程，没有最终答案")
+            if response.get("finish_reason") in {"length", "max_tokens"}:
+                raise ValueError("模型输出达到长度上限，JSON 不完整")
+            payload = self._extract_json_value(str(response.get("content") or ""))
+            validated = response_model.model_validate(payload)
+            if business_validator:
+                business_validator(validated)
+            if response_validator:
+                response_validator(response)
+            return validated.model_dump(mode="json")
+
+        return validate
+
+    @staticmethod
+    def _extract_json_value(content: str) -> Any:
+        text = re.sub(r"<think>[\s\S]*?</think>", "", content or "", flags=re.I).strip()
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I).strip()
+        if not text:
+            raise ValueError("模型没有返回最终 JSON 内容")
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            decoder = json.JSONDecoder()
+            for index, char in enumerate(text):
+                if char not in "[{":
+                    continue
+                try:
+                    value, _ = decoder.raw_decode(text[index:])
+                    return value
+                except json.JSONDecodeError:
+                    continue
+        raise ValueError("模型未返回有效 JSON")
+
+    @staticmethod
+    def _structured_response_format(
+        provider_type: ProviderType,
+        schema: Dict[str, Any],
+        name: str,
+        attempt: int = 1,
+    ) -> Optional[Dict[str, Any]]:
+        if provider_type == ProviderType.ANTHROPIC:
+            return None
+        if provider_type in {ProviderType.CUSTOM, ProviderType.AZURE} or (
+            provider_type == ProviderType.OPENAI and attempt > 1
+        ):
+            return {"type": "json_object"}
+        safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", name)[:64] or "structured_response"
+        return {
+            "type": "json_schema",
+            "json_schema": {"name": safe_name, "strict": True, "schema": schema},
+        }
+
+    @staticmethod
+    def _validation_error_detail(exc: Exception) -> str:
+        if isinstance(exc, ValidationError):
+            return "；".join(
+                f"{'.'.join(str(part) for part in error['loc']) or 'response'}: {error['msg']}"
+                for error in exc.errors(include_input=False, include_url=False)
+            )[:300]
+        return re.sub(r"\s+", " ", str(exc)).strip()[:300]
+
+    async def _candidate_models(self, db: AsyncSession, task_type: str) -> List[ModelConfig]:
+        models = await self.get_available_models(db, task_type)
+        if not models and task_type != "chat":
+            models = await self.get_available_models(db, "chat")
+        return await self._rank_models_for_runtime(db, models or await self.get_available_models(db))
+
+    async def runtime_status(self, db: AsyncSession) -> Dict[str, Any]:
+        resources = await resource_runtime_status(db)
+        models = await self._candidate_models(db, "chat")
+        selected = models[0] if models else None
+        provider = (await db.execute(select(ModelProvider).where(
+            ModelProvider.id == selected.provider_id
+        ))).scalar_one_or_none() if selected else None
+        policy = await get_config_service(db).get("runtime.model_policy", settings.LLM_RUNTIME_POLICY)
+        return {
+            **resources,
+            "model_policy": policy,
+            "model_preference": self.runtime_preference(policy),
+            "selected_runtime": self._provider_runtime(provider) if provider else None,
+            "selected_model": selected.model_name if selected else None,
+            "selected_provider": provider.name if provider else None,
+            "model_ready": bool(selected and provider),
+            "active_model_calls": self._model_active,
+        }
 
     async def embed_with_fallback(
         self,
@@ -536,58 +807,80 @@ class LLMService:
         user_id: int,
         messages: List[Dict],
         task_type: str = "chat",
-        response_validator: Optional[Callable[[Dict[str, Any]], None]] = None,
+        models: Optional[List[ModelConfig]] = None,
+        response_validator: Optional[Callable[[Dict[str, Any]], Any]] = None,
+        max_attempts_per_model: int = 1,
+        structured_schema: Optional[Dict[str, Any]] = None,
+        structured_name: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """Internal implementation of chat_with_fallback"""
-        models = await self.get_available_models(db, task_type)
-        if not models and task_type != "chat":
-            models = await self.get_available_models(db, "chat")
-        if not models:
-            models = await self.get_available_models(db)
+        models = models if models is not None else await self._candidate_models(db, task_type)
         
         if not models:
             raise ValueError("No available models for this task type")
         
-        last_error = None
+        errors = []
         for model_config in models:
-            try:
-                result = await db.execute(
-                    select(ModelProvider).where(ModelProvider.id == model_config.provider_id)
-                )
-                provider = result.scalar_one_or_none()
-                
-                if not provider or not provider.is_active:
-                    continue
-                
-                adapter = self._get_provider(provider)
-                response = await adapter.chat(messages, model_config.model_name, **kwargs)
-                
-                # Record usage
-                await self.record_usage(
-                    db=db,
-                    user_id=user_id,
-                    model_config_id=model_config.id,
-                    prompt_tokens=response["usage"]["prompt_tokens"],
-                    completion_tokens=response["usage"]["completion_tokens"],
-                    task_type=task_type,
-                )
-                if response_validator:
-                    response_validator(response)
-                
-                response["model_config_id"] = model_config.id
-                response["model_name"] = model_config.model_name
-                response["display_name"] = model_config.display_name
-                response["fallback_used"] = model_config != models[0]
-                
-                return response
-                
-            except Exception as e:
-                logger.warning(f"Model {model_config.model_name} failed: {e}, trying next...")
-                last_error = e
+            result = await db.execute(
+                select(ModelProvider).where(ModelProvider.id == model_config.provider_id)
+            )
+            provider = result.scalar_one_or_none()
+            if not provider or not provider.is_active:
                 continue
-        
-        raise ValueError(f"All models failed. Last error: {last_error}")
+
+            adapter = self._get_provider(provider)
+            attempt_messages = messages
+            for attempt in range(1, max(1, max_attempts_per_model) + 1):
+                try:
+                    call_kwargs = dict(kwargs)
+                    if structured_schema:
+                        response_format = self._structured_response_format(
+                            provider.provider_type,
+                            structured_schema,
+                            structured_name or "structured_response",
+                            attempt,
+                        )
+                        if response_format:
+                            call_kwargs["response_format"] = response_format
+                        else:
+                            call_kwargs.pop("response_format", None)
+                    response = await adapter.chat(attempt_messages, model_config.model_name, **call_kwargs)
+
+                    await self.record_usage(
+                        db=db,
+                        user_id=user_id,
+                        model_config_id=model_config.id,
+                        prompt_tokens=response["usage"]["prompt_tokens"],
+                        completion_tokens=response["usage"]["completion_tokens"],
+                        task_type=task_type,
+                    )
+                    validated = response_validator(response) if response_validator else None
+                    if validated is not None:
+                        response["validated"] = validated
+
+                    response["model_config_id"] = model_config.id
+                    response["model_name"] = model_config.model_name
+                    response["display_name"] = model_config.display_name
+                    response["fallback_used"] = model_config != models[0]
+                    response["attempt"] = attempt
+                    return response
+                except Exception as exc:
+                    error_detail = self._validation_error_detail(exc)
+                    error = f"{model_config.display_name} 第 {attempt} 次：{error_detail}"
+                    errors.append(error)
+                    logger.warning("Structured/model call failed: %s", error)
+                    if attempt < max_attempts_per_model:
+                        attempt_messages = [
+                            *messages,
+                            {
+                                "role": "user",
+                                "content": f"上一次输出未通过校验：{error_detail}。请重新生成，只返回符合要求的 JSON。",
+                            },
+                        ]
+
+        detail = "；".join(errors[-6:]) if errors else "没有可用模型"
+        raise ValueError(f"所有模型均未生成有效结果：{detail}")
     
     async def record_usage(
         self,
@@ -642,18 +935,39 @@ class LLMService:
                     "capability": "embedding",
                     "dimensions": len(vectors[0]),
                 }
-            success = await adapter.test_connection(model_name=model_config.model_name)
-            if not success:
-                return {
-                    "success": False,
-                    "error": "Connection failed. Please check API Key and API Base URL.",
-                    "model_name": model_config.model_name,
-                    "provider": provider.name
-                }
+            schema = ModelHealthContract.model_json_schema()
+            messages = self._with_schema_instruction(
+                [{"role": "user", "content": "返回 status 为 ok 的结构化结果。"}],
+                schema,
+            )
+            validator = self._structured_validator(ModelHealthContract, None, None)
+            last_error = None
+            for attempt in range(1, 4):
+                try:
+                    kwargs = {"temperature": 0, "max_tokens": 64}
+                    response_format = self._structured_response_format(
+                        provider.provider_type,
+                        schema,
+                        ModelHealthContract.__name__,
+                        attempt,
+                    )
+                    if response_format:
+                        kwargs["response_format"] = response_format
+                    response = await adapter.chat(messages, model_config.model_name, **kwargs)
+                    validator(response)
+                    break
+                except Exception as exc:
+                    last_error = exc
+            else:
+                raise ValueError(f"模型连续 3 次未通过结构化输出测试：{last_error}")
             return {
                 "success": True,
                 "model_name": model_config.model_name,
-                "provider": provider.name
+                "provider": provider.name,
+                "capability": "chat",
+                "json_mode": True,
+                "attempt": attempt,
+                "thinking_disabled": not settings.OLLAMA_THINK if provider.provider_type == ProviderType.OLLAMA else None,
             }
         except Exception as e:
             logger.error(f"Model test failed: {e}")

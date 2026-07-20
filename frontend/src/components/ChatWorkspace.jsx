@@ -13,6 +13,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
+import { useAuthStore } from '../store/authStore'
 import VeriSureLogo from './VeriSureLogo'
 import AssetCredentialModal from './AssetCredentialModal'
 import ResultMessageRenderer from './ResultMessageRenderer'
@@ -754,7 +755,9 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
     let wsConnected = false
 
     try {
-      const ws = new WebSocket(wsUrl)
+      const token = useAuthStore.getState().token
+      if (!token) return
+      const ws = new WebSocket(wsUrl, ['certiproof', `auth.${token}`])
       wsRefsRef.current.set(taskId, ws)
       startPollingFallback(taskId)
 

@@ -67,3 +67,6 @@ build/
 
 # Generated validation reports
 artifacts/
+
+# Local inference weights are deployed separately.
+models/llm/

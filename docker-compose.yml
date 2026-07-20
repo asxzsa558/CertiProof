@@ -1,6 +1,7 @@
 version: "3.8"
 
 x-worker-common: &worker-common
+  image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/backend:${CERTIPROOF_VERSION:-latest}
   build:
     context: ./backend
     dockerfile: Dockerfile
@@ -11,8 +12,22 @@ x-worker-common: &worker-common
     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
     APP_ENV: ${APP_ENV:-production}
     DEBUG: ${DEBUG:-false}
+    ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
+    LOGIN_RATE_LIMIT_ATTEMPTS: ${LOGIN_RATE_LIMIT_ATTEMPTS:-5}
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: ${LOGIN_RATE_LIMIT_WINDOW_SECONDS:-300}
     MCP_GATEWAY_URL: http://mcp-gateway:9000
     OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    OPENAI_API_BASE: ${OPENAI_API_BASE:-}
+    OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+    LLM_RUNTIME_POLICY: ${LLM_RUNTIME_POLICY:-auto}
+    LLM_GPU_AVAILABLE: ${LLM_GPU_AVAILABLE:-auto}
+    VLLM_API_BASE: ${VLLM_API_BASE:-http://vllm:8000/v1}
+    VLLM_MODEL: ${VLLM_MODEL:-}
+    LLAMA_CPP_API_BASE: ${LLAMA_CPP_API_BASE:-http://llama-cpp:8080/v1}
+    LLAMA_CPP_MODEL: ${LLAMA_CPP_MODEL:-}
+    OLLAMA_REQUEST_TIMEOUT_SECONDS: ${OLLAMA_REQUEST_TIMEOUT_SECONDS:-300}
+    OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+    OLLAMA_THINK: ${OLLAMA_THINK:-false}
     TASK_EXECUTION_MODE: worker
     TASK_WORKER_POLL_SECONDS: ${TASK_WORKER_POLL_SECONDS:-3}
     TASK_LEASE_MINUTES: ${TASK_LEASE_MINUTES:-2}
@@ -38,12 +53,21 @@ x-worker-common: &worker-common
     embedding-server:
       condition: service_healthy
   restart: unless-stopped
+  mem_limit: ${WORKER_MEMORY_LIMIT:-2g}
+  cpus: ${WORKER_CPU_LIMIT:-2.0}
+  pids_limit: ${WORKER_PIDS_LIMIT:-512}
+  logging: &default-logging
+    driver: json-file
+    options:
+      max-size: ${LOG_MAX_SIZE:-20m}
+      max-file: ${LOG_MAX_FILES:-5}
   networks:
     - certiproof-net
 
 services:
   # 数据库
   db:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/postgres:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./docker/postgres
       dockerfile: Dockerfile
@@ -54,6 +78,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-certiproof}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-4g}
+    cpus: ${POSTGRES_CPU_LIMIT:-2.0}
+    pids_limit: 512
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-certiproof}"]
       interval: 10s
@@ -68,6 +96,10 @@ services:
     container_name: certiproof-redis
     volumes:
       - redis_data:/data
+    mem_limit: ${REDIS_MEMORY_LIMIT:-1g}
+    cpus: ${REDIS_CPU_LIMIT:-1.0}
+    pids_limit: 256
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -78,6 +110,7 @@ services:
 
   # 前端
   frontend:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/frontend:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -87,11 +120,16 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-512m}
+    cpus: ${FRONTEND_CPU_LIMIT:-1.0}
+    pids_limit: 256
+    logging: *default-logging
     networks:
       - certiproof-net
 
   # 后端（包含 Orchestrator）
   backend:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/backend:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -104,9 +142,23 @@ services:
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       APP_ENV: ${APP_ENV:-production}
       DEBUG: ${DEBUG:-false}
+      ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
+      LOGIN_RATE_LIMIT_ATTEMPTS: ${LOGIN_RATE_LIMIT_ATTEMPTS:-5}
+      LOGIN_RATE_LIMIT_WINDOW_SECONDS: ${LOGIN_RATE_LIMIT_WINDOW_SECONDS:-300}
       CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000"]}'
       MCP_GATEWAY_URL: http://mcp-gateway:9000
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_BASE: ${OPENAI_API_BASE:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      LLM_RUNTIME_POLICY: ${LLM_RUNTIME_POLICY:-auto}
+      LLM_GPU_AVAILABLE: ${LLM_GPU_AVAILABLE:-auto}
+      VLLM_API_BASE: ${VLLM_API_BASE:-http://vllm:8000/v1}
+      VLLM_MODEL: ${VLLM_MODEL:-}
+      LLAMA_CPP_API_BASE: ${LLAMA_CPP_API_BASE:-http://llama-cpp:8080/v1}
+      LLAMA_CPP_MODEL: ${LLAMA_CPP_MODEL:-}
+      OLLAMA_REQUEST_TIMEOUT_SECONDS: ${OLLAMA_REQUEST_TIMEOUT_SECONDS:-300}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      OLLAMA_THINK: ${OLLAMA_THINK:-false}
       TASK_EXECUTION_MODE: ${TASK_EXECUTION_MODE:-worker}
       DOCUMENT_ANALYSIS_MODE: ${DOCUMENT_ANALYSIS_MODE:-standard}
       GRAPH_NAME: ${GRAPH_NAME:-certiproof}
@@ -127,6 +179,10 @@ services:
       embedding-server:
         condition: service_healthy
     restart: unless-stopped
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
+    cpus: ${BACKEND_CPU_LIMIT:-2.0}
+    pids_limit: 512
+    logging: *default-logging
     networks:
       - certiproof-net
 
@@ -149,10 +205,15 @@ services:
       frontend:
         condition: service_started
     restart: unless-stopped
+    mem_limit: ${EDGE_MEMORY_LIMIT:-512m}
+    cpus: ${EDGE_CPU_LIMIT:-1.0}
+    pids_limit: 256
+    logging: *default-logging
     networks:
       - certiproof-net
 
   migrate:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/backend:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -235,6 +296,7 @@ services:
 
   # MCP Gateway
   mcp-gateway:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/mcp-gateway:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./mcp-servers/gateway
       dockerfile: Dockerfile
@@ -249,11 +311,16 @@ services:
       - db-tools
       - windows-tools
     restart: unless-stopped
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    logging: *default-logging
     networks:
       - certiproof-net
 
   # 统一安全工具服务 (nmap + testssl + nuclei + hydra)
   security-tools:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/security-tools:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./mcp-servers/security-tools
       dockerfile: Dockerfile
@@ -261,11 +328,16 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    mem_limit: ${SECURITY_TOOL_MEMORY_LIMIT:-2g}
+    cpus: ${SECURITY_TOOL_CPU_LIMIT:-2.0}
+    pids_limit: 1024
+    logging: *default-logging
     networks:
       - certiproof-net
 
   # SSH 白盒配置核查服务
   ssh-checker:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/ssh-checker:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./mcp-servers/ssh-checker
       dockerfile: Dockerfile
@@ -273,11 +345,16 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    logging: *default-logging
     networks:
       - certiproof-net
 
   # 快速端口扫描服务 (masscan + fping)
   fast-scanner:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/fast-scanner:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./mcp-servers/fast-scanner
       dockerfile: Dockerfile
@@ -285,11 +362,16 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    logging: *default-logging
     networks:
       - certiproof-net
 
   # Web 安全检测服务 (nikto + sqlmap + gobuster + ffuf)
   web-tools:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/web-tools:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./mcp-servers/web-tools
       dockerfile: Dockerfile
@@ -297,11 +379,16 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    mem_limit: ${WEB_TOOL_MEMORY_LIMIT:-2g}
+    cpus: ${WEB_TOOL_CPU_LIMIT:-2.0}
+    pids_limit: 1024
+    logging: *default-logging
     networks:
       - certiproof-net
 
   # 网络设备检测服务 (snmpwalk + onesixtyone)
   network-tools:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/network-tools:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./mcp-servers/network-tools
       dockerfile: Dockerfile
@@ -309,11 +396,16 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    logging: *default-logging
     networks:
       - certiproof-net
 
   # 数据库安全检测服务 (redis-cli + tnscmd10g + mysql-client)
   db-tools:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/db-tools:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./mcp-servers/db-tools
       dockerfile: Dockerfile
@@ -321,11 +413,16 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    logging: *default-logging
     networks:
       - certiproof-net
 
   # Windows/AD 安全检测服务 (enum4linux-ng + netexec + impacket)
   windows-tools:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/windows-tools:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./mcp-servers/windows-tools
       dockerfile: Dockerfile
@@ -333,11 +430,77 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    logging: *default-logging
+    networks:
+      - certiproof-net
+
+  # NVIDIA GPU 本地推理；仅在 gpu profile 中启动。
+  vllm:
+    profiles: ["gpu"]
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.19.1}
+    container_name: certiproof-vllm
+    command:
+      - --model
+      - ${VLLM_MODEL:-Qwen/Qwen3-14B}
+      - --served-model-name
+      - ${VLLM_MODEL:-Qwen/Qwen3-14B}
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --max-model-len
+      - ${VLLM_MAX_MODEL_LEN:-16384}
+      - --gpu-memory-utilization
+      - ${VLLM_GPU_MEMORY_UTILIZATION:-0.9}
+    environment:
+      HF_HOME: /models/huggingface
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - llm_models:/models
+    ipc: host
+    runtime: nvidia
+    pids_limit: 2048
+    logging: *default-logging
+    restart: unless-stopped
+    networks:
+      - certiproof-net
+
+  # 纯 CPU 离线推理；仅在 cpu-local profile 中启动。
+  llama-cpp:
+    profiles: ["cpu-local"]
+    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    container_name: certiproof-llama-cpp
+    command:
+      - -m
+      - /models/${LLAMA_CPP_MODEL_FILE:-qwen3-14b-q4_k_m.gguf}
+      - --alias
+      - ${LLAMA_CPP_MODEL:-qwen3-14b}
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --ctx-size
+      - ${LLAMA_CPP_CONTEXT_SIZE:-16384}
+      - --parallel
+      - ${LLAMA_CPP_PARALLEL:-1}
+    volumes:
+      - ${LLM_MODEL_DIR:-./models/llm}:/models:ro
+    mem_limit: ${LLAMA_CPP_MEMORY_LIMIT:-24g}
+    cpus: ${LLAMA_CPP_CPU_LIMIT:-16.0}
+    pids_limit: 1024
+    logging: *default-logging
+    restart: unless-stopped
     networks:
       - certiproof-net
 
   # OCR MCP Server
   ocr-server:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/ocr-server:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./mcp-servers/ocr-server
       dockerfile: Dockerfile
@@ -351,11 +514,16 @@ services:
     volumes:
       - ocr_models:/root/.paddlex
     restart: unless-stopped
+    mem_limit: ${OCR_MEMORY_LIMIT:-8g}
+    cpus: ${OCR_CPU_LIMIT:-4.0}
+    pids_limit: 1024
+    logging: *default-logging
     networks:
       - certiproof-net
 
   # 本地多语言文本向量服务（ONNX Runtime，无外部授权依赖）
   embedding-server:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/embedding-server:${CERTIPROOF_VERSION:-latest}
     build:
       context: ./mcp-servers/embedding-server
       dockerfile: Dockerfile
@@ -375,6 +543,10 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    mem_limit: ${EMBEDDING_MEMORY_LIMIT:-6g}
+    cpus: ${EMBEDDING_CPU_LIMIT:-4.0}
+    pids_limit: 1024
+    logging: *default-logging
     networks:
       - certiproof-net
 
@@ -384,6 +556,7 @@ volumes:
   uploads_data:
   ocr_models:
   embedding_models:
+  llm_models:
   caddy_data:
   caddy_config:
 

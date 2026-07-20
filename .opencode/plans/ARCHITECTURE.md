@@ -183,26 +183,56 @@ flowchart LR
 - Git 仓库保存完整源码、锁文件、Dockerfile、Compose 编排、迁移和标准库；不依赖本机生成且被忽略的 `frontend/dist`。
 - 前端镜像采用多阶段构建：Node 20 容器执行 `npm ci` 和 Vite 构建，再把静态产物复制到轻量 Python 静态服务镜像。
 - 全新部署先由 `.env.example` 创建根目录 `.env`，并必须替换数据库密码和至少 32 位的 `SECRET_KEY`。
-- `docker compose up -d --build` 是标准启动入口；`migrate` 服务先完成数据库迁移、pgvector/Apache AGE 初始化和标准图谱装载，业务服务再启动。
+- `scripts/start-production.sh` 是生产推荐入口，并兼容 `docker compose` 与 `docker-compose`；它先探测 NVIDIA GPU、选择模型 profile，再按 `CERTIPROOF_DEPLOY_MODE` 使用源码构建或已发布镜像。常规开发使用 `build`，云部署包默认使用 `images`，只拉取镜像并以 `--no-build` 启动。
+- `.github/workflows/publish-cloud-images.yml` 在 `main` 推送、版本标签或手动触发时先执行 Compose 校验、后端测试和前端生产构建，再依据 `docker-bake.hcl` 在原生 Ubuntu x86_64 Runner 上构建 13 个 `linux/amd64` 业务镜像并发布到 GHCR。`main` 发布 `latest`，版本标签使用标签名；后端、迁移和五类 Worker 复用同一个后端镜像，不重复构建。
+- `scripts/package-cloud-deployment.sh` 生成 CPU 云推理包和 NVIDIA GPU 本地推理包。部署包包含 Compose、环境模板、Caddy、标准库和启动/预检/备份脚本，不重复塞入镜像层或模型权重；真正的应用镜像由目标主机从 GHCR 拉取。
+- `scripts/cloud-preflight.sh` 在创建容器前检查 Linux/x86_64、Docker/Compose、密钥、域名、磁盘/内存以及云模型或 NVIDIA runtime，并验证最终 Compose 配置。失败必须在启动前给出可操作原因。
+- `migrate` 服务先完成数据库迁移、pgvector/Apache AGE 初始化和标准图谱装载，业务服务再启动。
 - PostgreSQL、Redis、上传材料、OCR 模型和向量模型分别使用持久卷；普通 `down` 不删除数据，只有明确清库时才使用 `down -v`。
-- 模型权重不进入 Git。向量模型和 OCR/视觉模型首次使用时从模型源下载到持久卷，后续启动复用缓存。
+- 模型权重不进入 Git、业务镜像或部署压缩包。向量模型和 OCR/视觉模型首次使用时从模型源下载到持久卷，GPU 包的 Qwen3-14B 也由 vLLM 首次启动时下载；后续启动复用缓存，隔离环境需预先搬运模型卷。
 - 可复现构建仍依赖部署环境能够访问 Docker 镜像源、npm/Python 软件源和首次模型下载源；这些外部网络失败必须与源码构建失败区分显示。
 - `acceptance` Compose profile 提供隔离的受控 SSH/HTTP/HTTPS 靶机，用真实端口、认证、协议和漏洞工具结果验收完整流程；它不属于生产服务，也不替代已授权公网抽样。
 - 首期云上生产继续采用单台 Linux 云服务器和同一份 Compose，不提前拆成多机控制面。`production` profile 增加 Caddy 边缘容器，只有 80/443 暴露公网；前端 3000、后端 8000 仅绑定宿主机回环地址，数据库、Redis、Gateway 与 Tool Server 只在容器网络通信。
-- 多 VPC 检测依赖云服务器到目标 CIDR 的双向路由、安全组、网络 ACL、主机防火墙和扫描源白名单；VPC 互通时无需分布式 Agent，不互通时再增加远端扫描节点。数据库与上传材料使用 `scripts/backup-production.sh` 生成带 SHA-256 的业务备份，并复制到异机或对象存储做恢复演练。
+- Compose 为数据库、Redis、API、Worker、OCR、向量和工具容器设置可覆盖的 CPU、内存、PID 与滚动日志上限。应用启动后检测容器可用 CPU、内存和 GPU，自动推荐轻量、标准或 GPU 档位；管理员可在系统设置中切换自动/手动档位、并发数和压力阈值。达到 CPU 或内存阈值时 Worker 暂停领取新任务，已有任务不被强制中断。
+- 多 VPC 检测依赖云服务器到目标 CIDR 的双向路由、安全组、网络 ACL、主机防火墙和扫描源白名单；VPC 互通时无需分布式 Agent，不互通时再增加远端扫描节点。数据库与上传材料使用 `scripts/backup-production.sh` 生成带 SHA-256 的业务备份，并复制到异机或对象存储；当前自动验收只校验备份成功生成与哈希完整性，不自动执行恢复验证。
+
+**CPU 云推理与 GPU 本地推理部署矩阵**：
+
+| 准备项 | CPU 云服务器 + 云端推理模型 | NVIDIA GPU 云服务器 + 本地 vLLM |
+|--------|-----------------------------|----------------------------------|
+| 适用场景 | 先上线验证、并发不高、不保存本地大模型、允许通过 HTTPS 调用合规的云模型 | 文档和提示词不能发往外部、需要稳定低延迟、调用量足以摊薄 GPU 成本 |
+| 操作系统 | 推荐 Ubuntu 22.04/24.04 LTS x86_64 | 推荐 Ubuntu 22.04/24.04 LTS x86_64；当前 Compose 的 GPU 自动探测和 `runtime: nvidia` 以 NVIDIA 为正式支持路径 |
+| 建议规格 | 测试起点 8 vCPU / 32 GB / 200 GB；正式单机建议 16 vCPU / 64 GB / 300 GB SSD | Qwen3-14B BF16 建议 16 vCPU / 64 GB RAM / 单卡 48 GB 显存 / 300-500 GB SSD；40 GB 显存可作为低并发起点，24 GB 不能直接承载当前默认 BF16 14B 配置 |
+| 交付制品 | `certiproof-cloud-cpu-<version>.tar.gz`；共享业务镜像从 GHCR 拉取 | `certiproof-cloud-gpu-<version>.tar.gz`；共享业务镜像从 GHCR 拉取，并额外使用固定版本的 vLLM 官方镜像 |
+| 宿主机软件 | Docker Engine、Docker Compose plugin；使用发布包时不需要 Git 或本地 LLM 运行时 | CPU 方案全部软件，另加 NVIDIA 驱动、`nvidia-container-toolkit` 和 Docker NVIDIA runtime；vLLM/CUDA 用户态依赖由官方容器镜像提供，宿主机无需另装完整 CUDA SDK |
+| 推理准备 | 云模型 API 地址、模型名、API Key、余额/配额、并发与限流、固定出口 IP 或私网端点 | `vllm/vllm-openai:v0.19.1` 镜像、`Qwen/Qwen3-14B` 权重下载权限和持久模型卷；首次下载前需要访问 Docker Hub 与模型源，离线环境需提前搬运镜像和权重 |
+| 本地模型范围 | RapidOCR、PaddleOCR-VL 和 E5 向量模型仍在本机容器执行；只有通用 LLM 判证与对话调用云端 | vLLM 承载通用 LLM；RapidOCR、PaddleOCR-VL 和 E5 继续由各自容器运行，不与 vLLM 混成一个进程 |
+| 网络 | 入站仅开放 80/443；出站允许云模型 API、镜像源和首次模型源；到被测 VPC 必须有双向路由和授权 | 入站和扫描网络要求相同；运行期可不访问云模型，但首次拉镜像/权重仍需出站，或使用离线制品 |
+| 关键配置 | `LLM_RUNTIME_POLICY=cloud`、`OPENAI_API_BASE`、`OPENAI_API_KEY`、`OPENAI_MODEL` | `LLM_RUNTIME_POLICY=vllm`、`VLLM_MODEL=Qwen/Qwen3-14B`、`VLLM_MAX_MODEL_LEN=16384`、`VLLM_GPU_MEMORY_UTILIZATION=0.9` |
+| 启动结果 | `scripts/start-production.sh` 只启动 `production` profile，统一 LLMService 通过云 API 调用 | 脚本检测到 `nvidia-smi` 后同时启动 `production` 与 `gpu` profile，业务容器通过内网 `http://vllm:8000/v1` 调用 |
+
+两种方案共同必须准备域名与 DNS、80/443 安全组、项目到目标资产的合法网络路径、至少 20 位 URL 安全字符组成的随机数据库密码、至少 32 位 `SECRET_KEY`、正确的 `CORS_ORIGINS`、持久数据盘和异机备份位置。生产启动前依次执行 `scripts/cloud-preflight.sh`、`nvidia-smi`（仅 GPU）、GPU 容器烟测、`scripts/start-production.sh --dry-run`、正式启动和 `/health`/模型结构化输出测试。Qwen3-14B 官方模型为 14.8B 参数，当前默认使用 16K 上下文；显存建议包含 BF16 权重、KV Cache 和 vLLM 运行开销，不按“参数量等于显存”简单估算。
 
 ```mermaid
 flowchart LR
-  CLONE["Git clone：源码与锁文件"] --> ENV["由 .env.example 创建 .env"]
-  ENV --> BUILD["Docker Compose build"]
-  BUILD --> FEIMG["Node 构建前端 → 静态服务镜像"]
-  BUILD --> APPIMG["后端、Worker 与工具镜像"]
-  APPIMG --> MIGRATE["迁移 + pgvector + AGE + 标准图谱"]
-  MIGRATE --> START["启动 API、Worker、Gateway 与 Tool Server"]
-  START --> EDGE["production profile：Caddy 80/443"]
-  START --> LAZY["首次任务按需下载模型到持久卷"]
-  FEIMG --> EDGE
-  EDGE --> READY["HTTPS / API 健康检查"]
+  SOURCE["源码、锁文件、Dockerfile"] --> CI["GitHub Actions：测试 + Buildx Bake"]
+  CI --> REGISTRY["GHCR：13 个 linux/amd64 业务镜像"]
+  CI --> CPU["CPU 云推理部署包"]
+  CI --> GPU["GPU 本地推理部署包"]
+  LOCAL["本地开发"] --> BUILD["build 模式：Compose 构建源码"]
+  REGISTRY --> PULL["images 模式：pull + --no-build"]
+  CPU --> PREFLIGHT["云主机预检"]
+  GPU --> PREFLIGHT
+  PREFLIGHT --> PULL
+  BUILD --> MIGRATE["迁移 + pgvector + AGE + 标准图谱"]
+  PULL --> MIGRATE
+  MIGRATE --> START["API、五类 Worker、Gateway、工具与 Caddy"]
+  START --> PROFILE{"推理策略"}
+  PROFILE -->|"CPU 包"| CLOUD["云端 LLM"]
+  PROFILE -->|"GPU 包"| VLLM["vLLM + Qwen3-14B"]
+  START --> LAZY["OCR / 向量按需下载到持久卷"]
+  CLOUD --> READY["HTTPS、健康检查、结构化模型测试"]
+  VLLM --> READY
   LAZY --> READY
 ```
 
@@ -555,13 +585,19 @@ Finding、受控整改建议、文档/技术复测、自动裁决、阶段联动
 | 文档语义向量 | `intfloat/multilingual-e5-large`，FastEmbed + ONNX Runtime，1024 维 | 把检查项和内容块转为向量，做语义召回；不负责合规判定 | 首次使用下载到 Docker `embedding_models` 卷，之后复用缓存 |
 | 轻量 OCR | `RapidOCR 1.4.4`，ONNX Runtime | 识别普通扫描页文字和坐标 | 随 OCR 镜像安装，按页面懒执行 |
 | 完整视觉解析 | `PaddleOCR-VL-1.6`，默认 CPU | 解析版面、表格、图表标签和复杂页面 | 首次需要时懒加载到 `ocr_models` 卷；当前容器健康状态为 `lazy`，表示已配置但尚未加载 |
-| 合规判证 LLM | 组织模型配置中为“文档判证”用途选择的模型，不固定供应商 | 只针对检查项和候选证据输出结构化支持/部分/不支持/矛盾 | 由模型配置管理；本地文档默认不发送给外部视觉服务 |
+| 合规判证 LLM | 云端 API、GPU `vLLM`、CPU `llama.cpp` 或兼容 `Ollama` | 只针对检查项和候选证据输出结构化支持/部分/不支持/矛盾 | 云端由模型配置管理；本地权重挂载持久卷或宿主机目录，不进入应用镜像 |
 
 自动策略：标准模式仅对原生为空、单页文字少于阈值或包含关键图片的页面调用 OCR；先运行 RapidOCR，结果为空、平均置信度低于 0.72、要求视觉优先或选择深度模式时，再调用 PaddleOCR-VL-1.6。深度模式会对 PDF 页面进行交叉验证。两种结果按位置、哈希和相似度融合并保留来源置信度。Paddle 原生运行时被隔离在子进程中，即使发生段错误或超时，OCR API 仍存活。原生正文可靠或轻量 OCR 已覆盖全部必需图片时，完整视觉失败只显示降级警告并继续；原生不足且必需视觉页面未完整覆盖时才返回 `unable`，不得生成完整合规结论。
+
+推理兼容策略：CertiProof 使用统一 `LLMService` 契约。`auto` 在检测到 NVIDIA GPU 时优先 `vLLM`，无 GPU 时优先云端 API；`local` 在 GPU 上选择 `vLLM`，纯 CPU 选择 `llama.cpp`；管理员也可显式固定 `cloud/vllm/llama_cpp/ollama`。`vLLM` 和 `llama.cpp` 通过 OpenAI-compatible 接口接入，Ollama 保留原生适配并自动转换共享参数。首选运行时失败后按受控优先级尝试已启用的备用模型，业务层、AI Engine、文档判证和 Flow Engine 不感知硬件差异。
+
+结构化模型链路：AI 路由、Capability 计划、文档归类、证据判定和归档交接摘要统一携带 Pydantic 生成的 JSON Schema。OpenAI 与 Ollama 首选原生 Schema 约束；不支持原生 Schema 的 OpenAI-compatible、Azure 或 Anthropic 仍接收同一 Schema 提示，并由应用层做相同的 Pydantic 校验。每个候选模型最多尝试三次，格式、字段、枚举、完整性或业务规则失败都会带原因重新生成；连续失败后切换下一模型，全部失败时返回明确错误且不创建执行任务。通过结构校验后仍必须执行 Skill/Capability 白名单、参数 schema、项目资产范围、RBAC 和 Flow Engine 校验。模型设置页的“测试”不再只检查 API 存活，而会对云端和本地模型实际执行同一结构化生成测试。
 
 要求：
 - 本地优先，不默认把企业文档发往外部视觉服务。
 - 容器部署需能按环境选择后端模型。
+- 本地模型权重独立保存在模型卷或宿主机数据盘，不进入应用镜像，也不在 Docker build 阶段下载。
+- CPU/GPU 切换保持相同业务契约；部署脚本自动探测硬件，系统设置允许覆盖模型策略和资源档位。
 - 模型不可用时返回 `unable`，不能默认为通过。
 
 ## 五、关键用户流程
@@ -606,6 +642,10 @@ Finding、受控整改建议、文档/技术复测、自动裁决、阶段联动
 8. 后端禁止成员移除自己、禁止删除或降级最后一名管理员、禁止非管理员授予管理员身份；历史管理员模板关联由迁移 `022` 清理。
 9. Dashboard 只返回当前用户有权读取的 RBAC 摘要；没有 `role:read` 时不泄露成员、模板和审计内容。
 10. API 对读取、创建、修改、删除、执行扫描、管理测评、导出报告和系统配置分别做权限判断，前端隐藏入口不能替代后端校验。
+11. 生产环境默认关闭公开注册；登录按来源地址记录失败次数，默认 5 分钟内 5 次失败后暂时拒绝，成功登录清除该来源的失败计数。
+12. WebSocket 不接受查询字符串明文令牌，访问令牌通过子协议头传递；后端同时校验令牌、账号状态、任务存在性、任务所属项目和 `scan:read` 权限。
+13. 模型 API Key 使用由 `SECRET_KEY` 派生的 Fernet 密钥加密保存，接口只返回“是否已配置”，不返回密钥正文；旧明文值在启动时一次性加密。
+14. 生产 CORS 只允许明确域名，Caddy 负责 HTTPS、HSTS 和安全响应头，内部服务不直接暴露公网。
 
 ```mermaid
 flowchart LR
@@ -619,7 +659,7 @@ flowchart LR
   DEFAULT --> API
 ```
 
-异常规则：未登录返回认证错误；不属于组织或缺少权限返回明确的 403；禁用账号不能登录；角色名称冲突不能覆盖已有角色；系统模板不得修改；未知权限、最后管理员降级和自我移除均被拒绝。
+异常规则：未登录返回认证错误；WebSocket 缺少或无效令牌关闭为 4401，任务不存在为 4404，越权为 4403；不属于组织或缺少权限返回明确的 403；禁用账号不能登录；角色名称冲突不能覆盖已有角色；系统模板不得修改；未知权限、最后管理员降级和自我移除均被拒绝。
 
 验收要求：使用只读身份读取项目和报告成功，但访问成员清单、执行扫描、初始化组织数据或修改权限必须失败；管理员始终拥有全部权限。
 
@@ -835,9 +875,11 @@ sequenceDiagram
 
 顶层工具和组合子工具共用同一结果判定：`scan_completed=false`、`success=false`、`reachable=false` 或 `tool_status=warning` 必须归一化为 `warning`，界面统一显示短状态“无法判定”，并在独立摘要列展示工具原始原因；不得计入成功、不得生成“0 个问题”或“本次未发现问题”的安全结论。状态和风险标签禁止拆字换行，长原因允许自然换行或横向滚动，不能压缩成不可读文本。ScanTask 可以进入执行终态 `completed`，但结果可信度必须保持 `conditional`，相关 Finding 和复测项保持活动状态。
 
-### 5.9 AI 对话、命令解析与并发任务
+### 5.9 分级提示词设计
 
-**状态**：五类对话边界、入口统一、持久化任务、进度恢复、多任务输入、独立 Worker 队列和受控并发均已 `implemented`；多 Agent 协作是 `accepted-pending`。
+**状态**：短核心 Prompt、五类语义路由、按需 Prompt Skill、受限 Capability 计划和统一结构化校验均已 `implemented`。
+
+设计目标是让模型只看到完成当前一步所需的最少规则和事实。分级不是把一个长 Prompt 拆成多个固定长 Prompt，而是先判定业务类别，再按需装载一至三个业务 Skill；权限、资产范围、参数和流程状态始终由代码裁决。
 
 | 对话类别 | 支持范围 | 处理方式 |
 |----------|----------|----------|
@@ -847,7 +889,20 @@ sequenceDiagram
 | `help` | 能做什么、如何上传、如何检测、如何理解结果 | 返回 CertiProof 当前能力和操作说明，不启动任务 |
 | `out_of_scope` | 与项目查询、检测、流程和产品使用无关的问题 | 明确说明不支持，不退化为通用聊天助手 |
 
-**分层 Prompt Skill 架构**：
+**层级与职责**：
+
+| 层级 | 是否调用模型 | 常驻/按需 | 输入 | 输出与责任 |
+|------|--------------|-----------|------|------------|
+| `C0 代码边界` | 否 | 常驻 | 登录用户、组织/项目、权限、资产范围、Flow 状态 | 先建立可信边界；模型无权修改 RBAC、授权资产或正式测评状态 |
+| `P1 核心系统提示词` | 是 | 每次模型调用常驻，内容短且稳定 | CertiProof 身份、安全边界、事实边界、JSON 约束 | 规定“只用当前加载内容、缺信息要询问、不得编造和越权” |
+| `P2 语义路由提示词` | 是 | 每轮自然语言先加载 | 简短 Skill 目录、当前项目标识、本轮输入、最近最多 3 条用户输入 | 输出 `RouteContract`：五类之一、注册意图、Skill、作用域、实体、置信度和上下文开关 |
+| `P3 业务 Prompt Skill` | 是 | 路由后按需加载 1-3 个 | 所选 Skill 的领域规则及声明的上下文字段 | 提供当前业务的口径，例如 Web 扫描映射、测评流程、文档判证或报告规则 |
+| `P4 Capability 计划提示词` | 需要选择 Capability 时调用 | 按需 | 所选 Skill、相关 Capability schema、字段投影后的项目/资产/凭据状态 | 输出 `CapabilityPlanContract`，只能使用已列出的能力和合法参数；主要服务检测执行，也覆盖尚无固定命令映射的解释/管理请求 |
+| `C5 契约与执行门禁` | 否 | 常驻 | 模型 JSON 或快捷入口结构化计划 | 执行 Pydantic、业务枚举、Capability 白名单、参数 schema、RBAC、资产范围和 Flow Engine 校验；通过后才创建任务 |
+
+`project_query`、已注册的测评开始/复测/重置/报告命令、`help` 和 `out_of_scope` 在路由后走类型化查询或显式命令，不为“显得智能”再进入计划器。自然语言检测以及少量尚无固定命令映射的解释/管理请求才进入 `P3/P4`；快捷指令和 `/` 命令已经明确 Capability，直接从 `C0` 进入 `C5`，因此三种入口共享执行契约但不浪费一次工具选择模型调用。
+
+**装载与裁决规则**：
 
 1. AI Engine 常驻的核心提示词只定义 CertiProof 身份、安全边界、事实边界和 JSON 输出约束，不把全部工具、流程规则和示例长期塞入一个大 Prompt。
 2. 第一轮语义路由只接收简短 Skill 目录、当前项目标识、本轮输入和当前线程最近少量用户输入，严格输出五类之一、已注册意图、业务 Skill、作用域、实体、置信度和是否需要上下文。
@@ -859,14 +914,18 @@ sequenceDiagram
 8. `help` 返回固定的当前产品能力说明；`out_of_scope` 明确拒绝范围外问题，不调用通用问答模型，不为天气、创作或其他无关请求生成答案。
 9. 只有代词、省略或明确表达“继续、刚才、之前”时才加载当前线程摘要；线程 ID 必须贯穿自然语言、快捷指令和 `/` 命令，其他线程和归档内容不能补入本轮目标。
 10. 模型只负责语义理解和受限检测计划。代码继续执行 Capability 白名单、参数 schema、RBAC、当前项目资产范围和 Flow Engine 边界校验；查询要求 `project:read` 或对应读权限，执行安全工具要求 `scan:execute`，流程写入要求 `assessment:manage`。
-11. 路由返回非法 JSON 或自造意图时只重试修复一次；模型超时或仍不合法时，仅对明确的 CertiProof 查询、检测、流程和帮助语句使用小范围降级识别。不确定或范围外内容不得被猜成执行动作。检测计划器超时时也只对已明确的单工具意图使用安全默认参数，基线缺凭据时必须询问。
+11. 路由或计划返回非法 JSON、自造意图、自造 Skill、越权 Capability、缺失参数或不完整判证时，由统一结构化链路在同一模型内最多重试三次，再按优先级切换备用模型。所有模型都失败后，仅对明确的 CertiProof 查询、检测、流程和帮助语句使用小范围确定性降级；不确定或范围外内容不得被猜成执行动作，基线缺凭据时必须询问。
 12. 快捷指令和 `/` 命令在用户已经明确选择 Capability 后直接生成结构化计划并进入同一校验与交互任务队列，不再调用模型重复选择工具；自然语言入口经过五类路由后也落到同一 Capability 和 ScanTask 契约。
 
 ```mermaid
 flowchart LR
   NL["自然语言"] --> CORE["短核心 Prompt"]
   CORE --> ROUTER["语义路由器"]
-  ROUTER --> CAT["五类业务契约"]
+  ROUTER --> RVALID["Schema + Pydantic + 意图/Skill 校验"]
+  RVALID -->|"通过"| CAT["五类业务契约"]
+  RVALID -->|"失败"| RRETRY["同模型最多 3 次 / 再切备用模型"]
+  RRETRY --> ROUTER
+  RRETRY -->|"全部失败"| FAIL["明确失败或有限确定性降级"]
   CAT -->|"项目查询"| FACT["类型化事实查询"]
   CAT -->|"流程操作"| FLOWCMD["Flow Engine 受控命令"]
   CAT -->|"帮助 / 范围外"| SCOPE["scope-guard 确定性回复"]
@@ -876,8 +935,12 @@ flowchart LR
   PICK --> CAPS["相关 Capability schema"]
   CTX --> PLAN["受限计划器"]
   CAPS --> PLAN
+  PLAN --> PVALID["Schema + Pydantic + Capability/参数校验"]
+  PVALID -->|"失败"| PRETRY["同模型最多 3 次 / 再切备用模型"]
+  PRETRY --> PLAN
+  PRETRY -->|"全部失败"| FAIL
   QUICK["快捷指令 / 命令"] --> STRUCT["已选 Capability 的结构化计划"]
-  PLAN --> GUARD["参数 / RBAC / 资产范围 / Flow Engine 校验"]
+  PVALID -->|"通过"| GUARD["RBAC / 资产范围 / Flow Engine 校验"]
   STRUCT --> GUARD
   FACT --> RESULT["持久进度、事实与可读结果"]
   FLOWCMD --> GUARD
@@ -885,6 +948,15 @@ flowchart LR
   GUARD --> TASK["独立 ScanTask / 确定性查询"]
   TASK --> RESULT
 ```
+
+**两个典型调用**：
+
+- 用户输入“现在合规状态如何”：`P1 → P2` 识别为 `project_query/query_project_status`，随后由后端读取当前评分、覆盖率、阶段和 Finding 并排版；不进入检测计划器，模型不能复用历史数字。
+- 用户输入“对所有资产做 Web 扫描”：`P1 → P2` 选择 `detection_execution + security-scan`，再加载 Web 相关 Capability schema 和当前项目资产，`P4` 生成 `nikto_scan` 计划；`C5` 校验目标属于当前项目后创建独立 ScanTask。
+
+### 5.10 AI 对话、命令解析与并发任务
+
+**状态**：五类对话边界、入口统一、持久化任务、进度恢复、多任务输入、独立 Worker 队列和受控并发均已 `implemented`；多 Agent 协作是 `accepted-pending`。
 
 1. 用户在 `/projects/:projectId` 输入自然语言，或从 `/` 命令面板和紧凑“快捷指令”卡片面板选择命令；回车发送，Shift+Enter 换行，方向上键查看历史输入。输入正文从编辑区左侧正常起笔，材料上传、`/` 和快捷指令位于底部工具带，不能占据正文首列。
 2. 自然语言由 AI Engine 先归入项目查询、检测执行、流程操作、使用帮助或范围外五类；只有检测执行按需加载业务 Skill、当前项目事实和相关能力 schema 生成结构化 plan。`/` 提供命令检索，“快捷指令”提供可视化工具卡片，两者都从同一工具目录生成并复用资产选择、凭据输入和任务创建。
@@ -897,7 +969,7 @@ flowchart LR
 9. 刷新项目页后恢复对话历史、运行任务和已完成结果；服务重启时以持久化 ScanTask 和 checkpoint 为准，无法恢复的进程必须明确失败而不是永久运行。
 10. 用户可以暂停、继续、停止或删除允许控制的任务；停止请求持久化，工作进程在安全检查点退出。
 11. 当前输入明确给出目标时，结构化计划只保留当前输入中出现的目标并按能力和参数去重；历史消息只能辅助理解指代，不能把上一条扫描目标再次加入新任务。
-12. 一个组合计划中某个参数无效或目标越界时，只剔除该子步骤并继续执行其余合法步骤；全部步骤都无效时才拒绝任务。LLM 是自然语言检测意图的主路由器和规划器；非法输出先修复一次，服务不可用时只按当前明确的业务语句做小范围降级，不从模糊内容推断执行动作。
+12. 一个组合计划中某个参数无效或目标越界时，只剔除该子步骤并继续执行其余合法步骤；全部步骤都无效时才拒绝任务。LLM 是自然语言检测意图的主路由器和规划器；结构化输出按统一链路在单模型内最多重试三次后切换备用模型，服务不可用时只按当前明确的业务语句做小范围降级，不从模糊内容推断执行动作。
 13. “Web 扫描”或“Web 漏洞扫描”是能力目录中 `nikto_scan` 的显式别名，其参数契约为 `target`；明确要求 SQL 注入且提供带查询参数的 URL 或 POST 数据时使用 `sqlmap_scan`。该映射用于约束工具 schema，不取代 LLM 对模糊目标、组合任务和上下文的判断。
 14. 自然语言、可视化快捷指令和 `/` 工具命令必须创建相同结构的独立 ScanTask；不按入口建立不同队列。Web 扫描 A 与随后提交的端口扫描 B 可以同时运行，谁先完成谁先回写自己的结果，暂停、失败和超时互不改变另一任务状态。
 15. 目标执行拓扑拆分为文档分析、测评技术检测、交互检测、整改与重新检查、低优先级维护五类持久队列和独立 Worker 池。每类配置并发上限、租约、心跳和背压；结果始终以任务 ID、项目 ID、资产和能力关联，不能依赖前端请求顺序。
@@ -933,7 +1005,7 @@ flowchart LR
   MW --> RESULT
 ```
 
-### 5.10 Finding、证据、整改与复测
+### 5.11 Finding、证据、整改与复测
 
 **状态**：`implemented`。Finding 直接复测模型、文档/技术复测 Worker、自动裁决、阶段联动、重置清理、项目页交互和报告追溯已经落地；不建立中间工单系统。
 
@@ -991,7 +1063,7 @@ flowchart LR
 
 实现验收：数据库迁移 `013_reopen_accepted_risks` 已在 PostgreSQL 执行，旧的管理性关闭捷径全部恢复为待整改；项目 70 的最新 Web 复测可逐项显示资产、工具、`still_present/new` 结果、原始发现和任务 ID。`check_verification_contract.py`、`check_verification_lifecycle.py` 和自动化测试通过。`build_real_compliance_documents.py` 与 `check_real_material_api_flow.py` 使用真实 DOCX、文本 PDF、扫描 PDF、批量材料和受控 SSH/Web 靶机，从空项目验证错误凭据失败、正确凭据重试、文档改进材料、技术复测、不适用项和四阶段 HTML 报告；报告明确保留已修复、仍存在和无法完成的覆盖限制。
 
-### 5.11 HTML 报告生成
+### 5.12 HTML 报告生成
 
 **状态**：`implemented`。
 
@@ -1025,7 +1097,7 @@ stateDiagram-v2
 
 验收要求：测试报告必须同时包含技术初检问题、文档问题、整改动作、技术/文档复测、已修复与仍存在结果；同一版本的 HTML/JSON 哈希和内容保持稳定，新的测评材料、测评任务重跑、复测或重置必须使旧版本过期，独立工具检测不得使其过期。
 
-### 5.12 资产与端口变更检测
+### 5.13 资产与端口变更检测
 
 **状态**：`implemented`。
 
@@ -1036,7 +1108,7 @@ stateDiagram-v2
 5. 用户确认变更后事件从待处理队列移出，但审计信息仍可查询。
 6. 扫描失败或结果不完整时不得生成“端口已关闭”的变更结论。
 
-### 5.13 项目、对话与线程归档
+### 5.14 项目、对话与线程归档
 
 **状态**：项目归档、对话归档、线程自动续接、按需原文召回和恢复已实现；离线压缩导出为 `accepted-pending`。
 
@@ -1061,19 +1133,23 @@ flowchart LR
   RECALL --> PROMPT
 ```
 
-### 5.14 模型与 OCR 配置
+### 5.15 模型与 OCR 配置
 
-**状态**：模型供应商配置和三层文档解析策略已具备主体能力，完整文档视觉模型的跨平台容器能力仍需持续验证。
+**状态**：模型供应商、四类 LLM 运行时、结构化输出链和三层文档解析策略已实现；完整文档视觉模型的跨平台容器能力仍需在目标硬件持续验证。
 
 1. 管理员在模型设置页创建供应商和模型配置，测试连接后才将其设为可用。
-2. AI 对话、文档分类和证据判定按用途选择配置，不在业务代码中硬编码供应商。
-3. 文档解析模式包括原生解析优先、轻量 OCR fallback、完整文档视觉模型三层。
-4. 标准模式在原生结果为空或可疑时自动补充 OCR；深度模式对复杂页面做视觉交叉验证。
-5. OCR 默认在本地容器处理企业材料；部署到不同 CPU/GPU 环境时允许切换推理后端，但 OCR Service 和 MCP Gateway 对外保持统一可路由的 `document_page_parse` 契约。
-6. 模型不可用、超时或崩溃必须被隔离为单页/单任务错误，不能导致 Worker 永久占用或把检查判为通过。
-7. 模型密钥和文档凭据不得出现在 API 返回、日志、报告和架构文档中。
+2. 每个供应商记录 `runtime_kind=cloud/ollama/vllm/llama_cpp`；API Key 加密保存且永不回显。管理员可查看实际选中的运行时、模型、当前调用数和模型并发上限。
+3. AI 路由、工具计划、文档分类、证据判定和归档交接摘要按用途选择配置，不在业务代码中硬编码供应商；结构化任务统一执行 Schema/Pydantic、业务校验、每模型三次重试、备用模型回退和明确失败。
+4. `auto` 策略由硬件决定首选运行时：NVIDIA GPU 使用 vLLM，CPU 使用云端；离线 CPU 可选择 llama.cpp，Ollama 作为兼容入口保留。`scripts/start-production.sh --dry-run` 可在不启动服务时检查最终 profile。
+5. 系统设置的“运行资源”展示 CPU、可用内存、GPU、当前压力、推荐档位和有效并发；自动模式采用推荐值，手动模式支持轻量、标准、GPU 和自定义档位。
+6. 模型调用使用进程内动态并发槽；五类 Worker 按有效档位分别领取交互、文档、测评、复测和维护任务。达到资源压力阈值时暂停领取新任务，压力恢复后自动继续。
+7. 文档解析模式包括原生解析优先、轻量 OCR fallback、完整文档视觉模型三层。
+8. 标准模式在原生结果为空或可疑时自动补充 OCR；深度模式对复杂页面做视觉交叉验证。
+9. OCR 默认在本地容器处理企业材料；部署到不同 CPU/GPU 环境时允许切换推理后端，但 OCR Service 和 MCP Gateway 对外保持统一可路由的 `document_page_parse` 契约。
+10. 模型不可用、超时或崩溃必须被隔离为单页/单任务错误，不能导致 Worker 永久占用或把检查判为通过。
+11. 模型密钥和文档凭据不得出现在 API 返回、日志、报告和架构文档中。
 
-### 5.15 诊断、健康与工具遥测
+### 5.16 诊断、健康与工具遥测
 
 **状态**：`implemented`。
 
@@ -1085,7 +1161,7 @@ flowchart LR
 6. 工具不可用时，执行入口仍可见但明确标记不可用；用户触发后快速失败并给出依赖或路由原因。
 7. 后端、Worker、Gateway 和 Tool Server 日志使用任务 ID、项目 ID、资产和能力名关联，但必须脱敏密码、密钥和令牌。
 
-### 5.16 删除、清理与数据规模控制
+### 5.17 删除、清理与数据规模控制
 
 **状态**：`implemented`。扫描结果删除、测评重置、项目文档清理、组织业务初始化、容量遥测和标准图谱保护已形成闭环。
 
@@ -1195,24 +1271,24 @@ flowchart LR
 
 ### 9.1 最近一次综合验收
 
-**执行日期**：2026-07-19。下列结果来自当前 Docker Compose 运行环境，不是手工修改数据库得到的演示数字。
+**执行日期**：2026-07-20。下列结果来自当前 Docker Compose 运行环境，不是手工修改数据库得到的演示数字。
 
 | 验收层 | 实际覆盖 | 结果 |
 |--------|----------|------|
-| 自动化测试 | 文档、图谱、资产范围、队列控制、复测、报告、重置、删除、工具语义、权限边界、评分回填、测评幂等初始化、五类对话契约、确定性项目查询、检测变化、上下文续接、受控整改建议、Prompt Skill 路由、能力白名单、拓扑风险口径与服务提取 | 172 项通过；Pydantic class-based Config 弃用告警已消除，无测试失败 |
+| 自动化测试 | 文档、图谱、资产范围、队列控制、复测、报告、重置、删除、工具语义、权限边界、评分回填、测评幂等初始化、五类对话契约、确定性项目查询、检测变化、上下文续接、受控整改建议、Prompt Skill 路由、能力白名单、拓扑风险口径、模型结构化输出、运行时策略、资源档位和认证保护 | 197 项通过，无测试失败 |
 | 部署 API 烟测 | 临时项目、授权资产、四阶段初始化、技术任务、异步文档分析、报告门禁、完全重置、项目删除 | 通过；临时项目和任务已自动清理 |
 | 标准与检索 | 10 类核心文档、40 个控制域、80 个必检项、291 个标准图谱节点；精确检索 + 1024 维向量 + AGE 归属 | 通过 |
 | 真实材料闭环 | 项目 `P-072` 从空项目上传 11 个文件，10 类正确归类、1 个无关文件保持未归类；覆盖 DOCX、文本 PDF、扫描 PDF、原生/OCR 路径 | 10 类文档检查全部形成结论 |
 | 技术初检 | 受控靶机真实开放 SSH/HTTP/HTTPS；错误 SSH 密码与正确凭据分别执行；端口、漏洞、基线、弱口令、SSL、Web、数据库、SNMP、Windows/SMB 等进入结果矩阵 | 错误凭据明确失败；不适用、超时、风险和完成状态未互相冒充 |
 | 整改与复测 | 3 类改进文档、未修改文档复核、技术问题按资产/能力重检、长时间漏洞工具调用 | 40 个问题中 5 个已修复、35 个保持待处理、3 个无法验证；长调用期间租约持续更新 |
 | 正式报告 | 四阶段门禁、当前事实快照、HTML、哈希、版本、过期语义和可读业务文本 | 正式报告 V1 生成；本地验收副本为 `artifacts/certiproof-real-material-report.html` |
-| 交互并发 | 连续提交 Web 扫描与双资产端口扫描，重复资产去重，独立任务 ID 和结果归属 | 当前镜像两次创建耗时 0.014 秒和 0.010 秒；结果分别归属 `e2e-target`、`redis` |
+| 交互并发 | 连续提交 Web 扫描与双资产端口扫描，重复资产去重，独立任务 ID 和结果归属 | 当前镜像两次创建耗时 0.058 秒和 0.017 秒；结果分别归属 `e2e-target`、`redis` |
 | 工具层 | Docker 内部真实端口、异步进度、数据库组合、SSH 错误、Web/目录/模糊测试、SNMP、Windows/SMB | 工具烟测通过；不可达和不匹配服务保持“未完成/无法判断” |
 | 已授权公网抽样 | `121.40.95.31` 高危端口、SSL、Web | 主机可达，23 个端口为 filtered；SSL 90 秒、Web 120 秒超时均保留具体原因，未误报“无风险” |
 | 生命周期 | 文档、内容块、向量、证据图谱、扫描结果、文件和项目删除 | 临时数据已清理；291 个全局标准节点完整保留 |
 | 进度一致性 | 单项目唯一测评、确定性最新记录、只读整改工作区、运行态轮询和刷新恢复 | 迁移 `020` 已删除空重复实例；项目 72 在刷新、5/8 秒轮询周期和用户上滚后保持 100% 与原滚动位置，数据库无重复测评实例 |
 | UI | Dashboard、项目与资产、报告中心、项目执行页、检测列表、模型设置、访问控制、数据生命周期；桌面 1280px 与窄屏 1024px | 无页面级横向溢出；查询结果单卡展示，报告多选删除交互、整改步骤展开和窄屏收敛经真实页面点击验证 |
-| 构建与部署 | Python 编译、Vite 生产构建、Alembic `023`、Compose 本地/production profile、MCP/AGE/向量诊断 | 核心路由与全部安全工具服务健康；Caddy 边缘、端口隔离和业务备份脚本配置通过；当前 Apple Silicon/Colima 下完整文档视觉模型降级为轻量 OCR fallback，扫描 PDF 实测可完成 |
+| 构建与部署 | Python 编译、Vite 生产构建、Alembic `024`、Compose 本地/production/gpu/cpu-local profile、硬件探测、动态并发、密钥迁移和备份生成 | 核心路由与全部安全工具服务健康；当前自动识别为轻量档位并选择云模型，3 个模型密钥完成加密且 API 不回显；备份文件与 SHA-256 校验通过，未执行自动恢复验证 |
 
 验收边界：公网目标受容器出口、防火墙和限速影响，工具“超时/filtered”是可信执行事实而不是平台故障；当前容器的完整文档视觉模型依赖 fallback 保证扫描件可用，复杂图表理解仍需在目标生产硬件上复验；标准库仍需后续专业校准；多 Agent 与离线压缩导出仍为后续能力。
 
@@ -1254,7 +1330,7 @@ flowchart LR
 | 执行与结论 | 任务完成只代表执行终态；风险、受限、不适用和无发现独立归一化，流程进度不冒充合规分 | 项目页、结果、测评、报告 | implemented |
 | 评分口径 | 符合 1 分、部分符合 0.5 分、不符合/失败/无法验证 0 分；不适用排除，未开始/执行中不提前计分；检测覆盖率和无法判定数量独立展示 | 项目页、完成页、报告 | implemented |
 | AI 五类对话契约 | 用户输入严格归入项目查询、检测执行、流程操作、使用帮助或范围外；范围外不再退化为通用聊天，重复业务意图从 Skill 目录删除 | AI Engine、Prompt Skill Registry、项目对话 | implemented |
-| AI Prompt Skill 编排 | 使用短核心 Prompt、五类语义路由器和按需 Prompt Skill Registry；只有检测执行进入受限计划器，结构化入口直接复用同一执行契约 | AI Engine、Orchestrator、Context Manager、Capability Registry | implemented |
+| AI 分级提示词编排 | 使用 `C0` 代码边界、`P1` 短核心 Prompt、`P2` 五类语义路由、`P3` 按需 Prompt Skill、`P4` 受限 Capability 计划和 `C5` 代码门禁；检测执行及少量未映射请求进入计划器，结构化入口直接复用执行契约 | AI Engine、Orchestrator、Context Manager、Capability Registry | implemented |
 | AI 编排与契约兜底 | LLM 是语义路由和检测规划主路径；非法契约先修复一次，服务不可用时只对明确业务语句使用小范围降级；代码始终校验 Skill 白名单、当前资产、权限和参数 schema | AI Engine、Orchestrator、资产范围 | implemented |
 | 独立任务调度 | 自然语言、可视化快捷指令和 `/` 命令共用交互检测队列；不同任务并发执行、独立返回，不因前一任务耗时而阻塞 | 对话、测评、文档、Worker、结果 | implemented |
 | 查询结果契约 | 资产、状态、通过准备度、主要差距、管理层摘要、问题、检测历史和结果变化使用确定性摘要与单一 `query_result` 卡；同类 Finding 聚合，历史枚举转业务文本，变化只比较同目标同能力的最新可比任务 | AI 对话、Orchestrator、Flow Engine、结果卡 | implemented |
@@ -1270,10 +1346,15 @@ flowchart LR
 | 对话上下文续接 | 最近原文与分段摘要常驻；达到 160 条或约 120k token 后在无运行中交互任务时自动归档并切换下一线程；明确历史提问才按需召回归档摘录 | Context Manager、Orchestrator、项目对话 | implemented |
 | Pydantic 配置 | 后端 Schema 和 Settings 全部采用 `ConfigDict/SettingsConfigDict`，不再使用 Pydantic v2 已弃用的 class-based Config | 后端 API、配置、测试 | implemented |
 | 云上生产 | 首期使用单 Linux 主机多容器 Compose，Caddy 独占公网 80/443，其余服务内网隔离；VPC 互通则同一扫描平面覆盖多 VPC，不互通时再引入远端 Agent | Compose、Caddy、网络、备份 | implemented |
+| CPU/GPU 云交付 | 13 个共享业务镜像通过 Buildx 发布至 GHCR；CPU/GPU 部署包仅携带编排和配置，预检通过后拉取固定版本镜像启动，当前正式发布架构为 `linux/amd64` | CI、Compose、部署、模型运行时 | implemented |
+| 模型部署策略 | CPU 默认调用云端模型，NVIDIA GPU 默认启动 vLLM；纯 CPU 离线可选 llama.cpp，Ollama 保留；统一 LLMService、Schema 校验和故障回退 | 模型设置、部署、AI Engine、文档判证 | implemented |
+| 资源自适应 | 启动探测 CPU/内存/GPU并推荐轻量、标准或 GPU 档位；前端可切换自动/手动与并发阈值，Worker 按压力动态背压 | 系统设置、Worker、模型调用、Compose | implemented |
+| 生产安全 | 关闭公开注册、登录失败限流、WebSocket 任务级鉴权、模型密钥加密且不回显、明确 CORS 与 HTTPS 边界 | 认证、模型、WebSocket、Caddy | implemented |
+| 上线验收 | 自动检查迁移、构建、登录态、项目/文档/测评/报告、工具、并发、网络和备份生成完整性；不自动执行备份恢复验证 | 测试、部署、运维 | implemented |
 | 架构记忆 | 讨论结论更新本文并重新生成独立 HTML；旧设计不进入现行正文 | 产品与系统文档 | implemented |
 
 ---
 
-**文档版本**: v4.19
-**最后更新**: 2026-07-19
+**文档版本**: v4.22
+**最后更新**: 2026-07-20
 **维护者**: CertiProof Team

@@ -181,6 +181,62 @@
   border-radius: 3px;
 }
 
+.runtime-hardware-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.runtime-hardware-grid > div {
+  min-width: 0;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 6px;
+}
+
+.runtime-hardware-grid span,
+.runtime-hardware-grid strong {
+  display: block;
+}
+
+.runtime-hardware-grid span {
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 11px;
+}
+
+.runtime-hardware-grid strong {
+  overflow: hidden;
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.9);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-recommendation,
+.runtime-selection,
+.runtime-effective-limits,
+.runtime-pressure-warning {
+  padding: 9px 11px;
+  color: rgba(255, 255, 255, 0.66);
+  background: rgba(34, 211, 238, 0.05);
+  border: 1px solid rgba(34, 211, 238, 0.13);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.runtime-recommendation span {
+  margin-left: 5px;
+}
+
+.runtime-pressure-warning {
+  margin-top: 8px;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
 .config-tabs .ant-tabs-content {
   height: 100%;
 }

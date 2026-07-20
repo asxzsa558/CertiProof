@@ -1,16 +1,50 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
 from app.core.database import get_db
+from app.core.config import settings
 from app.core.security import get_password_hash, verify_password, create_access_token, create_refresh_token, get_current_user
 from app.models.user import User
 from app.models.organization import Organization, OrganizationMember, OrgRole
 from app.schemas.user import UserCreate, UserLogin, UserResponse, TokenResponse, RefreshTokenRequest, OrganizationBrief
 from app.core.security import decode_token
 import re
+import asyncio
+import time
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+_login_failures: dict[str, list[float]] = {}
+_login_lock = asyncio.Lock()
+
+
+def _login_client_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+async def _enforce_login_rate_limit(request: Request) -> None:
+    key = _login_client_key(request)
+    now = time.monotonic()
+    cutoff = now - settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS
+    async with _login_lock:
+        failures = [stamp for stamp in _login_failures.get(key, []) if stamp >= cutoff]
+        _login_failures[key] = failures
+        if len(failures) >= settings.LOGIN_RATE_LIMIT_ATTEMPTS:
+            retry_after = max(1, int(failures[0] + settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS - now))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="登录尝试过于频繁，请稍后再试",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+
+async def _record_login_result(request: Request, success: bool) -> None:
+    key = _login_client_key(request)
+    async with _login_lock:
+        if success:
+            _login_failures.pop(key, None)
+        else:
+            _login_failures.setdefault(key, []).append(time.monotonic())
 
 
 async def get_user_organizations(db: AsyncSession, user_id: int) -> list[OrganizationBrief]:
@@ -42,6 +76,8 @@ def generate_org_code(name: str) -> str:
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
+    if not settings.ALLOW_PUBLIC_REGISTRATION:
+        raise HTTPException(status_code=403, detail="公开注册已关闭，请联系组织管理员")
     # Check if email already exists
     result = await db.execute(select(User).where(User.email == user_data.email))
     if result.scalar_one_or_none():
@@ -106,12 +142,14 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
+async def login(credentials: UserLogin, request: Request, db: AsyncSession = Depends(get_db)):
+    await _enforce_login_rate_limit(request)
     # Find user
     result = await db.execute(select(User).where(User.email == credentials.email))
     user = result.scalar_one_or_none()
     
     if not user or not verify_password(credentials.password, user.hashed_password):
+        await _record_login_result(request, False)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -123,6 +161,8 @@ async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is disabled",
         )
+
+    await _record_login_result(request, True)
     
     # Update last login
     user.last_login_at = datetime.utcnow()
@@ -144,6 +184,11 @@ async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
         user=user_response,
         organizations=orgs,
     )
+
+
+@router.get("/registration-status")
+async def registration_status():
+    return {"enabled": settings.ALLOW_PUBLIC_REGISTRATION}
 
 
 @router.post("/refresh", response_model=TokenResponse)

@@ -9,7 +9,7 @@ from app.models.evidence import Evidence, EvidenceType
 from app.models.verification import FindingEvent, VerificationItem, VerificationOutcome, VerificationRun, VerificationRunStatus
 from app.models.monitoring import ScheduledScan, ScanHistory, ScheduleFrequency
 from app.models.change_snapshot import ChangeSnapshot
-from app.models.model_config import ModelProvider, ModelConfig, ModelUsage, ProviderType
+from app.models.model_config import ModelProvider, ModelConfig, ModelUsage, ProviderType, InferenceRuntime
 from app.models.context import (
     ConversationHistory, ActionHistory, ResultCache, ProjectMemory, UserMemory,
     ConversationArchive, ConversationThread, ConversationSummary
@@ -73,6 +73,7 @@ __all__ = [
     "ModelConfig",
     "ModelUsage",
     "ProviderType",
+    "InferenceRuntime",
     "ConversationHistory",
     "ActionHistory",
     "ResultCache",

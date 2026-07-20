@@ -1,7 +1,7 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional, List
 from datetime import datetime
-from app.models.model_config import ProviderType
+from app.models.model_config import InferenceRuntime, ProviderType
 
 
 # --- Provider Schemas ---
@@ -11,6 +11,17 @@ class ModelProviderBase(BaseModel):
     provider_type: ProviderType
     api_key: Optional[str] = None
     api_base: Optional[str] = None
+    runtime_kind: InferenceRuntime = InferenceRuntime.CLOUD
+
+    @model_validator(mode="after")
+    def validate_runtime(self):
+        if self.provider_type == ProviderType.OLLAMA:
+            self.runtime_kind = InferenceRuntime.OLLAMA
+        elif self.runtime_kind == InferenceRuntime.OLLAMA:
+            raise ValueError("Ollama 运行时必须使用 Ollama 提供商类型")
+        elif self.runtime_kind in {InferenceRuntime.VLLM, InferenceRuntime.LLAMA_CPP} and self.provider_type != ProviderType.CUSTOM:
+            raise ValueError("vLLM 和 llama.cpp 必须使用 OpenAI-compatible 自定义提供商类型")
+        return self
 
 
 class ModelProviderCreate(ModelProviderBase):
@@ -21,11 +32,17 @@ class ModelProviderUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     api_key: Optional[str] = None
     api_base: Optional[str] = None
+    runtime_kind: Optional[InferenceRuntime] = None
     is_active: Optional[bool] = None
 
 
-class ModelProviderResponse(ModelProviderBase):
+class ModelProviderResponse(BaseModel):
     id: int
+    name: str
+    provider_type: ProviderType
+    api_base: Optional[str] = None
+    runtime_kind: InferenceRuntime
+    api_key_configured: bool
     is_active: bool
     created_at: datetime
     updated_at: datetime

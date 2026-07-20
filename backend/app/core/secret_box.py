@@ -25,3 +25,20 @@ def decrypt_json(value: str) -> dict:
         return json.loads(_fernet().decrypt(value.encode()).decode())
     except (InvalidToken, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("任务凭证已失效或无法解密，请重新发起检测") from exc
+
+
+def encrypt_secret(value: str) -> str:
+    if value.startswith("enc:"):
+        return value
+    return "enc:" + _fernet().encrypt(value.encode()).decode()
+
+
+def decrypt_secret(value: str | None) -> str:
+    if not value:
+        return ""
+    if not value.startswith("enc:"):
+        return value
+    try:
+        return _fernet().decrypt(value[4:].encode()).decode()
+    except InvalidToken as exc:
+        raise ValueError("模型密钥无法解密，请管理员重新配置") from exc

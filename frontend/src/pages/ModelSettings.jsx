@@ -22,6 +22,7 @@ function ModelSettings() {
   const [providers, setProviders] = useState([])
   const [models, setModels] = useState([])
   const [usage, setUsage] = useState([])
+  const [runtimeStatus, setRuntimeStatus] = useState(null)
   const [loading, setLoading] = useState(false)
   const [providerModalVisible, setProviderModalVisible] = useState(false)
   const [modelModalVisible, setModelModalVisible] = useState(false)
@@ -39,14 +40,16 @@ function ModelSettings() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [providersRes, modelsRes, usageRes] = await Promise.all([
+      const [providersRes, modelsRes, usageRes, runtimeRes] = await Promise.all([
         api.get('/models/providers'),
         api.get('/models/configs'),
         api.get('/models/usage'),
+        api.get('/models/runtime'),
       ])
       setProviders(providersRes.data)
       setModels(modelsRes.data)
       setUsage(usageRes.data)
+      setRuntimeStatus(runtimeRes.data)
     } catch (error) {
       message.error('加载数据失败')
     } finally {
@@ -57,6 +60,7 @@ function ModelSettings() {
   const handleCreateProvider = () => {
     setEditingProvider(null)
     providerForm.resetFields()
+    providerForm.setFieldsValue({ provider_type: 'openai', runtime_kind: 'cloud' })
     setProviderModalVisible(true)
   }
 
@@ -158,6 +162,12 @@ function ModelSettings() {
       render: (type) => <Tag color="blue">{type}</Tag>,
     },
     {
+      title: '运行时',
+      dataIndex: 'runtime_kind',
+      key: 'runtime_kind',
+      render: (runtime) => <Tag color={runtime === 'cloud' ? 'cyan' : 'gold'}>{({ cloud: '云端 API', vllm: 'vLLM', llama_cpp: 'llama.cpp', ollama: 'Ollama' })[runtime] || runtime}</Tag>,
+    },
+    {
       title: 'API Base',
       dataIndex: 'api_base',
       key: 'api_base',
@@ -172,6 +182,14 @@ function ModelSettings() {
           {active ? '已启用' : '已禁用'}
         </Tag>
       ),
+    },
+    {
+      title: '密钥',
+      dataIndex: 'api_key_configured',
+      key: 'api_key_configured',
+      render: (configured, record) => record.runtime_kind === 'cloud'
+        ? <Tag color={configured ? 'success' : 'warning'}>{configured ? '已配置' : '未配置'}</Tag>
+        : <Tag>本地连接</Tag>,
     },
     {
       title: '操作',
@@ -299,6 +317,14 @@ function ModelSettings() {
       </Header>
 
       <Content className="model-settings-content">
+        <Card className="runtime-status-card" style={{ marginBottom: 16 }}>
+          <Row gutter={[16, 12]}>
+            <Col xs={24} md={6}><Statistic title="当前策略" value={runtimeStatus?.model_policy || '-'} /></Col>
+            <Col xs={24} md={6}><Statistic title="选中运行时" value={runtimeStatus?.selected_runtime || '未就绪'} /></Col>
+            <Col xs={24} md={6}><Statistic title="当前模型" value={runtimeStatus?.selected_model || '未配置'} /></Col>
+            <Col xs={24} md={6}><Statistic title="并发调用" value={runtimeStatus?.active_model_calls || 0} suffix={`/ ${runtimeStatus?.limits?.model || '-'}`} /></Col>
+          </Row>
+        </Card>
         <Tabs defaultActiveKey="providers" className="settings-tabs">
           <TabPane tab="模型提供商" key="providers">
             <Card
@@ -315,6 +341,7 @@ function ModelSettings() {
                 rowKey="id"
                 loading={loading}
                 pagination={false}
+                scroll={{ x: 980 }}
               />
             </Card>
           </TabPane>
@@ -334,6 +361,7 @@ function ModelSettings() {
                 rowKey="id"
                 loading={loading}
                 pagination={false}
+                scroll={{ x: 900 }}
               />
             </Card>
           </TabPane>
@@ -391,7 +419,11 @@ function ModelSettings() {
             <Input placeholder="例如：OpenAI" />
           </Form.Item>
           <Form.Item name="provider_type" label="类型" rules={[{ required: true }]}>
-            <Select placeholder="选择类型">
+            <Select
+              placeholder="选择类型"
+              onChange={(type) => type === 'ollama' && providerForm.setFieldValue('runtime_kind', 'ollama')}
+              disabled={Boolean(editingProvider)}
+            >
               <Select.Option value="openai">OpenAI</Select.Option>
               <Select.Option value="anthropic">Anthropic</Select.Option>
               <Select.Option value="ollama">Ollama (本地)</Select.Option>
@@ -399,8 +431,16 @@ function ModelSettings() {
               <Select.Option value="custom">自定义</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="api_key" label="API Key">
-            <Input.Password placeholder="sk-..." />
+          <Form.Item name="runtime_kind" label="运行方式" rules={[{ required: true }]}>
+            <Select placeholder="选择运行方式">
+              <Select.Option value="cloud">云端 API</Select.Option>
+              <Select.Option value="vllm">vLLM（GPU 本地）</Select.Option>
+              <Select.Option value="llama_cpp">llama.cpp（CPU 离线）</Select.Option>
+              <Select.Option value="ollama">Ollama（本地兼容）</Select.Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="api_key" label={editingProvider?.api_key_configured ? 'API Key（留空保持原值）' : 'API Key'}>
+            <Input.Password placeholder={editingProvider?.api_key_configured ? '已安全保存' : 'sk-...'} />
           </Form.Item>
           <Form.Item name="api_base" label="API Base URL">
             <Input placeholder="https://api.openai.com/v1 (可选)" />

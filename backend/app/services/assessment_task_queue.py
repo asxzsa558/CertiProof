@@ -294,7 +294,7 @@ async def process_pending_assessment_tasks(db: AsyncSession, limit: int = 10) ->
         if claim.rowcount == 1:
             claimed.append(task.id)
     await db.commit()
-    semaphore = asyncio.Semaphore(max(1, settings.ASSESSMENT_MAX_CONCURRENT))
+    semaphore = asyncio.Semaphore(max(1, min(limit, 10)))
 
     async def run_task(task_id: int) -> None:
         async with semaphore:

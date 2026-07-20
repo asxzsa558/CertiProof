@@ -6,7 +6,8 @@ AI 决策引擎 - 使用 LLM 理解用户需求，生成执行计划
 import json
 import logging
 import re
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Literal
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.llm_service import llm_service
@@ -110,6 +111,50 @@ HELP_RESPONSE = """我可以在当前 CertiProof 项目中帮助你：
 OUT_OF_SCOPE_RESPONSE = "这个问题不属于 CertiProof 当前支持范围。我只能协助当前项目查询、安全检测、等保自查流程和产品使用操作。"
 
 
+RouteIntent = Literal[
+    "query_project_status", "query_compliance_readiness", "query_major_gaps", "query_executive_summary",
+    "query_findings", "query_open_ports", "query_vulnerabilities", "query_scan_history", "query_scan_changes",
+    "asset_list", "scan_ports", "scan_web", "scan_vulnerabilities", "scan_baseline", "scan_passwords",
+    "scan_tls", "scan_database", "scan_network_device", "scan_windows", "scan_web_discovery",
+    "scan_reachability", "scan_comprehensive", "assessment_technical", "explicit_capability",
+    "assessment_start", "assessment_retest", "assessment_reset", "assessment_status", "assessment_explain",
+    "document_check", "document_explain", "remediation_action", "report_generate", "report_explain",
+    "asset_add", "asset_verify", "project_list", "project_manage", "help", "out_of_scope",
+]
+RouteSkill = Literal[
+    "project-status", "security-scan", "assessment-flow", "document-compliance",
+    "remediation-retest", "report-explanation", "asset-management", "scope-guard",
+]
+
+
+class RouteContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: Literal["project_query", "detection_execution", "flow_operation", "help", "out_of_scope"]
+    intents: List[RouteIntent] = Field(min_length=1, max_length=4)
+    skills: List[RouteSkill] = Field(min_length=1, max_length=3)
+    scope: Literal["current_project", "explicit_assets", "organization", "none"]
+    entities: Dict[str, Any]
+    confidence: float = Field(ge=0, le=1)
+    needs_clarification: bool
+    clarification: str
+    use_thread_context: bool
+
+
+class CapabilityStepContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capability: str
+    parameters: Dict[str, Any]
+
+
+class CapabilityPlanContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    plan: List[CapabilityStepContract] = Field(min_length=1)
+    response: str
+
+
 class AIEngine:
     """AI 决策引擎"""
     
@@ -138,8 +183,11 @@ class AIEngine:
                     max_tokens=600,
                     timeout=45.0,
                     task_type="intent_route",
+                    response_model=RouteContract,
+                    business_validator=self._validate_route_contract,
                 )
-                route = self._parse_route(router_response.get("content", ""))
+                route_content = json.dumps(router_response["validated"], ensure_ascii=False) if router_response.get("validated") else router_response.get("content", "")
+                route = self._parse_route(route_content)
             except Exception:
                 route = self._route_failure_fallback(user_input)
                 if not route:
@@ -187,6 +235,8 @@ class AIEngine:
                     max_tokens=1000,
                     timeout=60.0,
                     task_type="capability_plan",
+                    response_model=CapabilityPlanContract,
+                    business_validator=lambda value: self._validate_planner_contract(value, skills, route["intents"]),
                 )
             except Exception:
                 fallback = self._planner_failure_fallback(route, skills)
@@ -194,7 +244,8 @@ class AIEngine:
                     logger.warning("Capability planner failed; using bounded fallback for %s", route["intents"])
                     return fallback
                 raise
-            plan = self._parse_plan(planner_response.get("content", ""))
+            plan_content = json.dumps(planner_response["validated"], ensure_ascii=False) if planner_response.get("validated") else planner_response.get("content", "")
+            plan = self._parse_plan(plan_content)
             plan = self._restrict_plan_to_skills(plan, skills, route["intents"])
             plan["routing"] = {
                 **route,
@@ -204,9 +255,15 @@ class AIEngine:
             return plan
         except Exception as e:
             logger.error(f"AI decision failed: {e}", exc_info=True)
+            model_failure = "所有模型均未生成有效结果" in str(e) or "LLM call timed out" in str(e)
+            message = (
+                "AI 模型连续未生成通过校验的执行计划，本次没有执行任何工具。请检查模型配置或稍后重试。"
+                if model_failure
+                else "抱歉，我暂时无法理解你的需求。请尝试更明确地描述。"
+            )
             return {
-                "plan": [{"capability": "chat", "parameters": {"message": "抱歉，我暂时无法理解你的需求。请尝试更明确地描述。"}}],
-                "response": "抱歉，我暂时无法理解你的需求。请尝试更明确地描述。",
+                "plan": [{"capability": "chat", "parameters": {"message": message}}],
+                "response": message,
             }
 
     def _immediate_chat(self, message: str, route: Dict, capability: str = "chat") -> Dict:
@@ -439,22 +496,46 @@ class AIEngine:
         max_tokens: int,
         timeout: float,
         task_type: str,
+        response_model=None,
+        business_validator=None,
     ) -> Dict:
-        import asyncio
+        if user_id:
+            return await self.llm_service.chat_with_fallback(
+                db=db,
+                user_id=user_id,
+                messages=messages,
+                task_type=task_type,
+                timeout=timeout,
+                temperature=0.1,
+                max_tokens=max_tokens,
+                response_model=response_model,
+                business_validator=business_validator,
+            )
+        return await self._call_llm_direct(db, messages, max_tokens=max_tokens)
 
-        request = self.llm_service.chat_with_fallback(
-            db=db,
-            user_id=user_id,
-            messages=messages,
-            task_type=task_type,
-            temperature=0.1,
-            max_tokens=max_tokens,
-        ) if user_id else self._call_llm_direct(db, messages, max_tokens=max_tokens)
-        try:
-            return await asyncio.wait_for(request, timeout=timeout)
-        except asyncio.TimeoutError as exc:
-            logger.warning("AI %s timed out after %.0fs", task_type, timeout)
-            raise ValueError(f"AI {task_type} timed out") from exc
+    def _validate_route_contract(self, value: RouteContract) -> None:
+        unknown = [intent for intent in value.intents if intent not in INTENT_CATEGORIES]
+        if unknown:
+            raise ValueError(f"未知意图：{', '.join(unknown)}")
+        categories = {INTENT_CATEGORIES[intent] for intent in value.intents}
+        if categories != {value.category}:
+            raise ValueError("category 与 intents 不一致")
+        known_skills = set(prompt_skill_registry._skills)
+        unknown_skills = [skill for skill in value.skills if skill not in known_skills]
+        if unknown_skills:
+            raise ValueError(f"未知 Skill：{', '.join(unknown_skills)}")
+
+    def _validate_planner_contract(self, value: CapabilityPlanContract, skills, intents: List[str]) -> None:
+        allowed = set(prompt_skill_registry.capability_names_for(skills, intents)) | {"chat", "help"}
+        for item in value.plan:
+            if item.capability not in allowed:
+                raise ValueError(f"Capability {item.capability} 超出当前 Skill 范围")
+            capability = self.registry.get(item.capability)
+            if not capability:
+                raise ValueError(f"Capability {item.capability} 未注册")
+            validated = self._validate_step(item.model_dump(), capability)
+            if validated.get("_validation_error"):
+                raise ValueError(validated["_validation_error"])
 
     def _build_router_messages(self, user_input: str, context: Dict) -> List[Dict]:
         recent_user_turns = [

@@ -8,6 +8,7 @@ import {
   FileProtectOutlined, ExperimentOutlined, SaveOutlined,
   ReloadOutlined, BulbOutlined, GlobalOutlined, FileTextOutlined,
   DatabaseOutlined, DeleteOutlined, HddOutlined, WarningOutlined,
+  DashboardOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
@@ -40,6 +41,7 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
   const [documentHealth, setDocumentHealth] = useState(null)
   const [storage, setStorage] = useState(null)
   const [clearingDocuments, setClearingDocuments] = useState(false)
+  const [runtimeStatus, setRuntimeStatus] = useState(null)
 
   const navigate = useNavigate()
 
@@ -58,14 +60,16 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [modelsRes, configRes, metaRes] = await Promise.all([
+      const [modelsRes, configRes, metaRes, runtimeRes] = await Promise.all([
         api.get('/models/available'),
         api.get('/config/'),
         api.get('/config/meta'),
+        api.get('/config/runtime-status'),
       ])
       setModels(modelsRes.data)
       setConfigs(configRes.data)
       setMeta(metaRes.data)
+      setRuntimeStatus(runtimeRes.data)
       setPendingChanges({})
       try {
         const diagnosticsRes = await api.get('/diagnostics/operations', {
@@ -115,8 +119,12 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
       await api.put('/config/', { updates: pendingChanges })
       message.success(`已保存 ${Object.keys(pendingChanges).length} 项配置`)
       setPendingChanges({})
-      const configRes = await api.get('/config/')
+      const [configRes, runtimeRes] = await Promise.all([
+        api.get('/config/'),
+        api.get('/config/runtime-status'),
+      ])
       setConfigs(configRes.data)
+      setRuntimeStatus(runtimeRes.data)
     } catch (error) {
       console.error('Failed to save config:', error)
       message.error('保存失败')
@@ -475,6 +483,99 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
     )
   }
 
+  const renderRuntimeTab = () => {
+    const hardware = runtimeStatus?.hardware || {}
+    const limits = runtimeStatus?.limits || {}
+    const autoMode = getCurrentValue('runtime.resource_mode') !== 'manual'
+    const customProfile = !autoMode && getCurrentValue('runtime.resource_profile') === 'custom'
+    const concurrencyFields = [
+      ['runtime.interactive_concurrency', '交互扫描', 10],
+      ['runtime.assessment_concurrency', '技术测评', 10],
+      ['runtime.document_concurrency', '文档分析', 4],
+      ['runtime.verification_concurrency', '整改复测', 5],
+      ['runtime.model_concurrency', '模型调用', 16],
+    ]
+    return (
+      <div className="config-tab-content">
+        <div className="config-section">
+          <SectionTitle icon={<DashboardOutlined />} title="运行环境" subtitle="检测容器实际可用资源并给出档位建议" />
+          <div className="runtime-hardware-grid">
+            <div><span>CPU</span><strong>{hardware.cpu_count || '-'} 核</strong></div>
+            <div><span>可用内存</span><strong>{formatBytes(hardware.memory_available_bytes || 0)}</strong></div>
+            <div><span>GPU</span><strong>{hardware.gpu_available ? 'NVIDIA 可用' : '未检测到'}</strong></div>
+            <div><span>当前压力</span><strong>{Math.round(hardware.cpu_pressure_percent || 0)}% / {Math.round(hardware.memory_percent || 0)}%</strong></div>
+          </div>
+          <div className="runtime-recommendation">
+            推荐 <Tag color="cyan">{runtimeStatus?.recommended_profile || '-'}</Tag>
+            <span>{runtimeStatus?.recommendation_reason || '等待检测'}</span>
+          </div>
+          {runtimeStatus?.pressure?.paused && (
+            <div className="runtime-pressure-warning">已暂停领取新任务：{runtimeStatus.pressure.reasons.join('、')}</div>
+          )}
+        </div>
+
+        <div className="config-section">
+          <SectionTitle icon={<RobotOutlined />} title="模型部署策略" subtitle="自动模式下 CPU 使用云模型，GPU 使用 vLLM" />
+          <Form layout="vertical">
+            <Form.Item label="推理策略">
+              <Select value={getCurrentValue('runtime.model_policy') || 'auto'} onChange={value => handleConfigChange('runtime.model_policy', value)}>
+                <Option value="auto">自动：CPU 云端 / GPU vLLM</Option>
+                <Option value="cloud">仅云端模型</Option>
+                <Option value="local">本地优先：CPU llama.cpp / GPU vLLM</Option>
+                <Option value="vllm">仅 vLLM</Option>
+                <Option value="llama_cpp">仅 llama.cpp</Option>
+                <Option value="ollama">Ollama</Option>
+              </Select>
+            </Form.Item>
+          </Form>
+          <div className="runtime-selection">
+            当前选择：<strong>{runtimeStatus?.selected_runtime || '未配置'} · {runtimeStatus?.selected_model || '无可用模型'}</strong>
+          </div>
+        </div>
+
+        <div className="config-section">
+          <SectionTitle icon={<ThunderboltOutlined />} title="任务并发与背压" subtitle="修改只影响后续领取的任务，不中断运行中任务" />
+          <Form layout="vertical">
+            <Form.Item label="自动采用推荐档位">
+              <Switch checked={autoMode} onChange={checked => handleConfigChange('runtime.resource_mode', checked ? 'auto' : 'manual')} />
+            </Form.Item>
+            <Form.Item label="资源档位">
+              <Select disabled={autoMode} value={getCurrentValue('runtime.resource_profile') || 'standard'} onChange={value => handleConfigChange('runtime.resource_profile', value)}>
+                <Option value="light">轻量</Option>
+                <Option value="standard">标准</Option>
+                <Option value="gpu">GPU</Option>
+                <Option value="custom">自定义</Option>
+              </Select>
+            </Form.Item>
+            <div className="runtime-effective-limits">
+              当前生效：扫描 {limits.interactive || '-'} · 测评 {limits.assessment || '-'} · 文档 {limits.document || '-'} · 复测 {limits.verification || '-'} · 模型 {limits.model || '-'}
+            </div>
+            {customProfile && concurrencyFields.map(([key, label, max]) => (
+              <Form.Item key={key} label={label}>
+                <div className="slider-row">
+                  <Slider min={1} max={max} value={getCurrentValue(key) || 1} onChange={value => handleConfigChange(key, value)} />
+                  <span className="slider-value">{getCurrentValue(key) || 1}</span>
+                </div>
+              </Form.Item>
+            ))}
+            <Form.Item label="内存背压阈值">
+              <div className="slider-row">
+                <Slider min={50} max={99} value={getCurrentValue('runtime.memory_pressure_percent') || 90} onChange={value => handleConfigChange('runtime.memory_pressure_percent', value)} />
+                <span className="slider-value">{getCurrentValue('runtime.memory_pressure_percent') || 90}%</span>
+              </div>
+            </Form.Item>
+            <Form.Item label="CPU 背压阈值">
+              <div className="slider-row">
+                <Slider min={50} max={99} value={getCurrentValue('runtime.cpu_pressure_percent') || 95} onChange={value => handleConfigChange('runtime.cpu_pressure_percent', value)} />
+                <span className="slider-value">{getCurrentValue('runtime.cpu_pressure_percent') || 95}%</span>
+              </div>
+            </Form.Item>
+          </Form>
+        </div>
+      </div>
+    )
+  }
+
   // --- Tab 5: 报告 ---
   const renderReportTab = () => {
     return (
@@ -609,6 +710,9 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
             </TabPane>
             <TabPane tab={<span><FileTextOutlined /> 文档分析</span>} key="document">
               {renderDocumentTab()}
+            </TabPane>
+            <TabPane tab={<span><DashboardOutlined /> 运行资源</span>} key="runtime">
+              {renderRuntimeTab()}
             </TabPane>
             <TabPane tab={<span><FileTextOutlined /> 报告</span>} key="report">
               {renderReportTab()}

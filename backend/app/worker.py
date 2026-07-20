@@ -7,6 +7,7 @@ Run with:
 import asyncio
 import logging
 import sys
+import time
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
@@ -19,23 +20,35 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 logger = logging.getLogger(__name__)
+_last_pressure_log = 0.0
 
 
 async def _run_role_once(role: str) -> int:
+    global _last_pressure_log
     async with AsyncSessionLocal() as db:
+        from app.services.runtime_resources import runtime_status
+
+        resources = await runtime_status(db)
+        if resources["pressure"]["paused"]:
+            now = time.monotonic()
+            if now - _last_pressure_log >= 60:
+                logger.warning("%s worker backpressure: %s", role, "、".join(resources["pressure"]["reasons"]))
+                _last_pressure_log = now
+            return 0
+        limits = resources["limits"]
         if role == "interactive":
             active = sum(not task.done() for task in orchestrator.active_tasks.values())
-            available = max(0, settings.INTERACTIVE_SCAN_MAX_CONCURRENT - active)
+            available = max(0, limits["interactive"] - active)
             return await orchestrator.recover_incomplete_scan_tasks(db, limit=available) if available else 0
         if role == "document":
             from app.services.document_pipeline import process_pending_document_runs
-            return await process_pending_document_runs(db)
+            return await process_pending_document_runs(db, limit=limits["document"])
         if role == "assessment":
             from app.services.assessment_task_queue import process_pending_assessment_tasks
-            return await process_pending_assessment_tasks(db)
+            return await process_pending_assessment_tasks(db, limit=limits["assessment"])
         if role == "verification":
             from app.services.verification_queue import process_pending_verification_runs
-            return await process_pending_verification_runs(db)
+            return await process_pending_verification_runs(db, limit=limits["verification"])
 
         from app.api.monitoring import run_due_scheduled_scans
         from app.services.archive_queue import process_pending_archive_jobs, process_pending_conversation_summaries

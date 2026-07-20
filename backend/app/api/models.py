@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.core.rbac import require_any_org_permission
 from app.core.security import get_current_user
 from app.models.user import User
-from app.models.model_config import ModelProvider, ModelConfig, ModelUsage
+from app.models.model_config import InferenceRuntime, ModelProvider, ModelConfig, ModelUsage, ProviderType
 from app.schemas.model_config import (
     ModelProviderCreate,
     ModelProviderUpdate,
@@ -26,6 +26,7 @@ from app.schemas.model_config import (
     AvailableModel,
 )
 from app.services.llm_service import llm_service
+from app.core.secret_box import encrypt_secret
 
 router = APIRouter(prefix="/models", tags=["Model Configuration"])
 
@@ -43,13 +44,15 @@ async def create_provider(
     provider = ModelProvider(
         name=provider_data.name,
         provider_type=provider_data.provider_type,
-        api_key=provider_data.api_key,
+        api_key=encrypt_secret(provider_data.api_key) if provider_data.api_key else None,
         api_base=provider_data.api_base,
+        runtime_kind=provider_data.runtime_kind.value,
         is_active=True,
     )
     db.add(provider)
     await db.commit()
     await db.refresh(provider)
+    llm_service.providers.clear()
     return provider
 
 
@@ -85,14 +88,23 @@ async def update_provider(
     if provider_data.name is not None:
         provider.name = provider_data.name
     if provider_data.api_key is not None:
-        provider.api_key = provider_data.api_key
+        provider.api_key = encrypt_secret(provider_data.api_key) if provider_data.api_key else None
     if provider_data.api_base is not None:
         provider.api_base = provider_data.api_base
+    if provider_data.runtime_kind is not None:
+        if provider_data.runtime_kind == InferenceRuntime.OLLAMA and provider.provider_type != ProviderType.OLLAMA:
+            raise HTTPException(status_code=422, detail="Ollama 运行时必须使用 Ollama 提供商类型")
+        if provider.provider_type == ProviderType.OLLAMA and provider_data.runtime_kind != InferenceRuntime.OLLAMA:
+            raise HTTPException(status_code=422, detail="Ollama 提供商只能使用 Ollama 运行时")
+        if provider_data.runtime_kind in {InferenceRuntime.VLLM, InferenceRuntime.LLAMA_CPP} and provider.provider_type != ProviderType.CUSTOM:
+            raise HTTPException(status_code=422, detail="vLLM 和 llama.cpp 必须使用自定义 OpenAI-compatible 提供商")
+        provider.runtime_kind = provider_data.runtime_kind.value
     if provider_data.is_active is not None:
         provider.is_active = provider_data.is_active
     
     await db.commit()
     await db.refresh(provider)
+    llm_service.providers.clear()
     return provider
 
 
@@ -113,6 +125,7 @@ async def delete_provider(
     
     await db.delete(provider)
     await db.commit()
+    llm_service.providers.clear()
     return None
 
 
@@ -265,6 +278,15 @@ async def test_model_config(
 
 
 # --- Available Models Endpoint ---
+
+@router.get("/runtime")
+async def get_runtime_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await require_any_org_permission(db, current_user, "system:config")
+    return await llm_service.runtime_status(db)
+
 
 @router.get("/available", response_model=List[AvailableModel])
 async def get_available_models(

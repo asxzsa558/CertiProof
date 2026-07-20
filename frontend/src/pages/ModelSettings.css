@@ -112,6 +112,21 @@
   color: #fff !important;
 }
 
+.runtime-status-card .ant-statistic-content {
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .model-settings-content {
+    padding: 16px;
+  }
+
+  .model-settings-header {
+    padding: 12px 16px !important;
+  }
+}
+
 .model-settings-content .ant-modal-content {
   background: var(--bg-tertiary) !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;

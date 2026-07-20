@@ -11,6 +11,7 @@ from app.core.rbac import require_any_org_permission
 from app.core.security import get_current_user
 from app.models.user import User
 from app.services.config_service import ConfigService, get_config_service
+from app.services.llm_service import llm_service
 
 router = APIRouter(prefix="/config", tags=["System Config"])
 
@@ -40,6 +41,15 @@ async def get_config_meta(
     await require_any_org_permission(db, current_user, "system:config")
     service = get_config_service(db)
     return await service.get_meta()
+
+
+@router.get("/runtime-status")
+async def get_runtime_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await require_any_org_permission(db, current_user, "system:config")
+    return await llm_service.runtime_status(db)
 
 
 @router.put("/")

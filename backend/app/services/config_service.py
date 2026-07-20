@@ -56,6 +56,57 @@ DEFAULT_CONFIGS = {
         "description": "默认文档分析模式（standard/deep）",
         "category": "document",
     },
+    # 运行资源与推理策略
+    "runtime.model_policy": {
+        "value": settings.LLM_RUNTIME_POLICY,
+        "description": "模型运行策略（auto/cloud/local/vllm/llama_cpp/ollama）",
+        "category": "runtime",
+    },
+    "runtime.resource_mode": {
+        "value": "auto",
+        "description": "资源档位采用自动推荐或手动配置（auto/manual）",
+        "category": "runtime",
+    },
+    "runtime.resource_profile": {
+        "value": "standard",
+        "description": "手动资源档位（light/standard/gpu/custom）",
+        "category": "runtime",
+    },
+    "runtime.interactive_concurrency": {
+        "value": settings.INTERACTIVE_SCAN_MAX_CONCURRENT,
+        "description": "交互扫描最大并发数",
+        "category": "runtime",
+    },
+    "runtime.assessment_concurrency": {
+        "value": settings.ASSESSMENT_MAX_CONCURRENT,
+        "description": "技术测评最大并发数",
+        "category": "runtime",
+    },
+    "runtime.document_concurrency": {
+        "value": settings.DOCUMENT_WORKER_BATCH_SIZE,
+        "description": "文档分析最大并发数",
+        "category": "runtime",
+    },
+    "runtime.verification_concurrency": {
+        "value": 2,
+        "description": "整改复测最大并发数",
+        "category": "runtime",
+    },
+    "runtime.model_concurrency": {
+        "value": 4,
+        "description": "模型调用最大并发数",
+        "category": "runtime",
+    },
+    "runtime.memory_pressure_percent": {
+        "value": 90,
+        "description": "暂停领取新任务的内存压力阈值",
+        "category": "runtime",
+    },
+    "runtime.cpu_pressure_percent": {
+        "value": 95,
+        "description": "暂停领取新任务的 CPU 负载阈值",
+        "category": "runtime",
+    },
     # 报告
     "report.default_format": {
         "value": settings.REPORT_DEFAULT_FORMAT,
@@ -95,7 +146,7 @@ class ConfigService:
         db_configs = {c.key: c.value for c in result.scalars().all()}
 
         # 合并默认配置和数据库配置
-        grouped = {"ai": {}, "assessment": {}, "document": {}, "report": {}}
+        grouped = {"ai": {}, "assessment": {}, "document": {}, "runtime": {}, "report": {}}
         for key, meta in DEFAULT_CONFIGS.items():
             category = meta["category"]
             if key in db_configs:
@@ -109,6 +160,7 @@ class ConfigService:
         """更新配置项"""
         if key not in DEFAULT_CONFIGS:
             raise ValueError(f"Unknown config key: {key}")
+        value = self._validate(key, value)
 
         result = await self.db.execute(
             select(SystemConfig).where(SystemConfig.key == key)
@@ -131,6 +183,37 @@ class ConfigService:
         await self.db.refresh(config)
         logger.info(f"Config updated: {key} = {value}")
         return config
+
+    @staticmethod
+    def _validate(key: str, value: Any) -> Any:
+        options = {
+            "runtime.model_policy": {"auto", "cloud", "local", "vllm", "llama_cpp", "ollama"},
+            "runtime.resource_mode": {"auto", "manual"},
+            "runtime.resource_profile": {"light", "standard", "gpu", "custom"},
+        }
+        if key in options:
+            if value not in options[key]:
+                raise ValueError(f"Invalid value for {key}")
+            return value
+        ranges = {
+            "runtime.interactive_concurrency": (1, 10),
+            "runtime.assessment_concurrency": (1, 10),
+            "runtime.document_concurrency": (1, 4),
+            "runtime.verification_concurrency": (1, 5),
+            "runtime.model_concurrency": (1, 16),
+            "runtime.memory_pressure_percent": (50, 99),
+            "runtime.cpu_pressure_percent": (50, 99),
+        }
+        if key in ranges:
+            try:
+                number = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{key} must be an integer") from exc
+            low, high = ranges[key]
+            if not low <= number <= high:
+                raise ValueError(f"{key} must be between {low} and {high}")
+            return number
+        return value
 
     async def update_batch(self, updates: Dict[str, Any]) -> int:
         """批量更新配置"""

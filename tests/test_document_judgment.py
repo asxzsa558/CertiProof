@@ -111,6 +111,7 @@ def test_llm_fallback_rejects_invalid_structured_response(monkeypatch):
         DB(),
         1,
         [{"role": "user", "content": "test"}],
+        models=models,
         response_validator=lambda response: _engine()._parse_llm_json(response["content"]),
     ))
 
