@@ -31,3 +31,8 @@ def test_nuclei_image_is_not_pinned_to_one_cpu_architecture():
 def test_tool_dockerfiles_use_valid_apt_mirror_substitution():
     for dockerfile in (ROOT / "mcp-servers").glob("*/Dockerfile"):
         assert "|g| /etc" not in dockerfile.read_text(encoding="utf-8"), dockerfile
+
+
+def test_publish_workflow_uses_standalone_bake_definition():
+    workflow = (ROOT / ".github/workflows/publish-cloud-images.yml").read_text(encoding="utf-8")
+    assert "docker buildx bake -f docker-bake.hcl --push" in workflow
