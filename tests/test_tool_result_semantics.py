@@ -653,6 +653,26 @@ def test_crypto_transport_reports_protocol_evidence_and_risk(monkeypatch):
     assert any(item["id"] == "crypto:weak-protocol:TLS1" for item in result["data"]["findings"])
 
 
+def test_crypto_transport_uses_gateway_sync_route(monkeypatch):
+    calls = []
+
+    async def call(_self, tool_name, params):
+        calls.append((tool_name, params))
+        return {"status": "success", "data": {"scan_completed": True, "findings": []}}
+
+    async def call_with_progress(*_args, **_kwargs):
+        raise AssertionError("crypto_transport_scan is not an async gateway tool")
+
+    monkeypatch.setattr(MCPGatewayClient, "call", call)
+    monkeypatch.setattr(MCPGatewayClient, "call_with_progress", call_with_progress)
+    result = asyncio.run(ExecutionEngine()._crypto_transport_scan(
+        {"target": "example.test", "port": 443}, user_id=1, project_id=1, db=None,
+    ))
+
+    assert calls == [("crypto_transport_scan", {"target": "example.test", "port": 443})]
+    assert result["scan_completed"] is True
+
+
 def test_snmp_no_response_is_failed_and_hides_library_setup_noise(monkeypatch):
     path = Path(__file__).resolve().parents[1] / "mcp-servers" / "network-tools" / "server.py"
     spec = importlib.util.spec_from_file_location("certiproof_network_tools_server", path)

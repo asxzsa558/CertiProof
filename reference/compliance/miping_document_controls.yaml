@@ -1,22 +1,66 @@
-version: "2026.07-miping-eight-domain-v2"
+version: "2026.07-miping-eight-domain-v3"
 basis:
   - "GB/T 39786-2021"
   - "GB/T 43206-2023"
+  - "GB/T 43207-2023"
   - "GM/T 0116-2021"
+  - "信息系统密码应用高风险判定指引（2020版）"
   - "商用密码应用安全性评估测评工具指引"
   - "商用密码应用安全性评估管理办法"
 description: "CertiProof 商用密码应用安全自查标准库。覆盖四个技术层面和四个管理层面，用于企业内部差距分析，不代替经认定密评机构出具的正式密评结论。"
+calibration:
+  calibrated_at: "2026-07-22"
+  scope: "企业内部商用密码应用自查；不对外出具具有证明作用的密评结论。"
+  authoritative_sources:
+    - id: "GBT-39786-2021"
+      title: "信息安全技术 信息系统密码应用基本要求"
+      status: "现行"
+      purpose: "定义密码应用技术与管理要求。"
+    - id: "GBT-43206-2023"
+      title: "信息安全技术 信息系统密码应用测评要求"
+      status: "现行；2024-04-01实施"
+      purpose: "定义单元测评对象、方法和结果判定。"
+    - id: "GBT-43207-2023"
+      title: "信息安全技术 信息系统密码应用设计指南"
+      status: "现行；2024-04-01实施"
+      purpose: "校准密码应用方案的需求分析、设计内容和实施一致性。"
+    - id: "GMT-0116-2021"
+      title: "信息系统密码应用测评过程指南"
+      status: "现行"
+      purpose: "约束准备、方案、现场、分析和报告过程。"
+    - id: "MIP-HIGH-RISK-2020"
+      title: "信息系统密码应用高风险判定指引"
+      status: "公开指引"
+      purpose: "校准高风险条件、缓解措施和密钥全生命周期风险。"
+    - id: "MIP-MEASURES-2023"
+      title: "商用密码应用安全性评估管理办法"
+      status: "现行；2023-11-01施行"
+      purpose: "约束方案评估、现场评估、客观凭据、报告和留存边界。"
+  decision_principles:
+    - "文档出现算法、产品或制度名称只能作为候选证据，不能直接判定符合。"
+    - "必须同时核对保护对象、实现机制、合规来源、责任主体和运行记录。"
+    - "缺少适用性说明、现场证据或有效性验证时，不得自动判定通过。"
+    - "不适用必须说明业务场景、等级依据、替代措施和审批记录。"
+    - "高风险结论必须满足明确高风险条件；单纯缺少材料优先判为无法验证或中危差距。"
+  severity_policy:
+    high: "命中高风险指引条件，或缺失会直接影响重要数据、身份真实性、密钥安全及密码产品合规性。"
+    medium: "制度、方案、记录或证据不完整，尚不能证明形成直接高风险。"
+    low: "不影响核心密码措施有效性的记录、格式或维护性偏差。"
 requirement_defaults:
   required_evidence: ["可定位的方案、制度、配置或运行记录", "明确的适用对象、责任主体和执行方式"]
   completeness: "证据应说明保护对象、密码措施、密钥或产品服务、责任主体及可核验记录；仅出现算法或产品名称不算完整。"
   negative_conditions: ["明确未采用所需密码保护措施", "使用来源或合规状态不明的密码产品服务", "密钥全生命周期缺少责任与记录", "证据之间相互矛盾"]
-  severity: "high"
+  severity: "medium"
+  applicability: "根据测评等级、业务场景、密码应用方案和适用性论证确定；不得仅因未部署某类对象而自动判定不适用。"
+  automation_boundary: "材料检查只能判断证据完整性；技术机制的正确性和有效性仍需自动工具或现场验证。"
   remediation_template: "补充“{requirement}”对应的密码应用设计、责任分工、配置依据和可审计运行记录。"
 
 documents:
   system_crypto_scope:
     name: "信息系统及密码应用边界清单"
     aliases: ["信息系统及密码应用边界清单", "密评范围清单", "密码应用边界", "系统边界和资产清单"]
+    basis: ["GM/T 0116-2021 测评准备与方案编制", "商用密码应用安全性评估管理办法第十一条、第十二条"]
+    automation_boundary: "清单用于确定测评范围和对象，不证明对象上的密码措施已经正确有效实施。"
     controls:
       - id: "MIP-SCOPE-001"
         title: "测评对象和边界"
@@ -40,10 +84,34 @@ documents:
             text: "为每类测评对象指定系统、密码和业务责任人"
             evidence_keywords: ["系统责任人", "密码责任人", "业务责任人", "联系方式"]
             missing_judgement: "未明确测评对象责任主体。"
+      - id: "MIP-SCOPE-003"
+        title: "重要数据与密码应用点映射"
+        required_points:
+          - id: "P1"
+            text: "识别重要数据、敏感信息和涉及法律责任认定的业务行为"
+            evidence_keywords: ["重要数据", "敏感信息", "法律责任", "业务行为", "数据分类"]
+            missing_judgement: "未识别需要密码保护的重要数据和关键业务行为。"
+          - id: "P2"
+            text: "记录数据产生、传输、存储、使用和销毁环节对应的密码应用点"
+            evidence_keywords: ["数据流向", "产生", "传输", "存储", "使用", "销毁", "密码应用点"]
+            missing_judgement: "未建立数据生命周期与密码应用点的对应关系。"
+      - id: "MIP-SCOPE-004"
+        title: "适用性与边界变更"
+        required_points:
+          - id: "P1"
+            text: "对不适用指标记录业务场景、等级依据、替代措施和审批结论"
+            evidence_keywords: ["不适用", "业务场景", "等级依据", "替代措施", "审批"]
+            missing_judgement: "不适用项缺少可核验的适用性论证。"
+          - id: "P2"
+            text: "建立资产、网络、业务和密码应用变化后的边界复核机制"
+            evidence_keywords: ["边界变更", "资产变更", "网络变更", "业务变更", "重新评估"]
+            missing_judgement: "未发现密码应用边界的变更复核机制。"
 
   crypto_algorithm_protocol_inventory:
     name: "密码算法、协议与证书清单"
     aliases: ["密码算法协议与证书清单", "算法协议证书清单", "密码算法清单", "证书清单"]
+    basis: ["GB/T 39786-2021 通用要求", "信息系统密码应用高风险判定指引第5章", "商用密码应用安全性评估测评工具指引第4章"]
+    automation_boundary: "清单可证明声明和台账，算法、协议、证书的正确性与有效性必须结合配置、抓包或自动工具核验。"
     controls:
       - id: "MIP-ALG-001"
         title: "算法协议使用清单"
@@ -67,10 +135,36 @@ documents:
             text: "建立证书申请、签发、更新、吊销和状态检查机制"
             evidence_keywords: ["证书申请", "签发", "更新", "吊销", "CRL", "OCSP"]
             missing_judgement: "未发现证书全生命周期和状态检查机制。"
+      - id: "MIP-ALG-003"
+        title: "算法强度与来源合规"
+        severity: "high"
+        required_points:
+          - id: "P1"
+            text: "证明所用算法符合密码相关国家标准或行业标准且安全强度满足保护需求"
+            evidence_keywords: ["国家标准", "行业标准", "算法强度", "SM2", "SM3", "SM4", "RSA 2048"]
+            negative_conditions: ["使用MD5、DES、SHA-1保护重要数据", "RSA密钥不足2048比特", "使用未经安全论证的自研算法"]
+            missing_judgement: "未证明密码算法来源和安全强度满足要求。"
+          - id: "P2"
+            text: "明确禁止弱算法、未知算法和不符合要求参数的配置基线"
+            evidence_keywords: ["禁止算法", "弱算法", "未知算法", "参数基线", "禁用清单"]
+            missing_judgement: "未建立弱算法和不安全参数禁用基线。"
+      - id: "MIP-ALG-004"
+        title: "清单与实际配置一致性"
+        required_points:
+          - id: "P1"
+            text: "定期将算法协议证书清单与生产配置、抓包和扫描结果核对"
+            evidence_keywords: ["配置核对", "抓包", "扫描结果", "一致性", "定期复核"]
+            missing_judgement: "未发现清单与生产配置的一致性核对。"
+          - id: "P2"
+            text: "对清单外算法、协议、证书或密码套件建立发现和处置记录"
+            evidence_keywords: ["清单外", "未知证书", "未知协议", "处置记录", "偏差"]
+            missing_judgement: "未发现清单外密码能力的偏差处置机制。"
 
   crypto_personnel_records:
     name: "密码相关人员管理记录"
     aliases: ["密码相关人员管理记录", "密码人员管理", "密码岗位人员记录", "密码培训记录"]
+    basis: ["GB/T 39786-2021 人员管理要求", "商用密码应用安全性评估管理办法第十二条、第十三条"]
+    automation_boundary: "制度文字不能替代人员授权、培训、交接和审计的实际记录。"
     controls:
       - id: "MIP-PER-001"
         title: "岗位、准入和制约"
@@ -94,10 +188,23 @@ documents:
             text: "人员调岗离职时回收账号、权限、介质和密码材料并留痕"
             evidence_keywords: ["调岗", "离职", "账号回收", "权限回收", "介质回收", "交接记录"]
             missing_judgement: "未发现人员变更离岗的回收和交接证据。"
+      - id: "MIP-PER-003"
+        title: "双人控制与独立监督"
+        required_points:
+          - id: "P1"
+            text: "关键密钥操作和高风险密码配置变更实行双人控制或复核"
+            evidence_keywords: ["双人控制", "双人复核", "密钥操作", "配置变更", "审批"]
+            missing_judgement: "未发现关键密码操作的双人控制或复核证据。"
+          - id: "P2"
+            text: "审计人员独立于日常密码操作并定期复核特权行为"
+            evidence_keywords: ["独立审计", "职责分离", "特权行为", "定期复核", "审计员"]
+            missing_judgement: "未证明密码审计岗位具备必要独立性。"
 
   physical_environment_evidence:
     name: "物理和环境安全现场证据"
     aliases: ["物理和环境安全现场证据", "机房密码应用证据", "门禁监控完整性证据", "物理环境检查记录"]
+    basis: ["GB/T 39786-2021 物理和环境安全要求", "GB/T 43206-2023 物理和环境安全测评要求", "信息系统密码应用高风险判定指引第6章"]
+    automation_boundary: "必须提供门禁、监控、密码模块和运行记录的现场证据；仅靠远程网络扫描不能判定。"
     controls:
       - id: "MIP-PHY-001"
         title: "电子门禁身份鉴别"
@@ -121,10 +228,23 @@ documents:
             text: "保存完整性校验、异常告警和审计抽查记录"
             evidence_keywords: ["完整性校验", "异常告警", "审计抽查", "校验记录"]
             missing_judgement: "未发现物理记录完整性保护的运行证据。"
+      - id: "MIP-PHY-003"
+        title: "现场机制有效性与缓解措施"
+        required_points:
+          - id: "P1"
+            text: "通过现场测试或抽样记录证明门禁鉴别和记录完整性机制实际有效"
+            evidence_keywords: ["现场测试", "抽样", "鉴别结果", "完整性验证", "测试记录"]
+            missing_judgement: "未提供物理环境密码机制有效性验证记录。"
+          - id: "P2"
+            text: "未采用密码技术时记录生物识别、专人值守、登记和视频监控等缓解措施及适用性论证"
+            evidence_keywords: ["生物识别", "专人值守", "人员登记", "视频监控", "缓解措施", "适用性"]
+            missing_judgement: "缺少物理身份鉴别替代措施的适用性和有效性证据。"
 
   network_communication_evidence:
     name: "网络和通信安全现场证据"
     aliases: ["网络和通信安全现场证据", "通信密码配置", "TLS TLCP 配置", "VPN密码配置", "通信抓包"]
+    basis: ["GB/T 39786-2021 网络和通信安全要求", "GB/T 43206-2023 网络和通信安全测评要求", "信息系统密码应用高风险判定指引第7章", "商用密码应用安全性评估测评工具指引"]
+    automation_boundary: "协议和证书工具只能形成辅助证据；业务通信范围、双向鉴别、边界策略和有效性仍需配置、抓包与现场记录。"
     controls:
       - id: "MIP-NET-001"
         title: "通信实体身份鉴别与信道保护"
@@ -148,10 +268,48 @@ documents:
             text: "证书链、证书状态、协议版本和密码套件检查结果可追溯"
             evidence_keywords: ["证书链", "证书状态", "协议版本", "密码套件", "检查结果"]
             missing_judgement: "网络通信密码配置缺少可追溯核验结果。"
+      - id: "MIP-NET-003"
+        title: "外联与集中管理通道"
+        severity: "high"
+        required_points:
+          - id: "P1"
+            text: "识别跨边界、远程接入和集中管理通信，并对通信实体进行适用等级的身份鉴别"
+            evidence_keywords: ["跨边界", "远程接入", "集中管理", "通信实体", "双向认证", "身份鉴别"]
+            missing_judgement: "未覆盖跨边界和集中管理通信的实体鉴别。"
+          - id: "P2"
+            text: "对外联和管理通道使用符合要求的TLS、TLCP、IPSec VPN或SSL VPN并验证配置有效性"
+            evidence_keywords: ["TLCP", "IPSec VPN", "SSL VPN", "管理通道", "配置验证", "有效性"]
+            negative_conditions: ["使用SSH 1.0、SSL 2.0、SSL 3.0或TLS 1.0", "通过不可控网络明文传输鉴别数据"]
+            missing_judgement: "未证明外联和管理通道的密码保护正确有效。"
+      - id: "MIP-NET-004"
+        title: "通信机密性与完整性验证"
+        severity: "high"
+        required_points:
+          - id: "P1"
+            text: "对重要通信数据的机密性保护执行协议、算法、密钥参数和密文有效性验证"
+            evidence_keywords: ["重要通信数据", "机密性", "协议分析", "密钥参数", "密文", "验证结果"]
+            missing_judgement: "未验证重要通信数据机密性保护的正确性和有效性。"
+          - id: "P2"
+            text: "对重要通信数据和边界访问控制信息的完整性保护执行验证并保存原始记录"
+            evidence_keywords: ["通信数据完整性", "访问控制信息", "MAC", "数字签名", "原始记录", "验证"]
+            missing_judgement: "未验证通信数据或边界访问控制信息完整性保护。"
+      - id: "MIP-NET-005"
+        title: "产品、证书与密钥对应关系"
+        required_points:
+          - id: "P1"
+            text: "将通信密码产品、服务、证书、密钥和具体通信链路建立对应关系"
+            evidence_keywords: ["通信链路", "密码产品", "密码服务", "证书", "密钥", "对应关系"]
+            missing_judgement: "通信链路无法追溯到实际密码产品、证书和密钥。"
+          - id: "P2"
+            text: "证明通信密码产品合规资质、运行前提、证书状态和密钥生命周期均有效"
+            evidence_keywords: ["产品认证", "运行前提", "证书状态", "密钥生命周期", "有效期"]
+            missing_judgement: "未证明通信密码产品及其证书密钥处于合规有效状态。"
 
   device_computing_evidence:
     name: "设备和计算安全现场证据"
     aliases: ["设备和计算安全现场证据", "设备密码配置", "主机密码应用证据", "计算环境密码配置"]
+    basis: ["GB/T 39786-2021 设备和计算安全要求", "GB/T 43206-2023 设备和计算安全测评要求", "信息系统密码应用高风险判定指引第8章"]
+    automation_boundary: "必须结合设备配置、密码模块、管理通道、日志和完整性验证记录；普通主机基线不能替代密评。"
     controls:
       - id: "MIP-DEV-001"
         title: "设备身份与远程管理"
@@ -175,10 +333,35 @@ documents:
             text: "重要日志采用密码技术保护完整性并保留验证记录"
             evidence_keywords: ["重要日志", "日志完整性", "数字签名", "哈希", "验证记录"]
             missing_judgement: "未提供重要日志完整性保护和验证记录。"
+      - id: "MIP-DEV-003"
+        title: "敏感标记与重要程序完整性"
+        required_points:
+          - id: "P1"
+            text: "对敏感标记、访问控制策略和关键配置采用密码技术保护完整性并可验证"
+            evidence_keywords: ["敏感标记", "访问控制策略", "关键配置", "完整性", "验证"]
+            missing_judgement: "未提供敏感标记或关键控制信息完整性保护证据。"
+          - id: "P2"
+            text: "对重要程序和文件建立签名、杂凑校验、可信验证或等效的完整性机制"
+            evidence_keywords: ["重要程序", "重要文件", "数字签名", "杂凑校验", "可信验证"]
+            missing_judgement: "未提供重要程序和文件完整性保护证据。"
+      - id: "MIP-DEV-004"
+        title: "设备密码模块和密钥使用"
+        severity: "high"
+        required_points:
+          - id: "P1"
+            text: "设备使用的密码模块、产品或服务具有适用合规证明并满足安全运行前提"
+            evidence_keywords: ["密码模块", "产品认证", "检测报告", "安全策略", "运行前提"]
+            missing_judgement: "未证明设备密码模块或产品合规且正确部署。"
+          - id: "P2"
+            text: "设备鉴别、管理通道和完整性机制使用的密钥用途、存储和更新受控"
+            evidence_keywords: ["设备密钥", "密钥用途", "密钥存储", "密钥更新", "调用授权"]
+            missing_judgement: "未证明设备密码机制使用的密钥受到全生命周期控制。"
 
   application_data_evidence:
     name: "应用和数据安全现场证据"
     aliases: ["应用和数据安全现场证据", "应用密码配置", "数据密码保护证据", "应用数据检查记录"]
+    basis: ["GB/T 39786-2021 应用和数据安全要求", "GB/T 43206-2023 应用和数据安全测评要求", "信息系统密码应用高风险判定指引第9章"]
+    automation_boundary: "必须结合业务流程、接口调用、重要数据样本、密码模块和验证记录；网络TLS结果不能覆盖存储和业务侧密码要求。"
     controls:
       - id: "MIP-APP-001"
         title: "应用身份鉴别与访问控制"
@@ -202,10 +385,59 @@ documents:
             text: "需要不可否认性的业务行为使用数字签名并保存验证记录"
             evidence_keywords: ["不可否认", "数字签名", "签名验证", "业务行为", "验证记录"]
             missing_judgement: "未提供重要业务行为不可否认性证据。"
+      - id: "MIP-APP-003"
+        title: "重要数据传输与存储机密性"
+        severity: "high"
+        required_points:
+          - id: "P1"
+            text: "验证重要数据在应用传输过程中的加密保护范围、算法、密钥和实现有效性"
+            evidence_keywords: ["重要数据", "传输机密性", "加密范围", "算法", "密钥", "有效性验证"]
+            missing_judgement: "未验证重要数据传输机密性保护。"
+          - id: "P2"
+            text: "验证重要数据在数据库、文件、备份和介质中的存储机密性保护"
+            evidence_keywords: ["存储机密性", "数据库加密", "文件加密", "备份加密", "介质"]
+            missing_judgement: "未验证重要数据存储机密性保护。"
+      - id: "MIP-APP-004"
+        title: "重要数据传输与存储完整性"
+        severity: "high"
+        required_points:
+          - id: "P1"
+            text: "验证重要数据传输过程采用MAC、数字签名或等效密码机制保护完整性"
+            evidence_keywords: ["传输完整性", "MAC", "数字签名", "篡改检测", "验证结果"]
+            missing_judgement: "未验证重要数据传输完整性保护。"
+          - id: "P2"
+            text: "验证重要数据存储过程采用MAC、数字签名或等效密码机制保护完整性"
+            evidence_keywords: ["存储完整性", "MAC", "数字签名", "完整性校验", "验证记录"]
+            missing_judgement: "未验证重要数据存储完整性保护。"
+      - id: "MIP-APP-005"
+        title: "应用日志和程序完整性"
+        required_points:
+          - id: "P1"
+            text: "重要应用日志采用密码技术保护完整性并定期验证"
+            evidence_keywords: ["应用日志", "日志完整性", "数字签名", "完整性验证", "审计"]
+            missing_judgement: "未提供重要应用日志完整性保护和验证证据。"
+          - id: "P2"
+            text: "重要应用程序加载、卸载和发布包采用签名或可信机制验证来源与完整性"
+            evidence_keywords: ["程序加载", "程序卸载", "发布包", "代码签名", "可信验证"]
+            missing_judgement: "未提供重要应用程序加载和发布完整性保护证据。"
+      - id: "MIP-APP-006"
+        title: "业务行为不可否认性"
+        severity: "high"
+        required_points:
+          - id: "P1"
+            text: "识别涉及法律责任认定的业务，并对数据原发行为形成可验证签名证据"
+            evidence_keywords: ["法律责任", "数据原发", "数字签名", "签名证据", "业务场景"]
+            missing_judgement: "未识别或保护需要原发行为不可否认性的业务。"
+          - id: "P2"
+            text: "对数据接收行为形成可验证证据并保存签名验证、时间和证书状态记录"
+            evidence_keywords: ["数据接收", "不可否认", "签名验证", "时间戳", "证书状态"]
+            missing_judgement: "未提供数据接收行为不可否认性及验证记录。"
 
   crypto_application_plan:
     name: "商用密码应用方案"
     aliases: ["商用密码应用方案", "密码应用方案", "密码建设方案", "密码改造方案"]
+    basis: ["GB/T 39786-2021", "GB/T 43207-2023", "信息系统密码应用高风险判定指引第10.2节", "商用密码应用安全性评估管理办法第七条、第十条"]
+    automation_boundary: "方案检查判断需求、设计和可实施性；实际建设一致性与运行有效性必须在现场评估核验。"
     controls:
       - id: "MIP-PLAN-001"
         title: "系统范围与密码应用需求"
@@ -251,10 +483,24 @@ documents:
             text: "覆盖用户身份、访问控制、重要数据和不可否认性保护"
             evidence_keywords: ["用户身份", "访问控制", "重要数据", "不可否认", "数字签名"]
             missing_judgement: "未发现应用和数据层密码应用设计。"
+      - id: "MIP-PLAN-005"
+        title: "合规选型、密钥设计与实施一致性"
+        severity: "high"
+        required_points:
+          - id: "P1"
+            text: "论证密码算法、技术、产品、服务和密钥全生命周期设计的合规性与可实施性"
+            evidence_keywords: ["算法合规", "产品认证", "服务资质", "密钥全生命周期", "可实施性"]
+            missing_judgement: "方案未充分论证密码选型和密钥管理设计。"
+          - id: "P2"
+            text: "建立方案要求、建设配置、验收结果和运行现状的一致性核对机制"
+            evidence_keywords: ["方案一致性", "建设配置", "验收结果", "运行现状", "偏差整改"]
+            missing_judgement: "未建立密码应用方案与实际建设运行的一致性核对。"
 
   crypto_management_policy:
     name: "密码应用管理制度"
     aliases: ["密码应用管理制度", "商用密码管理制度", "密码管理制度"]
+    basis: ["GB/T 39786-2021 管理制度要求", "信息系统密码应用高风险判定指引第10.1节", "商用密码应用安全性评估管理办法第十二条、第十三条"]
+    automation_boundary: "制度存在不等于执行有效，必须与人员、密钥、产品介质、运行和审计记录交叉验证。"
     controls:
       - id: "MIP-POL-001"
         title: "制度体系与适用范围"
@@ -300,10 +546,23 @@ documents:
             text: "明确违规行为报告、纠正和责任追究"
             evidence_keywords: ["违规", "报告", "纠正", "责任追究", "问责"]
             missing_judgement: "未发现密码应用违规处置机制。"
+      - id: "MIP-POL-005"
+        title: "密码软硬件与介质管理"
+        required_points:
+          - id: "P1"
+            text: "规定密码软硬件和介质的采购、登记、部署、使用、维修、停用和报废流程"
+            evidence_keywords: ["密码软硬件", "介质", "采购", "登记", "维修", "报废"]
+            missing_judgement: "未建立密码软硬件及介质全生命周期管理要求。"
+          - id: "P2"
+            text: "限制密码设备、密钥介质和管理接口的访问并保留审批与操作记录"
+            evidence_keywords: ["密码设备", "密钥介质", "管理接口", "访问控制", "审批记录", "操作记录"]
+            missing_judgement: "未发现密码设备和介质访问控制及留痕要求。"
 
   key_management_policy:
     name: "密钥管理制度"
     aliases: ["密钥管理制度", "密钥管理办法", "密钥全生命周期管理"]
+    basis: ["GB/T 39786-2021 密钥管理要求", "信息系统密码应用高风险判定指引附录A"]
+    automation_boundary: "制度只能证明规则，密钥生成环境、存储形态、权限、更新、恢复和销毁必须结合配置及操作记录验证。"
     controls:
       - id: "MIP-KEY-001"
         title: "密钥生成与分发"
@@ -339,6 +598,7 @@ documents:
             evidence_keywords: ["密钥备份", "恢复", "归档", "恢复演练"]
             missing_judgement: "未发现密钥备份恢复和归档要求。"
       - id: "MIP-KEY-004"
+        severity: "high"
         title: "密钥撤销销毁与应急"
         required_points:
           - id: "P1"
@@ -349,10 +609,24 @@ documents:
             text: "规定密钥泄露、丢失或损坏时的应急处置"
             evidence_keywords: ["密钥泄露", "密钥丢失", "密钥损坏", "应急处置", "重新生成"]
             missing_judgement: "未发现密钥异常应急处置要求。"
+      - id: "MIP-KEY-005"
+        title: "公钥可信关联与关键操作控制"
+        severity: "high"
+        required_points:
+          - id: "P1"
+            text: "使用公钥前验证公钥与实体的可信关联、证书链、有效期和撤销状态"
+            evidence_keywords: ["公钥", "实体关联", "证书链", "有效期", "撤销状态", "OCSP"]
+            missing_judgement: "未建立公钥与实体可信关联及状态验证机制。"
+          - id: "P2"
+            text: "对根密钥、主密钥、密钥恢复和销毁等关键操作实施双人控制并保留审计记录"
+            evidence_keywords: ["根密钥", "主密钥", "双人控制", "密钥恢复", "密钥销毁", "审计记录"]
+            missing_judgement: "未发现关键密钥操作的双人控制和审计证据。"
 
   crypto_product_inventory:
     name: "密码产品和服务清单"
     aliases: ["密码产品和服务清单", "密码产品清单", "密码服务清单", "密码资产清单"]
+    basis: ["GB/T 39786-2021 通用要求", "信息系统密码应用高风险判定指引第5.3节", "商用密码应用安全性评估管理办法第十条"]
+    automation_boundary: "台账不能证明产品实际合规运行，必须核验证书、型号版本、安全策略、漏洞和部署前提。"
     controls:
       - id: "MIP-PROD-001"
         title: "产品服务台账"
@@ -367,6 +641,7 @@ documents:
             missing_judgement: "未发现产品服务版本和状态记录。"
       - id: "MIP-PROD-002"
         title: "合规资质核验"
+        severity: "high"
         required_points:
           - id: "P1"
             text: "记录密码产品或服务的适用合规证明"
@@ -378,6 +653,7 @@ documents:
             missing_judgement: "未发现合规证明与实际部署的一致性核验。"
       - id: "MIP-PROD-003"
         title: "算法与协议配置"
+        severity: "high"
         required_points:
           - id: "P1"
             text: "记录实际使用的算法、协议、密钥长度和参数"
@@ -387,10 +663,24 @@ documents:
             text: "识别并处置弱算法、过期协议或不安全参数"
             evidence_keywords: ["弱算法", "过期协议", "禁用", "整改", "不安全参数"]
             missing_judgement: "未发现弱算法和过期协议治理记录。"
+      - id: "MIP-PROD-004"
+        title: "安全运行前提与漏洞处置"
+        severity: "high"
+        required_points:
+          - id: "P1"
+            text: "核对密码产品安全策略、使用手册规定的部署条件和安全运行前提"
+            evidence_keywords: ["安全策略", "使用手册", "部署条件", "运行前提", "配置核对"]
+            missing_judgement: "未证明密码产品满足安全运行前提。"
+          - id: "P2"
+            text: "持续跟踪密码产品和基础密码组件高危漏洞并保存修复或缓解记录"
+            evidence_keywords: ["高危漏洞", "安全公告", "补丁", "缓解措施", "处置记录", "OpenSSL"]
+            missing_judgement: "未发现密码产品及组件高危漏洞跟踪处置记录。"
 
   crypto_operation_records:
     name: "密码建设、运行与审计记录"
     aliases: ["密码建设运行与审计记录", "密码建设、运行与审计记录", "密码建设与运行记录", "密码运行记录", "密码运维记录", "密码建设记录"]
+    basis: ["GB/T 39786-2021 建设运行要求", "GM/T 0116-2021", "商用密码应用安全性评估管理办法第八条、第九条、第十一条、第十三条"]
+    automation_boundary: "运行记录必须与实际对象、时间、责任人和结果对应，模板或空表不能判定为执行有效。"
     controls:
       - id: "MIP-OPS-001"
         title: "方案实施与验收"
@@ -425,10 +715,23 @@ documents:
             text: "按适用要求组织密评并保留报告和处置记录"
             evidence_keywords: ["密评", "评估报告", "评估机构", "处置记录", "报告留存"]
             missing_judgement: "未发现密评组织和结果处置记录。"
+      - id: "MIP-OPS-004"
+        title: "配置变更与记录可追溯"
+        required_points:
+          - id: "P1"
+            text: "密码配置、产品版本、证书和密钥变更经过评估、审批、测试、回滚准备和复核"
+            evidence_keywords: ["密码配置变更", "版本变更", "证书变更", "密钥变更", "回滚", "复核"]
+            missing_judgement: "未发现密码配置和关键资源变更的完整控制记录。"
+          - id: "P2"
+            text: "自查原始记录、报告、问题处置和关键运行证据按适用要求归档且可追溯"
+            evidence_keywords: ["原始记录", "报告归档", "问题处置", "留存期限", "可追溯", "六年"]
+            missing_judgement: "未证明密评自查原始记录和结果具备足够留存与追溯能力。"
 
   crypto_incident_plan:
     name: "密码应急处置预案"
     aliases: ["密码应急处置预案", "密码安全事件应急预案", "密码事件处置预案"]
+    basis: ["GB/T 39786-2021 应急处置要求", "商用密码应用安全性评估管理办法第十五条"]
+    automation_boundary: "预案文本必须由演练、事件记录、密钥和证书应急操作结果证明可执行。"
     controls:
       - id: "MIP-IR-001"
         title: "事件范围与分级"
@@ -463,3 +766,14 @@ documents:
             text: "事件或演练后复盘并更新预案、配置和控制措施"
             evidence_keywords: ["复盘", "改进措施", "更新预案", "整改", "经验总结"]
             missing_judgement: "未发现事件复盘和持续改进机制。"
+      - id: "MIP-IR-004"
+        title: "重大事件报告与恢复验证"
+        required_points:
+          - id: "P1"
+            text: "密码相关重大安全事件、重大隐患和紧急情况具有监管报告判断与报送流程"
+            evidence_keywords: ["重大安全事件", "重大隐患", "紧急情况", "监管报告", "报送流程"]
+            missing_judgement: "未发现密码重大事件和隐患的监管报告机制。"
+          - id: "P2"
+            text: "处置后验证密钥、证书、密码设备、业务数据和通信恢复的正确性与有效性"
+            evidence_keywords: ["恢复验证", "密钥", "证书", "密码设备", "业务数据", "通信恢复"]
+            missing_judgement: "未发现密码事件处置后的恢复有效性验证要求。"

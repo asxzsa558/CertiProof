@@ -617,7 +617,7 @@ async def generate_json_report(
         "document_unable": document_unable,
     })
     if high_risk_open:
-        conclusion = ("attention", "存在高风险待整改项，当前不应将项目视为已完成自查。")
+        conclusion = ("attention", "存在高风险待整改项；流程虽已完成，当前结论仍为未通过自查。")
     elif unable_scans or document_unable:
         conclusion = ("attention", "存在无法完成的检查，报告结论仅覆盖已成功取得结果的范围。")
     elif open_findings or document_attention:

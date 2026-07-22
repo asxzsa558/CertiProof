@@ -92,7 +92,7 @@ class KnowledgeGraphService:
     ) -> dict[str, Any]:
         raw = bundle_path.read_bytes()
         # Include graph schema generation so an unchanged YAML is reseeded after node UID/property changes.
-        digest = hashlib.sha256(raw + f"\n{library_name}:schema-v2".encode()).hexdigest()
+        digest = hashlib.sha256(raw + f"\n{library_name}:schema-v3".encode()).hexdigest()
         library = yaml.safe_load(raw) or {}
         version = str(library.get("version") or "unversioned")
         defaults = library.get("requirement_defaults") or {}
@@ -119,34 +119,47 @@ class KnowledgeGraphService:
         node_count = 1
         edge_count = 0
         for document_key, document in (library.get("documents") or {}).items():
+            document_basis = document.get("basis") or basis
+            document_applicability = document.get("applicability") or defaults.get("applicability") or ""
+            document_boundary = document.get("automation_boundary") or defaults.get("automation_boundary") or ""
             document_uid = f"document:{library_name}:{version}:{document_key}"
             await self._cypher(db, f"""
                 MATCH (s:StandardEdition {{uid: {_literal(standard_uid)}}})
                 MERGE (d:DocumentType {{uid: {_literal(document_uid)}}})
                 SET d.key = {_literal(document_key)}, d.name = {_literal(document.get('name') or document_key)},
-                    d.aliases = {_literal(document.get('aliases') or [])}, d.standard_version = {_literal(version)}
+                    d.aliases = {_literal(document.get('aliases') or [])}, d.standard_version = {_literal(version)},
+                    d.basis = {_literal(document_basis)}, d.applicability = {_literal(document_applicability)},
+                    d.automation_boundary = {_literal(document_boundary)}
                 MERGE (s)-[:DEFINES]->(d)
             """)
             node_count += 1
             edge_count += 1
             for control in document.get("controls") or []:
+                control_basis = control.get("basis") or document_basis
+                control_applicability = control.get("applicability") or document_applicability
+                control_boundary = control.get("automation_boundary") or document_boundary
                 control_id = str(control["id"])
                 control_uid = f"control:{library_name}:{version}:{control_id}"
                 await self._cypher(db, f"""
                     MATCH (d:DocumentType {{uid: {_literal(document_uid)}}})
                     MERGE (c:Control {{uid: {_literal(control_uid)}}})
                     SET c.control_id = {_literal(control_id)}, c.title = {_literal(control.get('title') or control_id)},
-                        c.standard_version = {_literal(version)}
+                        c.standard_version = {_literal(version)}, c.basis = {_literal(control_basis)},
+                        c.applicability = {_literal(control_applicability)},
+                        c.automation_boundary = {_literal(control_boundary)}
                     MERGE (d)-[:CONTAINS]->(c)
                 """)
                 node_count += 1
                 edge_count += 1
                 for point in control.get("required_points") or []:
                     requirement_uid = f"requirement:{library_name}:{version}:{control_id}:{point['id']}"
-                    required_evidence = point.get("required_evidence") or defaults.get("required_evidence") or point.get("evidence_keywords") or []
-                    completeness = point.get("completeness") or defaults.get("completeness") or "必须存在可定位的支持证据且无矛盾证据"
-                    negative_conditions = point.get("negative_conditions") or defaults.get("negative_conditions") or []
-                    severity = point.get("severity") or defaults.get("severity") or "medium"
+                    required_evidence = point.get("required_evidence") or control.get("required_evidence") or document.get("required_evidence") or defaults.get("required_evidence") or point.get("evidence_keywords") or []
+                    completeness = point.get("completeness") or control.get("completeness") or document.get("completeness") or defaults.get("completeness") or "必须存在可定位的支持证据且无矛盾证据"
+                    negative_conditions = point.get("negative_conditions") or control.get("negative_conditions") or document.get("negative_conditions") or defaults.get("negative_conditions") or []
+                    severity = point.get("severity") or control.get("severity") or document.get("severity") or defaults.get("severity") or "medium"
+                    point_basis = point.get("basis") or control_basis
+                    point_applicability = point.get("applicability") or control_applicability
+                    point_boundary = point.get("automation_boundary") or control_boundary
                     remediation = point.get("remediation") or str(
                         defaults.get("remediation_template") or "补充“{requirement}”相关制度条款和可审计证据。"
                     ).format(requirement=point.get("text") or "该要求")
@@ -161,7 +174,9 @@ class KnowledgeGraphService:
                             r.negative_conditions = {_literal(negative_conditions)},
                             r.completeness = {_literal(completeness)},
                             r.missing_judgement = {_literal(point.get('missing_judgement') or '未发现必需证据')},
-                            r.severity = {_literal(severity)}
+                            r.severity = {_literal(severity)}, r.basis = {_literal(point_basis)},
+                            r.applicability = {_literal(point_applicability)},
+                            r.automation_boundary = {_literal(point_boundary)}
                         MERGE (rule:DecisionRule {{uid: {_literal(decision_uid)}}})
                         SET rule.pass_condition = {_literal('必需证据完整且无矛盾')},
                             rule.partial_condition = {_literal('存在支持证据但完整性不足')},
@@ -203,6 +218,7 @@ class KnowledgeGraphService:
                    c.uid, c.control_id, c.title,
                    r.uid, r.point_id, r.text, r.keywords, r.required_evidence,
                    r.negative_conditions, r.completeness, r.missing_judgement, r.severity,
+                   r.basis, r.applicability, r.automation_boundary,
                    rule.pass_condition, rule.partial_condition, rule.fail_condition, rule.unable_condition,
                    guidance.text
             ORDER BY d.key, c.control_id, r.point_id
@@ -210,7 +226,8 @@ class KnowledgeGraphService:
             "version", "basis", "document_key", "document_name", "aliases",
             "control_uid", "control_id", "control_title", "requirement_uid",
             "point_id", "requirement_text", "keywords", "required_evidence", "negative_conditions",
-            "completeness", "missing_judgement", "severity", "pass_condition",
+            "completeness", "missing_judgement", "severity", "requirement_basis", "applicability",
+            "automation_boundary", "pass_condition",
             "partial_condition", "fail_condition", "unable_condition", "remediation",
         ))
         if not rows:
@@ -242,6 +259,9 @@ class KnowledgeGraphService:
                 "completeness": row["completeness"],
                 "missing_judgement": row["missing_judgement"],
                 "severity": row["severity"],
+                "basis": row["requirement_basis"] or row["basis"] or [],
+                "applicability": row["applicability"],
+                "automation_boundary": row["automation_boundary"],
                 "remediation": row["remediation"],
                 "decision_rule": {
                     "pass": row["pass_condition"],

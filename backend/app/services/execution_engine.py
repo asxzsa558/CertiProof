@@ -1402,7 +1402,7 @@ class ExecutionEngine:
     async def _crypto_transport_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         from app.mcp.gateway_client import MCPGatewayClient
 
-        result = await MCPGatewayClient().call_with_progress("crypto_transport_scan", {
+        result = await MCPGatewayClient().call("crypto_transport_scan", {
             "target": parameters["target"],
             "port": parameters.get("port", 443),
             **({"timeout": parameters["timeout"]} if "timeout" in parameters else {}),

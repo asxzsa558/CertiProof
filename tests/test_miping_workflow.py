@@ -4,6 +4,7 @@ import yaml
 
 from app.services.ai_engine import AIEngine
 from app.services.assessment_templates import MIPING_DOMAINS, MIPING_LEVEL_3_TEMPLATE
+from app.services.document_control_engine import DocumentControlEngine
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,8 +15,18 @@ def test_miping_library_covers_all_materials_and_required_points():
     documents = data["documents"]
     assert len(documents) == 13
     controls = [control for document in documents.values() for control in document["controls"]]
-    assert sum(len(control["required_points"]) for control in controls) >= 60
+    assert len(controls) == 56
+    assert sum(len(control["required_points"]) for control in controls) == 112
+    assert all(document.get("basis") and document.get("automation_boundary") for document in documents.values())
     assert all(point.get("evidence_keywords") and point.get("missing_judgement") for control in controls for point in control["required_points"])
+    assert data["requirement_defaults"]["severity"] == "medium"
+    high_risk = next(control for control in controls if control["id"] == "MIP-ALG-003")
+    assert high_risk["severity"] == "high"
+    assert high_risk["required_points"][0]["negative_conditions"]
+    engine = DocumentControlEngine(data)
+    inherited = engine.documents["network_communication_evidence"]["controls"][0]["required_points"][0]
+    assert inherited["basis"] and inherited["automation_boundary"]
+    assert inherited["severity"] == "medium"
 
 
 def test_miping_template_maps_to_eight_domains():

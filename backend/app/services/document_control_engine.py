@@ -61,6 +61,23 @@ class DocumentControlEngine:
             raise ValueError("DocumentControlEngine requires a non-empty standards library")
         self.library = library
         self.documents = self.library.get("documents", {})
+        defaults = self.library.get("requirement_defaults") or {}
+        for document in self.documents.values():
+            document_basis = document.get("basis") or self.library.get("basis") or []
+            for control in document.get("controls") or []:
+                inherited = {
+                    "basis": control.get("basis") or document_basis,
+                    "required_evidence": control.get("required_evidence") or document.get("required_evidence") or defaults.get("required_evidence"),
+                    "completeness": control.get("completeness") or document.get("completeness") or defaults.get("completeness"),
+                    "negative_conditions": control.get("negative_conditions") or document.get("negative_conditions") or defaults.get("negative_conditions"),
+                    "severity": control.get("severity") or document.get("severity") or defaults.get("severity") or "medium",
+                    "applicability": control.get("applicability") or document.get("applicability") or defaults.get("applicability"),
+                    "automation_boundary": control.get("automation_boundary") or document.get("automation_boundary") or defaults.get("automation_boundary"),
+                }
+                for point in control.get("required_points") or []:
+                    for key, value in inherited.items():
+                        if point.get(key) is None and value is not None:
+                            point[key] = value
 
     @classmethod
     async def from_graph(cls, db, assessment_type_code: str = "dengbao"):
@@ -885,6 +902,8 @@ class DocumentControlEngine:
             "completeness": point.get("completeness"),
             "negative_conditions": point.get("negative_conditions") or [],
             "severity": point.get("severity", "medium"),
+            "applicability": point.get("applicability"),
+            "automation_boundary": point.get("automation_boundary"),
             "remediation": point.get("remediation") or point.get("missing_judgement", "补充对应制度内容和可审计证据。"),
             "missing_judgement": point.get("missing_judgement", "未发现对应证据。"),
             "retrieval_complete": retrieval_complete,
