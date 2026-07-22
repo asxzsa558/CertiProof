@@ -25,6 +25,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
     const successCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'success').length
     const riskCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'risk').length
     const warningCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'warning').length
+    const notApplicableCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'not_applicable').length
     const failedCount = Object.values(assetResults).filter(r => getDisplayStatus(r) === 'failed').length
     const effectiveQualityVerdict = failedCount === totalAssets && totalAssets > 0
       ? 'failed'
@@ -40,7 +41,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       ? 'failed'
       : failedCount > 0 || warningCount > 0
         ? 'warning'
-        : riskCount > 0 ? 'risk' : 'success'
+        : riskCount > 0 ? 'risk' : notApplicableCount === totalAssets && totalAssets > 0 ? 'not_applicable' : 'success'
     const statusTextMap = Object.fromEntries(Object.entries(RESULT_STATES).map(([key, value]) => [key, value.label]))
     const assetResultFilter = assetResultFilters[resultKey] || 'all'
     const setAssetResultFilter = (value) => setAssetResultFilters(prev => ({ ...prev, [resultKey]: value }))
@@ -49,6 +50,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       success: { color: 'success', text: '检测完成', icon: <CheckCircleFilled /> },
       risk: { color: 'error', text: '发现问题', icon: <CloseCircleFilled /> },
       warning: { color: 'warning', text: '检测不完整', icon: <ExclamationCircleFilled /> },
+      not_applicable: { color: 'default', text: '不适用', icon: <ExclamationCircleFilled /> },
       failed: { color: 'error', text: '执行失败', icon: <CloseCircleFilled /> },
     }
     const assetEntries = Object.entries(assetResults)
@@ -60,6 +62,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       { key: 'success', label: '检测完成', count: successCount },
       { key: 'risk', label: '发现问题', count: riskCount },
       { key: 'warning', label: '检测不完整', count: warningCount },
+      { key: 'not_applicable', label: '不适用', count: notApplicableCount },
       { key: 'failed', label: '执行失败', count: failedCount },
     ]
 
@@ -72,6 +75,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       if (weakPasswords.length || findings.some(item => ['critical', 'high'].includes(item.severity))) return { label: '高', className: 'high' }
       if (state.key === 'risk') return { label: '高', className: 'high' }
       if (state.key === 'warning') return { label: '中', className: 'medium' }
+      if (state.key === 'not_applicable') return { label: '无', className: 'low' }
       if ((result.open_ports || []).length || (result.filtered_ports || []).length || findings.length) return { label: '中', className: 'medium' }
       return { label: '低', className: 'low' }
     }
@@ -83,11 +87,13 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
         return `明确开放 ${result.open_ports?.length || 0}，被过滤/未确认 ${result.filtered_count || result.filtered_ports?.length || 0}`
       }
       if (capability === 'scan_ssl') {
+        if (result.outcome === 'not_applicable') return '目标未提供 TLS 服务，本项不适用'
         return result.scan_completed === false || result.reachable === false
           ? 'SSL/TLS 未完成'
           : `SSL 问题 ${result.issues?.length || 0}，漏洞 ${result.vulnerabilities?.length || 0}`
       }
       if (capability === 'scan_vulnerabilities') {
+        if (result.coverage_limited) return result.tool_error || '受防护限制，漏洞检测不完整'
         if (result.scan_completed === false || (result.reachable !== true && !(result.findings || []).length)) {
           return '目标不可达或未验证，无法判断漏洞'
         }
@@ -105,6 +111,9 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       if (capability === 'baseline_check' || capability === 'linux_baseline') {
         return result.skipped ? (result.connection_error ? '无法连接' : '已跳过') : `未通过 ${result.summary?.non_compliant || 0} 项`
       }
+      if (['nikto_scan', 'gobuster_scan', 'ffuf_scan'].includes(capability) && result.scan_completed === false) {
+        return result.tool_error || 'Web 检测未完整执行'
+      }
       if (capability === 'nikto_scan') return `Web 问题 ${result.total_findings ?? result.findings?.length ?? 0}`
       return assetData.error || '已完成'
     }
@@ -116,6 +125,7 @@ export default function MultiAssetResultMessage({ msg, compact = false }) {
       lines.push(`检测完成: ${successCount}`)
       lines.push(`发现问题: ${riskCount}`)
       lines.push(`检测不完整: ${warningCount}`)
+      lines.push(`不适用: ${notApplicableCount}`)
       lines.push(`执行失败: ${failedCount}`)
       if (effectiveQualityVerdict) lines.push(`结果可信度: ${effectiveQualityVerdict} - ${quality.note || ''}`)
       lines.push(`检测工具: ${capabilitySet.map(c => CAPABILITY_NAMES[c] || c).join('、') || '安全检测'}`)

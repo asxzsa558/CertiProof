@@ -40,12 +40,15 @@ class Finding(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     assessment_id = Column(Integer, ForeignKey("assessments.id", ondelete="CASCADE"), nullable=True, index=True)
+    asset_id = Column(Integer, ForeignKey("assets.id", ondelete="SET NULL"), nullable=True, index=True)
     scan_task_id = Column(Integer, ForeignKey("scan_tasks.id"), nullable=True, index=True)
     document_run_id = Column(Integer, ForeignKey("document_analysis_runs.id", ondelete="SET NULL"), nullable=True, index=True)
     fingerprint = Column(String(64), nullable=True, index=True)
     source_type = Column(String(24), nullable=False, default="manual", index=True)
+    source_channel = Column(String(24), nullable=False, default="assessment", index=True)
     source_key = Column(String(120), nullable=True, index=True)
     scope_key = Column(String(500), nullable=True, index=True)
+    origin_finding_id = Column(Integer, ForeignKey("findings.id", ondelete="SET NULL"), nullable=True, index=True)
     
     # Finding info
     clause_id = Column(String(50), nullable=False, index=True)  # e.g., "8.1.4.1"
@@ -80,10 +83,14 @@ class Finding(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    occurrence_count = Column(Integer, nullable=False, default=1)
     
     # Relationships
     project = relationship("Project", back_populates="findings")
+    asset = relationship("Asset")
     scan_task = relationship("ScanTask", back_populates="findings")
+    origin_finding = relationship("Finding", remote_side=[id])
     document_run = relationship("DocumentAnalysisRun", back_populates="findings")
     evidences = relationship("Evidence", back_populates="finding", cascade="all, delete-orphan")
     events = relationship("FindingEvent", back_populates="finding", cascade="all, delete-orphan")

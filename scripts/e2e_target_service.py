@@ -3,18 +3,35 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import ssl
+import struct
 import subprocess
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import asyncssh
 
 
 USERNAME = "audit"
 PASSWORD = "CertiProof-E2E-2026!"
+WEAK_USERNAME = "root"
+WEAK_PASSWORD = "P@ssw0rd"
 HOST_KEY = Path("/tmp/certiproof_e2e_host_key")
 CERT = Path("/tmp/certiproof_e2e_cert.pem")
 CERT_KEY = Path("/tmp/certiproof_e2e_cert_key.pem")
+
+LAB_SERVICES = {
+    "ssh": 22,
+    "http": 80,
+    "https": 443,
+    "snmp": 161,
+    "oracle": 1521,
+    "mysql": 3306,
+    "redis": 6379,
+    "memcached": 11211,
+    "mongodb": 27017,
+}
 
 
 class TestSSHServer(asyncssh.SSHServer):
@@ -25,7 +42,10 @@ class TestSSHServer(asyncssh.SSHServer):
         return True
 
     def validate_password(self, username: str, password: str) -> bool:
-        return username == USERNAME and password == PASSWORD
+        return (username, password) in {
+            (USERNAME, PASSWORD),
+            (WEAK_USERNAME, WEAK_PASSWORD),
+        }
 
 
 COMMAND_OUTPUTS = {
@@ -100,22 +120,48 @@ async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     try:
         request_line = (await reader.readline()).decode("latin-1", errors="replace").strip()
         parts = request_line.split()
-        path = parts[1] if len(parts) > 1 else "/"
+        requested = parts[1] if len(parts) > 1 else "/"
+        parsed = urlsplit(requested)
+        path = parsed.path
         while True:
             line = await reader.readline()
             if line in {b"\r\n", b"\n", b""}:
                 break
-        if path in {"/", "/health", "/security.txt"}:
-            status, body = "200 OK", b"CertiProof controlled acceptance target\n"
+        content_type = "text/plain; charset=utf-8"
+        if path == "/health":
+            status, body = "200 OK", b"healthy\n"
+        elif path == "/manifest":
+            content_type = "application/json; charset=utf-8"
+            body = json.dumps({
+                "name": "CertiProof isolated acceptance target",
+                "services": LAB_SERVICES,
+                "purpose": "tool-chain validation only",
+            }).encode("utf-8")
+            status = "200 OK"
+        elif path in {"/", "/admin", "/api", "/login", "/backup", "/security.txt", "/robots.txt"}:
+            status, body = "200 OK", f"CertiProof controlled path: {path}\n".encode()
+        elif path == "/.git/config":
+            status, body = "200 OK", b"[core]\nrepositoryformatversion = 0\n"
+        elif path == "/.env":
+            status, body = "200 OK", b"APP_ENV=acceptance\nAPP_SECRET=not-a-real-secret\n"
+        elif path == "/server-status":
+            status, body = "200 OK", b"Apache Server Status for certiproof-e2e-target\n"
+        elif path == "/item":
+            item_id = parse_qs(parsed.query).get("id", [""])[0]
+            lowered = item_id.lower()
+            if "'" in item_id or '"' in item_id:
+                status, body = "500 Internal Server Error", b"SQL syntax error near supplied identifier\n"
+            elif any(marker in lowered for marker in ("1=2", "2=3", "false")):
+                status, body = "200 OK", b"No matching item\n"
+            else:
+                status, body = "200 OK", b"Item found: acceptance fixture\n"
         else:
             status, body = "404 Not Found", b"Not Found\n"
         response = (
             f"HTTP/1.1 {status}\r\n"
-            "Server: CertiProof-E2E/1.0\r\n"
-            "Content-Type: text/plain; charset=utf-8\r\n"
-            "X-Content-Type-Options: nosniff\r\n"
-            "X-Frame-Options: DENY\r\n"
-            "Content-Security-Policy: default-src 'none'\r\n"
+            "Server: CertiProof-E2E-Vulnerable/1.0\r\n"
+            f"Content-Type: {content_type}\r\n"
+            "X-CertiProof-Lab: intentionally-vulnerable\r\n"
             f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n"
         ).encode("ascii") + body
         writer.write(response)
@@ -123,6 +169,109 @@ async def handle_http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     finally:
         writer.close()
         await writer.wait_closed()
+
+
+async def _close_writer(writer: asyncio.StreamWriter) -> None:
+    writer.close()
+    await writer.wait_closed()
+
+
+async def handle_redis(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        request = await asyncio.wait_for(reader.read(4096), timeout=3)
+        payload = (
+            b"# Server\r\nredis_version:7.2.0\r\n"
+            b"redis_mode:standalone\r\nos:Linux acceptance\r\n"
+        )
+        if b"INFO" in request.upper():
+            writer.write(f"${len(payload)}\r\n".encode() + payload + b"\r\n")
+        else:
+            writer.write(b"+PONG\r\n")
+        await writer.drain()
+    finally:
+        await _close_writer(writer)
+
+
+async def handle_memcached(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        await asyncio.wait_for(reader.read(4096), timeout=3)
+        writer.write(b"STAT version 1.6.21\r\nSTAT curr_connections 1\r\nEND\r\n")
+        await writer.drain()
+    finally:
+        await _close_writer(writer)
+
+
+async def handle_mongodb(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        await asyncio.wait_for(reader.read(4096), timeout=3)
+        writer.write(b'{"version":"7.0.0","ok":1,"fixture":"certiproof"}\n')
+        await writer.drain()
+    finally:
+        await _close_writer(writer)
+
+
+async def handle_oracle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        await asyncio.wait_for(reader.read(1024), timeout=3)
+        writer.write(b"\x00\x20\x00\x00\x02\x00\x00\x00Oracle TNS Listener acceptance")
+        await writer.drain()
+    finally:
+        await _close_writer(writer)
+
+
+def mysql_packet(payload: bytes, sequence: int) -> bytes:
+    length = len(payload)
+    return length.to_bytes(3, "little") + bytes([sequence]) + payload
+
+
+async def read_mysql_packet(reader: asyncio.StreamReader) -> bytes:
+    header = await asyncio.wait_for(reader.readexactly(4), timeout=5)
+    length = int.from_bytes(header[:3], "little")
+    return await asyncio.wait_for(reader.readexactly(length), timeout=5)
+
+
+async def handle_mysql(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    """Minimal MySQL 4.1 responder for the empty-password acceptance probe."""
+    salt = b"certiproof-lab-salt!!"
+    capabilities = 0x0008A201
+    handshake = (
+        b"\x0a8.0.36-CertiProof-Lab\x00"
+        + struct.pack("<I", 1)
+        + salt[:8]
+        + b"\x00"
+        + struct.pack("<H", capabilities & 0xFFFF)
+        + b"\x21\x02\x00"
+        + struct.pack("<H", capabilities >> 16)
+        + b"\x15"
+        + b"\x00" * 10
+        + salt[8:20]
+        + b"\x00mysql_native_password\x00"
+    )
+    try:
+        writer.write(mysql_packet(handshake, 0))
+        await writer.drain()
+        await read_mysql_packet(reader)
+        writer.write(mysql_packet(b"\x00\x00\x00\x02\x00\x00\x00", 2))
+        await writer.drain()
+
+        command = await read_mysql_packet(reader)
+        if command[:1] != b"\x03":
+            return
+        column = (
+            b"\x03def\x00\x00\x00\x09VERSION()\x00\x0c"
+            b"\x21\x00\x20\x00\x00\x00\xfd\x00\x00\x00\x00\x00"
+        )
+        writer.write(mysql_packet(b"\x01", 1))
+        writer.write(mysql_packet(column, 2))
+        writer.write(mysql_packet(b"\xfe\x00\x00\x02\x00", 3))
+        value = b"8.0.36-CertiProof-Lab"
+        writer.write(mysql_packet(bytes([len(value)]) + value, 4))
+        writer.write(mysql_packet(b"\xfe\x00\x00\x02\x00", 5))
+        await writer.drain()
+    except (asyncio.IncompleteReadError, ConnectionError):
+        pass
+    finally:
+        await _close_writer(writer)
 
 
 def ensure_keys() -> ssl.SSLContext:
@@ -142,6 +291,11 @@ def ensure_keys() -> ssl.SSLContext:
 
 async def main() -> None:
     tls_context = ensure_keys()
+    snmpd = await asyncio.create_subprocess_exec(
+        "snmpd", "-f", "-Lo", "-C", "-c", "/app/snmpd.conf",
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     await asyncssh.create_server(
         TestSSHServer,
         "0.0.0.0",
@@ -151,8 +305,20 @@ async def main() -> None:
     )
     await asyncio.start_server(handle_http, "0.0.0.0", 80)
     await asyncio.start_server(handle_http, "0.0.0.0", 443, ssl=tls_context)
-    print("CertiProof E2E target ready on 22/80/443", flush=True)
-    await asyncio.Event().wait()
+    await asyncio.start_server(handle_oracle, "0.0.0.0", 1521)
+    await asyncio.start_server(handle_mysql, "0.0.0.0", 3306)
+    await asyncio.start_server(handle_redis, "0.0.0.0", 6379)
+    await asyncio.start_server(handle_memcached, "0.0.0.0", 11211)
+    await asyncio.start_server(handle_mongodb, "0.0.0.0", 27017)
+    await asyncio.sleep(0.2)
+    if snmpd.returncode is not None:
+        raise RuntimeError("snmpd failed to start")
+    print(f"CertiProof E2E target ready: {LAB_SERVICES}", flush=True)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        snmpd.terminate()
+        await snmpd.wait()
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@
 2. 环境变量 / Settings - 启动时的默认值
 """
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -23,32 +23,6 @@ DEFAULT_CONFIGS = {
         "value": settings.AI_HISTORY_TURNS,
         "description": "LLM 调用时携带的历史对话轮数（1-20）",
         "category": "ai",
-    },
-    "ai.enable_cache": {
-        "value": settings.AI_ENABLE_CACHE,
-        "description": "是否启用 prompt cache（Anthropic 节省成本）",
-        "category": "ai",
-    },
-    "ai.enable_assessment_context": {
-        "value": settings.AI_ENABLE_ASSESSMENT_CONTEXT,
-        "description": "是否在 prompt 中注入测评流程状态",
-        "category": "ai",
-    },
-    # 测评流程
-    "assessment.auto_start": {
-        "value": settings.ASSESSMENT_AUTO_START,
-        "description": "创建测评后是否自动开始",
-        "category": "assessment",
-    },
-    "assessment.auto_execute_tasks": {
-        "value": settings.ASSESSMENT_AUTO_EXECUTE_TASKS,
-        "description": "是否自动执行扫描类任务（asset_discovery / vuln_scan 等）",
-        "category": "assessment",
-    },
-    "assessment.max_concurrent": {
-        "value": settings.ASSESSMENT_MAX_CONCURRENT,
-        "description": "多资产扫描最大并发数（1-10）",
-        "category": "assessment",
     },
     # 文档合规检查
     "document.analysis_mode": {
@@ -107,17 +81,6 @@ DEFAULT_CONFIGS = {
         "description": "暂停领取新任务的 CPU 负载阈值",
         "category": "runtime",
     },
-    # 报告
-    "report.default_format": {
-        "value": settings.REPORT_DEFAULT_FORMAT,
-        "description": "默认报告格式（html/json）",
-        "category": "report",
-    },
-    "report.include_raw_scans": {
-        "value": settings.REPORT_INCLUDE_RAW_SCANS,
-        "description": "报告是否包含原始扫描数据",
-        "category": "report",
-    },
 }
 
 
@@ -146,9 +109,10 @@ class ConfigService:
         db_configs = {c.key: c.value for c in result.scalars().all()}
 
         # 合并默认配置和数据库配置
-        grouped = {"ai": {}, "assessment": {}, "document": {}, "runtime": {}, "report": {}}
+        grouped: Dict[str, Dict[str, Any]] = {}
         for key, meta in DEFAULT_CONFIGS.items():
             category = meta["category"]
+            grouped.setdefault(category, {})
             if key in db_configs:
                 grouped[category][key] = db_configs[key]
             else:
@@ -179,14 +143,14 @@ class ConfigService:
             )
             self.db.add(config)
 
-        await self.db.commit()
-        await self.db.refresh(config)
+        await self.db.flush()
         logger.info(f"Config updated: {key} = {value}")
         return config
 
     @staticmethod
     def _validate(key: str, value: Any) -> Any:
         options = {
+            "document.analysis_mode": {"standard", "deep"},
             "runtime.model_policy": {"auto", "cloud", "local", "vllm", "llama_cpp", "ollama"},
             "runtime.resource_mode": {"auto", "manual"},
             "runtime.resource_profile": {"light", "standard", "gpu", "custom"},
@@ -196,6 +160,7 @@ class ConfigService:
                 raise ValueError(f"Invalid value for {key}")
             return value
         ranges = {
+            "ai.history_turns": (1, 20),
             "runtime.interactive_concurrency": (1, 10),
             "runtime.assessment_concurrency": (1, 10),
             "runtime.document_concurrency": (1, 4),
@@ -215,14 +180,21 @@ class ConfigService:
             return number
         return value
 
-    async def update_batch(self, updates: Dict[str, Any]) -> int:
-        """批量更新配置"""
-        count = 0
-        for key, value in updates.items():
-            if key in DEFAULT_CONFIGS:
-                await self.update(key, value)
-                count += 1
-        return count
+    def validate_updates(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate a complete batch without mutating persistence state."""
+        if not updates:
+            raise ValueError("No configuration changes supplied")
+        unknown = sorted(set(updates) - set(DEFAULT_CONFIGS))
+        if unknown:
+            raise ValueError(f"Unknown config key: {', '.join(unknown)}")
+        return {key: self._validate(key, value) for key, value in updates.items()}
+
+    async def update_batch(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate every value first, then queue the whole batch in one transaction."""
+        validated = self.validate_updates(updates)
+        for key, value in validated.items():
+            await self.update(key, value)
+        return validated
 
     async def init_defaults(self) -> int:
         """初始化默认配置到数据库（如果不存在）"""
@@ -242,7 +214,7 @@ class ConfigService:
                 count += 1
 
         if count > 0:
-            await self.db.commit()
+            await self.db.flush()
             logger.info(f"Initialized {count} default configs")
         return count
 

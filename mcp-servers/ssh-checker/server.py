@@ -484,15 +484,40 @@ SSH_TASKS: Dict[str, Dict[str, Any]] = {}
 
 async def _run_async_tool(task_id: str, tool_name: str, params: Dict[str, Any]) -> None:
     task = SSH_TASKS[task_id]
-    task.update(status="running", progress=10)
+    task.update(
+        status="running",
+        progress=0,
+        started_at=datetime.utcnow().isoformat(),
+        heartbeat_at=datetime.utcnow().isoformat(),
+        elapsed_seconds=0,
+        message="SSH 基线核查已启动",
+    )
+
+    async def heartbeat():
+        started = time.time()
+        while task["status"] == "running":
+            elapsed = int(time.time() - started)
+            task.update(
+                progress=min(95, 5 + elapsed // 3),
+                elapsed_seconds=elapsed,
+                heartbeat_at=datetime.utcnow().isoformat(),
+                message=f"SSH 基线核查正在执行，已运行 {elapsed} 秒",
+            )
+            await asyncio.sleep(2)
+
+    heartbeat_task = asyncio.create_task(heartbeat())
     try:
         result = await TOOL_MAP[tool_name](params)
-        task.update(status="completed", progress=100, result=result)
+        task.update(status="completed", progress=100, result=result, message="SSH 基线核查完成")
     except asyncio.CancelledError:
-        task.update(status="cancelled", error="用户已停止检测")
+        task.update(status="cancelled", error="用户已停止检测", message="SSH 基线核查已停止")
         raise
     except Exception as exc:
-        task.update(status="failed", error=str(exc))
+        task.update(status="failed", error=str(exc), message="SSH 基线核查失败")
+    finally:
+        heartbeat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat_task
 
 @app.get("/")
 async def root():
@@ -566,7 +591,16 @@ async def get_scan_progress(task_id: str):
     task = SSH_TASKS.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return {"task_id": task_id, "status": task["status"], "progress": task["progress"], "error": task["error"]}
+    return {
+        "task_id": task_id,
+        "status": task["status"],
+        "progress": task["progress"],
+        "message": task.get("message"),
+        "elapsed_seconds": task.get("elapsed_seconds", 0),
+        "heartbeat_at": task.get("heartbeat_at"),
+        "alive": task["status"] == "running",
+        "error": task["error"],
+    }
 
 
 @app.get("/scan/{task_id}/result")

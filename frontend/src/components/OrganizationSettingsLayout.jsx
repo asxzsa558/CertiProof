@@ -32,7 +32,7 @@ const NAV_ITEMS = [
   { key: 'scan-nodes', group: '治理中心', label: '扫描节点', icon: <CloudServerOutlined />, path: '/settings/scan-nodes', permission: 'node:read' },
   { key: 'access', group: '治理中心', label: '角色权限', icon: <TeamOutlined />, path: '/settings/access', permission: 'role:read' },
   { key: 'data', group: '系统', label: '数据与生命周期', icon: <DatabaseOutlined />, path: '/settings/data-lifecycle', permission: 'system:config' },
-  { key: 'models', group: '系统', label: '系统设置', icon: <SettingOutlined />, path: '/settings/models', permission: 'system:config' },
+  { key: 'system', group: '系统', label: '系统设置', icon: <SettingOutlined />, path: '/settings/system', permission: 'system:config' },
 ]
 
 export default function OrganizationSettingsLayout({

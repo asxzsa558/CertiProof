@@ -17,6 +17,7 @@ from app.models.assessment import TaskInstance
 from app.models.asset import Asset
 from app.services.flow_engine import get_flow_engine
 from app.services.task_executor import get_task_executor
+from app.services.runtime_resources import concurrency_limit
 
 
 WORKER_ID = f"assessment-worker-{os.getenv('HOSTNAME', 'local')}-{os.getpid()}"
@@ -130,7 +131,7 @@ async def _run_claimed_task(task_id: int) -> None:
             await engine.reconcile_phase_progress(task.phase_id)
             return
 
-        semaphore = asyncio.Semaphore(max(1, min(settings.ASSESSMENT_MAX_CONCURRENT, 10)))
+        semaphore = asyncio.Semaphore(min(await concurrency_limit(db, "assessment"), 10))
 
         async def execute_target(target: str):
             async with semaphore:

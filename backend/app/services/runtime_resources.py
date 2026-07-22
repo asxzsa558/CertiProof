@@ -129,4 +129,22 @@ async def runtime_status(db: AsyncSession) -> dict[str, Any]:
             "memory_threshold": memory_threshold,
             "cpu_threshold": cpu_threshold,
         },
+        "operational_limits": {
+            "task_execution_mode": settings.TASK_EXECUTION_MODE,
+            "task_recovery_attempts": settings.TASK_MAX_RECOVERY_ATTEMPTS,
+            "document_recovery_attempts": settings.DOCUMENT_MAX_RECOVERY_ATTEMPTS,
+            "document_file_retry_attempts": settings.DOCUMENT_FILE_RETRY_ATTEMPTS,
+            "document_max_total_pages": settings.DOCUMENT_MAX_TOTAL_PAGES,
+            "upload_max_file_mb": settings.UPLOAD_MAX_FILE_MB,
+            "upload_max_batch_mb": settings.UPLOAD_MAX_BATCH_MB,
+            "active_history_retention_days": settings.ACTIVE_HISTORY_RETENTION_DAYS,
+        },
     }
+
+
+async def concurrency_limit(db: AsyncSession, role: str) -> int:
+    """Return the single effective concurrency limit used by every task producer."""
+    limits = (await runtime_status(db))["limits"]
+    if role not in limits:
+        raise ValueError(f"Unsupported runtime role: {role}")
+    return max(1, int(limits[role]))

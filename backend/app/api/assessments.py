@@ -21,7 +21,7 @@ from app.core.security import get_current_user
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-MAX_TASK_UPLOAD_SIZE = 100 * 1024 * 1024
+MAX_TASK_UPLOAD_SIZE = settings.UPLOAD_MAX_FILE_MB * 1024 * 1024
 from app.models.user import User
 from app.models.assessment import FlowTemplate, Assessment, PhaseInstance, TaskInstance, FlowEvent
 from app.models.project import Project
@@ -47,6 +47,7 @@ from app.services.document_pipeline import (
 from app.services.file_storage import file_storage
 from app.services.audit import record_audit_event
 from app.services.upload_validation import read_limited_upload
+from app.services.runtime_resources import concurrency_limit
 
 router = APIRouter(prefix="/assessments", tags=["Assessments"])
 
@@ -939,7 +940,7 @@ async def execute_task(
                         assessment_id=assessment.id,
                     )
 
-            semaphore = asyncio.Semaphore(max(1, min(settings.ASSESSMENT_MAX_CONCURRENT, 10)))
+            semaphore = asyncio.Semaphore(min(await concurrency_limit(db, "assessment"), 10))
             tasks_list = []
 
             for target in targets:
@@ -1154,7 +1155,9 @@ async def upload_phase_documents(
             skipped_files.extend(skipped)
             total_size += sum(len(item[1]) for item in documents)
             if len(expanded) > MAX_BATCH_FILES or total_size > MAX_BATCH_UNCOMPRESSED:
-                raise DocumentExtractionError(f"单次最多处理 {MAX_BATCH_FILES} 个文档，解压后总计不超过 300MB。")
+                raise DocumentExtractionError(
+                    f"单次最多处理 {MAX_BATCH_FILES} 个文档，解压后总计不超过 {settings.UPLOAD_MAX_BATCH_MB}MB。"
+                )
         if not expanded:
             raise DocumentExtractionError("上传内容中没有可分析的 DOCX、PDF、TXT、MD 或图片文档。")
     except DocumentExtractionError as exc:

@@ -175,6 +175,7 @@ async def nmap_scan(
     params: Dict[str, Any],
     progress_callback: Optional[callable] = None,
     process_callback: Optional[callable] = None,
+    continuous: bool = False,
 ) -> Dict[str, Any]:
     """执行 nmap 端口扫描"""
     target = params.get("target")
@@ -185,7 +186,11 @@ async def nmap_scan(
     if str(port_range).lower() in {"high-risk", "high_risk", "critical"}:
         port_range = HIGH_RISK_PORT_RANGE
     service_detection = params.get("service_detection", False)  # 默认禁用服务检测以提高速度
-    host_timeout = max(15, min(int(params.get("host_timeout", 120)), MAX_NMAP_HOST_TIMEOUT))
+    configured_host_timeout = params.get("host_timeout")
+    host_timeout = (
+        max(15, min(int(configured_host_timeout), MAX_NMAP_HOST_TIMEOUT))
+        if configured_host_timeout is not None else None
+    )
     
     cmd = [
         "nmap",
@@ -193,10 +198,11 @@ async def nmap_scan(
         "-sT",           # TCP connect 扫描（不需要 root）
         "-T4",           # 使用更快的时间模板
         "-oG", "-",      # 输出格式
-        "--host-timeout", f"{host_timeout}s",  # 限制主机扫描时间
         "--max-retries", "2",  # 限制重试次数
         "--min-rate", "100",   # 最小发包速率
     ]
+    if host_timeout is not None:
+        cmd.extend(["--host-timeout", f"{host_timeout}s"])
     
     if service_detection:
         cmd.append("-sV")
@@ -237,7 +243,7 @@ async def nmap_scan(
                 return 1000
         
         estimated_duration = max(parse_port_count(port_range) * 0.033, 5)  # 约 0.033秒/端口，最少5秒
-        max_duration = min(estimated_duration * 3, host_timeout)  # 给 3 倍余量，但不超过 host_timeout
+        max_duration = min(estimated_duration * 3, host_timeout) if host_timeout else max(estimated_duration * 3, 60)
         
         async def estimate_progress():
             if not progress_callback:
@@ -251,7 +257,11 @@ async def nmap_scan(
         
         # 并行执行进度估算和等待完成
         progress_task = asyncio.create_task(estimate_progress())
-        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=host_timeout + 30)
+        command_timeout = max(30, min(int(params.get("timeout", 300)), MAX_COMMAND_TIMEOUT))
+        if continuous:
+            stdout, _ = await process.communicate()
+        else:
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=command_timeout)
         progress_task.cancel()
         
         # 完成时回调 100%
@@ -324,11 +334,12 @@ async def nmap_scan(
                 "duration_ms": duration_ms,
                 "scan_time": datetime.utcnow().isoformat(),
                 "port_range": port_range,
+                "host_timeout": host_timeout,
                 "tcp_verified_ports": [p["port"] for p in tcp_verified_ports],
             },
         }
     except asyncio.TimeoutError:
-        raise ValueError(f"nmap scan timeout after {host_timeout}s")
+        raise ValueError(f"nmap scan timeout after {command_timeout}s")
     except Exception as e:
         error_msg = str(e)
         if "timeout" in error_msg.lower():
@@ -417,7 +428,11 @@ async def ping_host(params: Dict[str, Any]) -> Dict[str, Any]:
 
 # ============== TestSSL 工具 ==============
 
-async def testssl_scan(params: Dict[str, Any], process_callback: Optional[callable] = None) -> Dict[str, Any]:
+async def testssl_scan(
+    params: Dict[str, Any],
+    process_callback: Optional[callable] = None,
+    continuous: bool = False,
+) -> Dict[str, Any]:
     """执行 testssl.sh SSL/TLS 检测"""
     target = params.get("target")
     if not target:
@@ -452,7 +467,10 @@ async def testssl_scan(params: Dict[str, Any], process_callback: Optional[callab
         )
         if process_callback:
             process_callback(process)
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        if continuous:
+            stdout, stderr = await process.communicate()
+        else:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         # 读取 JSON 文件
         output = ""
@@ -622,13 +640,26 @@ async def testssl_scan(params: Dict[str, Any], process_callback: Optional[callab
             os.remove(json_file)
 
 
-async def crypto_transport_scan(params: Dict[str, Any]) -> Dict[str, Any]:
+async def crypto_transport_scan(
+    params: Dict[str, Any], process_callback: Optional[callable] = None,
+    continuous: bool = False,
+) -> Dict[str, Any]:
     """Collect protocol, certificate and algorithm evidence without inventing a Miping verdict."""
     target = params.get("target")
     if not target:
         raise ValueError("Missing required parameter: target")
     port = int(params.get("port", 443))
-    base = await testssl_scan({"target": target, "port": port, "timeout": params.get("timeout", 180)})
+    child_params = {"target": target, "port": port}
+    if "timeout" in params:
+        child_params["timeout"] = params["timeout"]
+    if process_callback or continuous:
+        base = await testssl_scan(
+            child_params,
+            process_callback=process_callback,
+            continuous=continuous,
+        )
+    else:
+        base = await testssl_scan(child_params)
     data = base.get("data") or {}
     if not data.get("scan_completed"):
         reason = data.get("tool_error") or "目标未完成 TLS/TLCP 握手，无法核验密码协议和证书"
@@ -709,14 +740,23 @@ async def crypto_transport_scan(params: Dict[str, Any]) -> Dict[str, Any]:
 
 # ============== Nuclei 工具 ==============
 
-async def nuclei_scan(params: Dict[str, Any], process_callback: Optional[callable] = None) -> Dict[str, Any]:
+async def nuclei_scan(
+    params: Dict[str, Any],
+    process_callback: Optional[callable] = None,
+    continuous: bool = False,
+) -> Dict[str, Any]:
     """执行 nuclei 漏洞扫描"""
     target = params.get("target")
     if not target:
         raise ValueError("Missing required parameter: target")
     
+    scan_profile = str(params.get("scan_profile") or "safe").lower()
+    protection_detected = bool(params.get("protection_detected"))
     templates = params.get("templates")
     severity = params.get("severity")
+    if scan_profile != "full":
+        templates = templates or ("misconfig,exposure" if protection_detected else "cve,misconfig,exposure")
+        severity = severity or ("critical,high" if protection_detected else "critical,high,medium")
     probe_host, probe_ports = nuclei_probe_endpoint(target)
     reachable_ports = await verify_tcp_open_ports(
         probe_host,
@@ -746,6 +786,7 @@ async def nuclei_scan(params: Dict[str, Any], process_callback: Optional[callabl
                 "scan_completed": False,
                 "templates": templates,
                 "severity_filter": severity,
+                "scan_profile": scan_profile,
                 "tool_error": reason,
                 "probe": probe_metadata,
             },
@@ -763,7 +804,17 @@ async def nuclei_scan(params: Dict[str, Any], process_callback: Optional[callabl
     if severity:
         cmd.extend(["-severity", severity])
     
-    cmd.extend(["-timeout", "30", "-retries", "2"])
+    request_timeout = 10 if protection_detected else 15
+    retries = 1
+    rate_limit = 10 if protection_detected else 25
+    concurrency = 5 if protection_detected else 10
+    cmd.extend([
+        "-timeout", str(request_timeout),
+        "-retries", str(retries),
+        "-rl", str(rate_limit),
+        "-c", str(concurrency),
+        "-bs", str(concurrency),
+    ])
     
     start_time = time.time()
     process = None
@@ -777,8 +828,11 @@ async def nuclei_scan(params: Dict[str, Any], process_callback: Optional[callabl
         )
         if process_callback:
             process_callback(process)
-        timeout = max(30, min(int(params.get("timeout", 180)), MAX_COMMAND_TIMEOUT))
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        timeout = None if continuous else max(30, min(int(params.get("timeout", 180)), MAX_COMMAND_TIMEOUT))
+        if continuous:
+            stdout, stderr = await process.communicate()
+        else:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         output = stdout.decode("utf-8", errors="replace")
         stderr_text = stderr.decode("utf-8", errors="replace").strip()
@@ -840,6 +894,9 @@ async def nuclei_scan(params: Dict[str, Any], process_callback: Optional[callabl
                 "scan_completed": scan_completed,
                 "templates": templates,
                 "severity_filter": severity,
+                "scan_profile": scan_profile,
+                "rate_limit": rate_limit,
+                "concurrency": concurrency,
                 "tool_error": tool_error,
                 "probe": probe_metadata,
             },
@@ -868,6 +925,9 @@ async def nuclei_scan(params: Dict[str, Any], process_callback: Optional[callabl
                 "scan_completed": False,
                 "templates": templates,
                 "severity_filter": severity,
+                "scan_profile": scan_profile,
+                "rate_limit": rate_limit,
+                "concurrency": concurrency,
                 "tool_error": "nuclei scan timeout",
                 "probe": probe_metadata,
             },
@@ -888,7 +948,11 @@ async def nuclei_scan(params: Dict[str, Any], process_callback: Optional[callabl
 COMMON_USERNAMES = ["admin", "root", "administrator", "user", "test", "guest"]
 COMMON_PASSWORDS = ["admin", "123456", "password", "root", "admin123", "P@ssw0rd", "test", "12345678"]
 
-async def hydra_bruteforce(params: Dict[str, Any], process_callback: Optional[callable] = None) -> Dict[str, Any]:
+async def hydra_bruteforce(
+    params: Dict[str, Any],
+    process_callback: Optional[callable] = None,
+    continuous: bool = False,
+) -> Dict[str, Any]:
     """执行 hydra 暴力破解（批量模式）"""
     import tempfile
     import os
@@ -947,7 +1011,10 @@ async def hydra_bruteforce(params: Dict[str, Any], process_callback: Optional[ca
             process_callback(process)
         
         timeout = max(30, min(int(params.get("timeout", 180)), MAX_COMMAND_TIMEOUT))
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        if continuous:
+            stdout, stderr = await process.communicate()
+        else:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         output = stdout.decode("utf-8", errors="replace")
         stderr_output = stderr.decode("utf-8", errors="replace")
@@ -1136,159 +1203,96 @@ async def execute(request: ExecuteRequest):
 import uuid
 import re
 
+async def _security_task_heartbeat(task_id: str, label: str) -> None:
+    started = time.time()
+    while SCAN_TASKS[task_id]["status"] == "running":
+        elapsed = int(time.time() - started)
+        task = SCAN_TASKS[task_id]
+        task["progress"] = max(task.get("progress", 0), min(95, 5 + elapsed // 3))
+        task["elapsed_seconds"] = elapsed
+        task["heartbeat_at"] = datetime.utcnow().isoformat()
+        task["message"] = f"{label}正在执行，已运行 {elapsed} 秒"
+        await asyncio.sleep(2)
+
+
+async def _run_async_security_tool(task_id: str, label: str, runner) -> None:
+    task = SCAN_TASKS[task_id]
+    task.update(
+        status="running",
+        progress=0,
+        started_at=datetime.utcnow().isoformat(),
+        heartbeat_at=datetime.utcnow().isoformat(),
+        elapsed_seconds=0,
+        message=f"{label}已启动",
+    )
+    heartbeat = asyncio.create_task(_security_task_heartbeat(task_id, label))
+    try:
+        task["result"] = await runner()
+        task.update(
+            status="completed",
+            progress=100,
+            heartbeat_at=datetime.utcnow().isoformat(),
+            message=f"{label}执行完成",
+        )
+    except asyncio.CancelledError:
+        task.update(status="cancelled", error="用户已停止扫描", message=f"{label}已停止")
+        raise
+    except Exception as exc:
+        task.update(status="failed", error=str(exc), message=f"{label}执行失败")
+    finally:
+        heartbeat.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat
+
+
 async def run_async_nmap(task_id: str, params: Dict[str, Any]):
-    """异步执行 nmap 扫描 - 带真实进度更新"""
     async def update_progress(progress: int):
         SCAN_TASKS[task_id]["progress"] = progress
-    
-    try:
-        SCAN_TASKS[task_id]["status"] = "running"
-        SCAN_TASKS[task_id]["progress"] = 0
-        
-        # 使用带进度回调的 nmap_scan
-        result = await nmap_scan(
+
+    await _run_async_security_tool(
+        task_id,
+        "Nmap 端口扫描",
+        lambda: nmap_scan(
             params,
             progress_callback=update_progress,
             process_callback=_remember_process(task_id),
-        )
-        
-        SCAN_TASKS[task_id]["status"] = "completed"
-        SCAN_TASKS[task_id]["progress"] = 100
-        SCAN_TASKS[task_id]["result"] = result
-        
-    except asyncio.CancelledError:
-        SCAN_TASKS[task_id]["status"] = "cancelled"
-        raise
-    except Exception as e:
-        error_msg = str(e)
-        if "timeout" in error_msg.lower():
-            SCAN_TASKS[task_id]["error"] = f"nmap scan timeout: {error_msg}"
-        elif "permission" in error_msg.lower():
-            SCAN_TASKS[task_id]["error"] = f"nmap permission denied (try running as root): {error_msg}"
-        else:
-            SCAN_TASKS[task_id]["error"] = f"nmap scan error: {error_msg}"
-        SCAN_TASKS[task_id]["status"] = "failed"
+            continuous=True,
+        ),
+    )
 
 
 async def run_async_nuclei(task_id: str, params: Dict[str, Any]):
-    """异步执行 nuclei 扫描"""
-    async def update_progress(progress: int):
-        SCAN_TASKS[task_id]["progress"] = progress
-    
-    try:
-        SCAN_TASKS[task_id]["status"] = "running"
-        SCAN_TASKS[task_id]["progress"] = 0
-        
-        # 启动进度估算任务
-        async def estimate_progress():
-            start_time = time.time()
-            estimated_duration = 120  # nuclei 通常 1-2 分钟
-            while SCAN_TASKS[task_id]["status"] == "running":
-                elapsed = time.time() - start_time
-                progress = min(int((elapsed / estimated_duration) * 90), 89)
-                SCAN_TASKS[task_id]["progress"] = progress
-                await asyncio.sleep(2)
-        
-        progress_task = asyncio.create_task(estimate_progress())
-        
-        result = await nuclei_scan(params, process_callback=_remember_process(task_id))
-        
-        progress_task.cancel()
-        
-        SCAN_TASKS[task_id]["status"] = "completed"
-        SCAN_TASKS[task_id]["progress"] = 100
-        SCAN_TASKS[task_id]["result"] = result
-        
-    except asyncio.CancelledError:
-        SCAN_TASKS[task_id]["status"] = "cancelled"
-        raise
-    except Exception as e:
-        error_msg = str(e)
-        if "timeout" in error_msg.lower():
-            SCAN_TASKS[task_id]["error"] = f"nuclei scan timeout: {error_msg}"
-        else:
-            SCAN_TASKS[task_id]["error"] = f"nuclei scan error: {error_msg}"
-        SCAN_TASKS[task_id]["status"] = "failed"
+    await _run_async_security_tool(
+        task_id,
+        "Nuclei 漏洞扫描",
+        lambda: nuclei_scan(params, process_callback=_remember_process(task_id), continuous=True),
+    )
 
 
 async def run_async_hydra(task_id: str, params: Dict[str, Any]):
-    """异步执行 hydra 暴力破解"""
-    async def update_progress(progress: int):
-        SCAN_TASKS[task_id]["progress"] = progress
-    
-    try:
-        SCAN_TASKS[task_id]["status"] = "running"
-        SCAN_TASKS[task_id]["progress"] = 0
-        
-        async def estimate_progress():
-            start_time = time.time()
-            estimated_duration = 180  # hydra 可能需要更久
-            while SCAN_TASKS[task_id]["status"] == "running":
-                elapsed = time.time() - start_time
-                progress = min(int((elapsed / estimated_duration) * 90), 89)
-                SCAN_TASKS[task_id]["progress"] = progress
-                await asyncio.sleep(3)
-        
-        progress_task = asyncio.create_task(estimate_progress())
-        
-        result = await hydra_bruteforce(params, process_callback=_remember_process(task_id))
-        
-        progress_task.cancel()
-        
-        SCAN_TASKS[task_id]["status"] = "completed"
-        SCAN_TASKS[task_id]["progress"] = 100
-        SCAN_TASKS[task_id]["result"] = result
-        
-    except asyncio.CancelledError:
-        SCAN_TASKS[task_id]["status"] = "cancelled"
-        raise
-    except Exception as e:
-        error_msg = str(e)
-        if "timeout" in error_msg.lower():
-            SCAN_TASKS[task_id]["error"] = f"hydra scan timeout: {error_msg}"
-        else:
-            SCAN_TASKS[task_id]["error"] = f"hydra scan error: {error_msg}"
-        SCAN_TASKS[task_id]["status"] = "failed"
+    await _run_async_security_tool(
+        task_id,
+        "Hydra 弱口令检测",
+        lambda: hydra_bruteforce(params, process_callback=_remember_process(task_id), continuous=True),
+    )
 
 
 async def run_async_testssl(task_id: str, params: Dict[str, Any]):
-    """异步执行 testssl 扫描"""
-    async def update_progress(progress: int):
-        SCAN_TASKS[task_id]["progress"] = progress
-    
-    try:
-        SCAN_TASKS[task_id]["status"] = "running"
-        SCAN_TASKS[task_id]["progress"] = 0
-        
-        async def estimate_progress():
-            start_time = time.time()
-            estimated_duration = 60  # testssl 通常较快
-            while SCAN_TASKS[task_id]["status"] == "running":
-                elapsed = time.time() - start_time
-                progress = min(int((elapsed / estimated_duration) * 90), 89)
-                SCAN_TASKS[task_id]["progress"] = progress
-                await asyncio.sleep(1)
-        
-        progress_task = asyncio.create_task(estimate_progress())
-        
-        result = await testssl_scan(params, process_callback=_remember_process(task_id))
-        
-        progress_task.cancel()
-        
-        SCAN_TASKS[task_id]["status"] = "completed"
-        SCAN_TASKS[task_id]["progress"] = 100
-        SCAN_TASKS[task_id]["result"] = result
-        
-    except asyncio.CancelledError:
-        SCAN_TASKS[task_id]["status"] = "cancelled"
-        raise
-    except Exception as e:
-        error_msg = str(e)
-        if "timeout" in error_msg.lower():
-            SCAN_TASKS[task_id]["error"] = f"testssl scan timeout: {error_msg}"
-        else:
-            SCAN_TASKS[task_id]["error"] = f"testssl scan error: {error_msg}"
-        SCAN_TASKS[task_id]["status"] = "failed"
+    await _run_async_security_tool(
+        task_id,
+        "SSL/TLS 检测",
+        lambda: testssl_scan(params, process_callback=_remember_process(task_id), continuous=True),
+    )
+
+
+async def run_async_crypto_transport(task_id: str, params: Dict[str, Any]):
+    await _run_async_security_tool(
+        task_id,
+        "密码协议与证书检测",
+        lambda: crypto_transport_scan(
+            params, process_callback=_remember_process(task_id), continuous=True,
+        ),
+    )
 
 
 @app.post("/scan/start")
@@ -1301,8 +1305,8 @@ async def start_scan(request: ExecuteRequest):
     if tool_name == "scan_ports":
         tool_name = "nmap_scan"
     
-    if tool_name not in ["nmap_scan", "nuclei_scan", "hydra_bruteforce", "testssl_scan"]:
-        raise HTTPException(status_code=400, detail="Only nmap_scan, nuclei_scan, hydra_bruteforce, testssl_scan support async mode")
+    if tool_name not in ["nmap_scan", "nuclei_scan", "hydra_bruteforce", "testssl_scan", "crypto_transport_scan"]:
+        raise HTTPException(status_code=400, detail=f"Tool {tool_name} does not support async mode")
     
     task_id = str(uuid.uuid4())
     SCAN_TASKS[task_id] = {
@@ -1324,6 +1328,8 @@ async def start_scan(request: ExecuteRequest):
         handle = asyncio.create_task(run_async_hydra(task_id, params))
     elif tool_name == "testssl_scan":
         handle = asyncio.create_task(run_async_testssl(task_id, params))
+    elif tool_name == "crypto_transport_scan":
+        handle = asyncio.create_task(run_async_crypto_transport(task_id, params))
     SCAN_TASKS[task_id]["handle"] = handle
     
     return {
@@ -1344,6 +1350,12 @@ async def get_scan_progress(task_id: str):
         "task_id": task_id,
         "status": task["status"],
         "progress": task.get("progress", 100 if task["status"] == "completed" else 0),
+        "message": task.get("message"),
+        "elapsed_seconds": task.get("elapsed_seconds", 0),
+        "heartbeat_at": task.get("heartbeat_at"),
+        "alive": task["status"] == "running" and (
+            task.get("process") is None or task["process"].returncode is None
+        ),
         "error": task.get("error"),
     }
 

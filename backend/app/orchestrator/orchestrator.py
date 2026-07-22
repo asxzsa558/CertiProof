@@ -29,6 +29,7 @@ from app.core.config import settings
 from app.core.redaction import redact_sensitive
 from app.services.audit import record_audit_event
 from app.services.asset_scope import target_identity
+from app.services.runtime_resources import concurrency_limit
 
 logger = logging.getLogger(__name__)
 
@@ -892,7 +893,7 @@ class Orchestrator:
                         dynamic_concurrent = 10
                     else:
                         dynamic_concurrent = 12
-                    dynamic_concurrent = min(dynamic_concurrent, max(1, settings.ASSESSMENT_MAX_CONCURRENT))
+                    dynamic_concurrent = min(dynamic_concurrent, await concurrency_limit(async_db, "interactive"))
                     logger.info(f"Multi-asset scan: {asset_count} assets, max_concurrent={dynamic_concurrent}")
 
                     execution_result = await self.execution_engine.execute_plan_concurrent(
@@ -952,6 +953,18 @@ class Orchestrator:
                 # 提取扫描结果
                 scan_results = self._extract_scan_results_from_execution(execution_result)
 
+                issue_tracking = {"tracked": 0, "resolved": 0, "finding_ids": []}
+                if scan_task_id:
+                    persisted_scan = await async_db.get(ScanTask, scan_task_id)
+                    if persisted_scan:
+                        from app.services.independent_finding_tracker import sync_independent_findings
+                        issue_tracking = await sync_independent_findings(
+                            async_db,
+                            persisted_scan,
+                            execution_result.get("results") or [],
+                            actor_id=user_id,
+                        )
+
                 # 用 AI 生成结果描述
                 result_description = await self._generate_result_description(
                     execution_result=execution_result,
@@ -981,6 +994,7 @@ class Orchestrator:
                         "scan_results": scan_results,
                         "success_count": execution_result.get("success_count", 0),
                         "failed_count": execution_result.get("failed_count", 0),
+                        "issue_tracking": issue_tracking,
                         "change_detection": {"port_changes": port_changes},
                     },
                     completed_at=completed_dt,
@@ -1165,7 +1179,49 @@ class Orchestrator:
 
         return expanded
     
-    def _update_task_progress(self, task_id: str, step_index: int, total_steps: int, capability_name: str, status: str):
+    def _persist_live_progress(self, task_id: str) -> None:
+        scan_task_id = self.get_task_metadata(task_id).get("scan_task_id")
+        progress = self.task_progress.get(task_id)
+        if not scan_task_id or not progress:
+            return
+        snapshot = redact_sensitive({
+            **progress,
+            "status": "running",
+            "updated_at": datetime.utcnow().isoformat(),
+        })
+
+        async def persist() -> None:
+            try:
+                async with AsyncSessionLocal() as progress_db:
+                    result = await progress_db.execute(
+                        select(ScanTask).where(ScanTask.id == scan_task_id)
+                    )
+                    scan_task = result.scalar_one_or_none()
+                    if not scan_task or scan_task.status not in (
+                        ScanTaskStatus.PENDING,
+                        ScanTaskStatus.RUNNING,
+                    ):
+                        return
+                    scan_task.progress = snapshot
+                    scan_task.lease_owner = self.worker_id
+                    scan_task.lease_expires_at = datetime.utcnow() + timedelta(
+                        minutes=settings.TASK_LEASE_MINUTES
+                    )
+                    await progress_db.commit()
+            except Exception as exc:
+                logger.warning("Failed to persist task %s progress: %s", task_id, exc)
+
+        asyncio.create_task(persist())
+
+    def _update_task_progress(
+        self,
+        task_id: str,
+        step_index: int,
+        total_steps: int,
+        capability_name: str,
+        status: str,
+        tool_progress: Optional[Dict[str, Any]] = None,
+    ):
         """更新任务执行进度"""
         if task_id not in self.task_progress:
             metadata = self.get_task_metadata(task_id)
@@ -1237,7 +1293,17 @@ class Orchestrator:
         
         display_name = capability_display_names.get(capability_name, capability_name)
         
-        if status == "running":
+        if tool_progress:
+            percent = max(0, min(int(tool_progress.get("progress") or 0), 99))
+            elapsed = max(0, int(tool_progress.get("elapsed_seconds") or 0))
+            message = tool_progress.get("message") or f"{display_name}仍在执行"
+            self.task_progress[task_id]["current_step"] = f"{message} · {percent}% · {elapsed} 秒"
+            self.task_progress[task_id]["tool_progress"] = {
+                **tool_progress,
+                "progress": percent,
+                "elapsed_seconds": elapsed,
+            }
+        elif status == "running":
             self.task_progress[task_id]["current_step"] = f"正在执行: {display_name}..."
         elif status == "completed":
             self.task_progress[task_id]["current_step"] = f"已完成: {display_name}"
@@ -1250,11 +1316,13 @@ class Orchestrator:
         
         self.task_progress[task_id]["step_index"] = step_index
         self.task_progress[task_id]["total_steps"] = total_steps
-        self.task_progress[task_id]["steps"].append({
-            "capability": capability_name,
-            "display_name": display_name,
-            "status": status,
-        })
+        if not tool_progress:
+            self.task_progress[task_id]["steps"].append({
+                "capability": capability_name,
+                "display_name": display_name,
+                "status": status,
+            })
+        self._persist_live_progress(task_id)
         
         try:
             import asyncio
@@ -1266,6 +1334,8 @@ class Orchestrator:
                 "total_steps": total_steps,
                 "capability": capability_name,
                 "display_name": display_name,
+                "current_step": self.task_progress[task_id]["current_step"],
+                "tool_progress": self.task_progress[task_id].get("tool_progress"),
             }))
         except Exception:
             pass
@@ -1314,7 +1384,8 @@ class Orchestrator:
         total_assets: int, 
         asset_name: str, 
         status: str,
-        capability_name: str = None
+        capability_name: str = None,
+        tool_progress: Optional[Dict[str, Any]] = None,
     ):
         """更新多资产任务进度"""
         # 线程安全的初始化
@@ -1344,6 +1415,7 @@ class Orchestrator:
             "name": asset_name,
             "capability": capability_name,
             "status": status,
+            "tool_progress": tool_progress,
         }
         
         # 更新或添加资产进度
@@ -1389,9 +1461,17 @@ class Orchestrator:
             "warning": "未完整/无法判定",
             "skipped": "已跳过",
         }.get(status, "正在执行")
-        self.task_progress[task_id]["current_step"] = (
-            f"{status_prefix}: {display_name} ({asset_index + 1}/{total_assets}) - {asset_name}"
-        )
+        if tool_progress:
+            percent = max(0, min(int(tool_progress.get("progress") or 0), 99))
+            elapsed = max(0, int(tool_progress.get("elapsed_seconds") or 0))
+            message = tool_progress.get("message") or f"{display_name}仍在执行"
+            self.task_progress[task_id]["current_step"] = (
+                f"{asset_name} · {message} · {percent}% · {elapsed} 秒"
+            )
+        else:
+            self.task_progress[task_id]["current_step"] = (
+                f"{status_prefix}: {display_name} ({asset_index + 1}/{total_assets}) - {asset_name}"
+            )
         self.task_progress[task_id]["step_index"] = min(asset_index, max(total_assets - 1, 0))
         self.task_progress[task_id]["total_steps"] = total_assets
         self.task_progress[task_id]["steps"] = [
@@ -1403,6 +1483,7 @@ class Orchestrator:
             for item in sorted(assets_list, key=lambda item: item.get("index", 0))
         ]
         self.task_progress[task_id]["asset_index"] = asset_index
+        self._persist_live_progress(task_id)
         
         # WebSocket 推送
         try:
@@ -1416,6 +1497,7 @@ class Orchestrator:
                 "asset_name": asset_name,
                 "status": status,
                 "capability": capability_name,
+                "tool_progress": tool_progress,
             }))
         except Exception:
             pass
@@ -2500,8 +2582,13 @@ class Orchestrator:
                     pass
                 elif status == "skipped":
                     detail = error_detail or {}
-                    results["asset_results"][target]["display_status"] = "warning"
-                    results["asset_results"][target]["error"] = detail.get("error_reason") or error
+                    results["asset_results"][target]["result"] = data
+                    results["asset_results"][target]["display_status"] = (
+                        "not_applicable" if data.get("outcome") == "not_applicable" or data.get("applicable") is False else "warning"
+                    )
+                    results["asset_results"][target]["error"] = (
+                        detail.get("error_reason") or data.get("tool_error") or error
+                    )
                     results["asset_results"][target]["error_detail"] = error_detail
                 else:
                     detail = error_detail or {}
@@ -2513,7 +2600,7 @@ class Orchestrator:
         asset_values = list(results["asset_results"].values())
         outcome_counts = self._execution_outcome_counts(execution_result)
         success_count = outcome_counts["success"]
-        warning_count = outcome_counts["warning"] + outcome_counts["skipped"]
+        warning_count = outcome_counts["warning"]
         failed_count = outcome_counts["failed"]
         incomplete_targets = [
             target
@@ -2526,6 +2613,9 @@ class Orchestrator:
         elif warning_count or incomplete_targets:
             verdict = "conditional"
             note = "部分资产或工具返回不可判定/未完成，需要结合网络连通性、权限和过滤状态复核。"
+        elif outcome_counts["skipped"]:
+            verdict = "complete"
+            note = "检测流程已完成，部分工具因目标未提供对应服务而明确不适用。"
         else:
             verdict = "complete"
             note = "检测链路完成，未出现工具级失败或不可判定状态。"

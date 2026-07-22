@@ -104,6 +104,7 @@ const renderResultMessage = (msg, options = {}) => {
   const status = inferResultState(queryResult || firstAsset || scanResults).key
   const error = queryResult?.error || firstAsset?.error
   const firstResult = firstAsset?.result || {}
+  const preflight = firstResult.preflight || {}
   const isVulnerabilityScan = ['nikto_scan', 'scan_vulnerabilities'].includes(tool)
   const vulnerabilityScanIncomplete = firstResult.scan_completed === false || (
     tool === 'scan_vulnerabilities' &&
@@ -479,12 +480,42 @@ const renderResultMessage = (msg, options = {}) => {
 
       {/* 错误信息 */}
       {error && (
-        <div className="result-details-section error-section">
-          <div className="section-title danger">
+        <div className={`result-details-section ${status === 'failed' ? 'error-section' : 'warning-section'}`}>
+          <div className={`section-title ${status === 'failed' ? 'danger' : 'warning'}`}>
             <ExclamationCircleFilled style={{ marginRight: 8 }} />
-            错误信息
+            {status === 'failed' ? '执行错误' : status === 'not_applicable' ? '不适用说明' : '检测限制'}
           </div>
           <div className="error-message">{error}</div>
+        </div>
+      )}
+
+      {Object.keys(preflight).length > 0 && (
+        <div className="result-details-section">
+          <div className="section-title">扫描前预检</div>
+          <div className="baseline-target-item">
+            <span>有效目标</span>
+            <span className="text-muted">{preflight.effective_url || preflight.host || resultTarget || '-'}</span>
+          </div>
+          {(preflight.ports || preflight.port) && (
+            <div className="baseline-target-item">
+              <span>端口状态</span>
+              <span className="text-muted">
+                {(preflight.ports || [{ port: preflight.port, state: preflight.state }]).map(item => `${item.port}/${item.state}`).join('、')}
+              </span>
+            </div>
+          )}
+          {preflight.protection_detected && (
+            <div className="baseline-target-item">
+              <span>访问防护</span>
+              <Tag color="gold">{preflight.protection_name || 'WAF/验证码'}</Tag>
+            </div>
+          )}
+          {preflight.soft_404 && (
+            <div className="baseline-target-item">
+              <span>不存在路径响应</span>
+              <span className="text-muted">HTTP {preflight.probe_status || '-'} · {preflight.probe_length || 0} 字节</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -647,6 +678,9 @@ const renderResultMessage = (msg, options = {}) => {
           {(() => {
             const describeSubResult = (sub) => {
               const data = sub.data || {}
+              if (data.outcome === 'not_applicable' || data.applicable === false) {
+                return `不适用${data.tool_error ? `：${data.tool_error}` : ''}`
+              }
               if (data.scan_completed === false || data.success === false) {
                 return `未完成/无响应${data.tool_error ? `：${data.tool_error}` : ''}`
               }
@@ -770,7 +804,7 @@ const renderResultMessage = (msg, options = {}) => {
     <div className="scan-animation-fade-in">
       <div className="message-bubble assistant" style={{ whiteSpace: 'pre-wrap' }}>
         {vulnerabilityScanIncomplete
-          ? `漏洞扫描未能验证目标 ${resultTarget || ''} 是否可达，本次不能得出“未发现漏洞”的结论。`
+          ? (firstResult.tool_error || `漏洞扫描未完整验证目标 ${resultTarget || ''}，本次不能得出“未发现漏洞”的结论。`)
           : msg.content}
       </div>
 

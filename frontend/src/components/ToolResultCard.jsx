@@ -171,6 +171,7 @@ const ToolResultCard = ({ tool, status, summary, details, copyText, defaultExpan
     success: { color: 'success', text: '检测完成', icon: <CheckCircleFilled /> },
     risk: { color: 'error', text: '发现问题', icon: <CloseCircleFilled /> },
     warning: { color: 'warning', text: '检测不完整', icon: <ExclamationCircleFilled /> },
+    not_applicable: { color: 'default', text: '不适用', icon: <ExclamationCircleFilled /> },
     failed: { color: 'error', text: '执行失败', icon: <CloseCircleFilled /> },
     skipped: { color: 'warning', text: '检测不完整', icon: <ExclamationCircleFilled /> },
   }
@@ -178,6 +179,7 @@ const ToolResultCard = ({ tool, status, summary, details, copyText, defaultExpan
     success: { color: 'success', text: '成功', icon: <CheckCircleFilled /> },
     risk: { color: 'warning', text: '需关注', icon: <ExclamationCircleFilled /> },
     warning: { color: 'warning', text: '未完整', icon: <ExclamationCircleFilled /> },
+    not_applicable: { color: 'default', text: '不适用', icon: <ExclamationCircleFilled /> },
     failed: { color: 'error', text: '失败', icon: <CloseCircleFilled /> },
     skipped: { color: 'default', text: '已跳过', icon: <ExclamationCircleFilled /> },
   }

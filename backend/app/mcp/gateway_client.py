@@ -22,9 +22,11 @@ class MCPGatewayClient:
         else:
             self.gateway_url = gateway_url
         
-        self.timeout = 900.0  # 15 分钟超时
+        # 同步通道只承载有界探测；长任务由 Gateway 409 升级到心跳轮询。
+        self.timeout = 120.0
         self.max_retries = 2  # 最大重试次数
         self.retry_delay = 2.0  # 重试延迟（秒）
+        self.progress_stale_seconds = float(settings.MCP_PROGRESS_STALE_SECONDS)
     
     async def call(self, tool_name: str, params: dict) -> dict:
         """
@@ -60,6 +62,9 @@ class MCPGatewayClient:
                     return result
                     
             except httpx.HTTPStatusError as e:
+                if e.response.status_code == 409:
+                    logger.info("MCP Gateway routed long-running tool to async mode: %s", tool_name)
+                    return await self.call_with_progress(tool_name, params)
                 last_error = Exception(f"MCP Gateway error: {e.response.status_code} - {e.response.text}")
                 logger.error(f"MCP Gateway HTTP error (attempt {attempt + 1}): {e.response.status_code} - {e.response.text}")
                 
@@ -185,11 +190,36 @@ class MCPGatewayClient:
         """
         # 启动异步任务
         task_id = await self.call_async(tool_name, params)
+        last_contact = asyncio.get_running_loop().time()
+        last_progress: dict = {}
         
         try:
             # 轮询进度
             while True:
-                progress = await self.get_progress(tool_name, task_id)
+                try:
+                    progress = await self.get_progress(tool_name, task_id)
+                    last_contact = asyncio.get_running_loop().time()
+                    last_progress = progress
+                except Exception as exc:
+                    disconnected_for = asyncio.get_running_loop().time() - last_contact
+                    if disconnected_for >= self.progress_stale_seconds:
+                        raise Exception(
+                            f"工具任务已连续 {int(disconnected_for)} 秒无法获取心跳，"
+                            "执行状态无法确认，请检查 MCP Gateway 或工具容器"
+                        ) from exc
+                    reconnecting = {
+                        **last_progress,
+                        "status": "running",
+                        "alive": None,
+                        "connection_state": "reconnecting",
+                        "message": (
+                            f"进度通道暂时中断，正在重连（已失联 {int(disconnected_for)} 秒）"
+                        ),
+                    }
+                    if on_progress:
+                        on_progress(reconnecting)
+                    await asyncio.sleep(poll_interval)
+                    continue
             
                 # 回调进度
                 if on_progress:

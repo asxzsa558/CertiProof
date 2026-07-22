@@ -47,7 +47,7 @@ ARCHIVE_SUFFIXES = {".zip", ".rar", ".7z"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 ANALYSIS_MODES = {"standard", "deep"}
 MAX_BATCH_FILES = 100
-MAX_BATCH_UNCOMPRESSED = 300 * 1024 * 1024
+MAX_BATCH_UNCOMPRESSED = settings.UPLOAD_MAX_BATCH_MB * 1024 * 1024
 
 
 class DocumentExtractionError(ValueError):
@@ -201,8 +201,10 @@ def expand_document_upload(file_name: str, content: bytes) -> tuple[list[tuple[s
                 skipped.append(item.filename)
                 continue
             total_size += item.file_size
-            if item.file_size > 100 * 1024 * 1024 or total_size > MAX_BATCH_UNCOMPRESSED:
-                raise DocumentExtractionError("ZIP 解压后超过单文件 100MB 或总计 300MB 限制。")
+            if item.file_size > settings.UPLOAD_MAX_FILE_MB * 1024 * 1024 or total_size > MAX_BATCH_UNCOMPRESSED:
+                raise DocumentExtractionError(
+                    f"ZIP 解压后超过单文件 {settings.UPLOAD_MAX_FILE_MB}MB 或总计 {settings.UPLOAD_MAX_BATCH_MB}MB 限制。"
+                )
             documents.append((path.as_posix(), archive.read(item)))
             if len(documents) > MAX_BATCH_FILES:
                 raise DocumentExtractionError(f"单次最多处理 {MAX_BATCH_FILES} 个文档。")
@@ -254,10 +256,12 @@ def _expand_libarchive(file_name: str, content: bytes) -> tuple[list[tuple[str, 
             while chunk := process.stdout.read(1024 * 1024):
                 member_size += len(chunk)
                 total_size += len(chunk)
-                if member_size > 100 * 1024 * 1024 or total_size > MAX_BATCH_UNCOMPRESSED:
+                if member_size > settings.UPLOAD_MAX_FILE_MB * 1024 * 1024 or total_size > MAX_BATCH_UNCOMPRESSED:
                     process.kill()
                     process.wait()
-                    raise DocumentExtractionError("压缩包解压后超过单文件 100MB 或总计 300MB 限制。")
+                    raise DocumentExtractionError(
+                        f"压缩包解压后超过单文件 {settings.UPLOAD_MAX_FILE_MB}MB 或总计 {settings.UPLOAD_MAX_BATCH_MB}MB 限制。"
+                    )
                 chunks.append(chunk)
             if process.wait(timeout=30):
                 raise DocumentExtractionError(f"无法解压 {path.name}，压缩包可能已加密或损坏。")
@@ -316,8 +320,10 @@ def _docx_native(path: Path, document_file: DocumentFile) -> tuple[list[dict], l
     from docx.table import Table
 
     with zipfile.ZipFile(path) as archive:
-        if sum(item.file_size for item in archive.infolist()) > 300 * 1024 * 1024:
-            raise DocumentExtractionError("DOCX 解压后内容超过 300MB，已拒绝处理。")
+        if sum(item.file_size for item in archive.infolist()) > MAX_BATCH_UNCOMPRESSED:
+            raise DocumentExtractionError(
+                f"DOCX 解压后内容超过 {settings.UPLOAD_MAX_BATCH_MB}MB，已拒绝处理。"
+            )
 
     document = docx.Document(str(path))
     blocks: list[dict] = []

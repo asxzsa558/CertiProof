@@ -16,6 +16,7 @@ from app.models.organization import OrganizationMember, OrganizationRole, Organi
 from app.models.scan_task import ScanTask
 from app.models.evidence import Evidence
 from app.models.finding import Finding, FindingStatus
+from app.services.display_names import CAPABILITY_DISPLAY_NAMES
 from app.schemas.dashboard import (
     DashboardResponse,
     DashboardProject,
@@ -546,7 +547,10 @@ async def get_organization_command_dashboard(
         return {
             "summary": {
                 "project_count": 0,
+                "active_project_count": 0,
+                "completed_project_count": 0,
                 "asset_count": 0,
+                "asset_type_counts": {},
                 "high_risk_count": 0,
                 "unknown_count": 0,
                 "average_progress": 0,
@@ -567,6 +571,10 @@ async def get_organization_command_dashboard(
 
     asset_count_result = await db.execute(select(func.count(Asset.id)).where(Asset.project_id.in_(project_ids)))
     asset_count = asset_count_result.scalar() or 0
+    asset_type_rows = (await db.execute(select(Asset.asset_type, func.count(Asset.id)).where(
+        Asset.project_id.in_(project_ids)
+    ).group_by(Asset.asset_type))).all()
+    asset_type_counts = {_enum_value(asset_type): count for asset_type, count in asset_type_rows}
 
     high_risk_result = await db.execute(
         select(func.count(Finding.id)).where(
@@ -636,8 +644,10 @@ async def get_organization_command_dashboard(
             task_done = sum(p.completed_tasks or 0 for p in phases)
 
         finding_filters = [Finding.project_id == project.id]
-        if assessment_code and assessment:
+        if assessment:
             finding_filters.append(Finding.assessment_id == assessment.id)
+        else:
+            finding_filters.append(Finding.assessment_id.is_(None))
         project_findings_result = await db.execute(select(Finding).where(*finding_filters))
         project_findings = project_findings_result.scalars().all()
         risk_stats = _actionable_risk_summary(project_findings)
@@ -916,35 +926,67 @@ async def get_organization_command_dashboard(
     tool_health = _tool_health(scans)
 
     risk_result = await db.execute(
-        select(Finding, Project)
+        select(Finding, Project, Asset, Assessment)
         .join(Project, Project.id == Finding.project_id)
+        .outerjoin(Asset, Asset.id == Finding.asset_id)
+        .outerjoin(Assessment, Assessment.id == Finding.assessment_id)
         .where(Finding.project_id.in_(project_ids), ~incomplete_technical_finding)
         .order_by(Finding.updated_at.desc())
-        .limit(80)
+        .limit(200)
     )
-    risk_queue = [
-        {
+    risk_queue = []
+    seen_risks = set()
+    for finding, project, asset, assessment in risk_result.all():
+        identity = (finding.assessment_id or 0, finding.fingerprint or finding.id)
+        if identity in seen_risks:
+            continue
+        seen_risks.add(identity)
+        assessment_code_value = assessment.assessment_type_code if assessment else None
+        source_label = (
+            "等保测评" if assessment_code_value == "dengbao"
+            else "密评测评" if assessment_code_value == "miping"
+            else "定时检测" if finding.source_channel == "scheduled"
+            else "独立检测"
+        )
+        scope_label = asset.value if asset else "项目级问题"
+        scope_name = (
+            asset.name if asset else
+            "文档合规检查" if finding.source_type == "document" else
+            "未绑定具体资产"
+        )
+        risk_queue.append({
             "finding_id": finding.id,
             "project_id": project.id,
-            "asset": project.name,
-            "risk": finding.clause_name or finding.description or finding.clause_id,
+            "project": project.name,
+            "asset_id": asset.id if asset else finding.asset_id,
+            "asset": scope_label,
+            "asset_name": scope_name,
+            "risk": finding.description or finding.clause_name or finding.clause_id,
+            "title": finding.clause_name or finding.clause_id,
             "control": finding.clause_id,
             "description": finding.description,
             "remediation_plan": finding.remediation_suggestion,
             "severity": _enum_value(finding.severity),
             "status": _enum_value(finding.status),
+            "source": source_label,
+            "source_channel": finding.source_channel,
+            "assessment_code": assessment_code_value,
+            "tool": CAPABILITY_DISPLAY_NAMES.get(finding.source_key, finding.source_key),
+            "occurrence_count": finding.occurrence_count or 1,
+            "last_seen_at": (finding.last_seen_at or finding.updated_at).isoformat() if (finding.last_seen_at or finding.updated_at) else None,
             "owner": "系统跟踪",
             "action": "查看" if _enum_value(finding.status) in ("fixed", "false_positive") else "整改与复测",
-        }
-        for finding, project in risk_result.all()
-    ]
+        })
 
     rbac = await organization_rbac_snapshot(db, org_id, current_permissions)
 
     return {
         "summary": {
             "project_count": len(projects),
+            "active_project_count": sum(0 < item["progress"] < 100 for item in project_matrix),
+            "completed_project_count": sum(item["progress"] >= 100 for item in project_matrix),
             "asset_count": asset_count,
+            "asset_type_counts": asset_type_counts,
             "high_risk_count": high_risk_count,
             "unknown_count": unknown_count,
             "average_progress": average_progress,

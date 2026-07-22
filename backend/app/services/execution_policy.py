@@ -123,6 +123,11 @@ async def validate_execution_parameters(
         params["port_range"] = _validate_port_range(params["port_range"])
     for key, minimum, maximum in (("rate", 1, 10000), ("threads", 1, 64), ("timeout", 1, 3600), ("level", 1, 5), ("risk", 1, 3), ("count", 1, 10)):
         _validate_limited_int(params, key, minimum, maximum)
+    if "scan_profile" in params:
+        profile = _clean_text(params["scan_profile"], "扫描范围").lower()
+        if profile not in {"safe", "full"}:
+            raise ValueError("扫描范围仅支持 safe 或 full")
+        params["scan_profile"] = profile
     if "method" in params:
         method = _clean_text(params["method"], "HTTP 方法").upper()
         if method not in _SAFE_METHOD:

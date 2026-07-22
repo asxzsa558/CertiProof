@@ -47,6 +47,7 @@ const buildAssetSummary = (assetData, capability) => {
     sub_results: assetData.result?.sub_results,
   }] : [])
   const discoveredAssets = assetData.result?.discovered_assets || {}
+  const resultState = inferResultState(assetData)
   
   const items = []
   if (openPorts.length > 0) items.push({ label: '明确开放端口', value: `${openPorts.length} 个`, color: '#3b82f6', icon: <MonitorOutlined /> })
@@ -64,7 +65,10 @@ const buildAssetSummary = (assetData, capability) => {
     items.push({ label: '子项结果', value: `${summary.success || 0}/${summary.total || compositeResults[0]?.sub_results?.length || 0}`, color: '#6366f1', icon: <RadarChartOutlined /> })
   }
   if (Object.keys(discoveredAssets).length > 0) items.push({ label: '已发现资产', value: `${Object.keys(discoveredAssets).length} 个`, color: '#10b981', icon: <RadarChartOutlined /> })
-  if (capability === 'nikto_scan' && findings.length === 0) items.push({ label: 'Web 问题', value: '0 个', color: '#10b981', icon: <GlobalOutlined /> })
+  if (capability === 'nikto_scan' && findings.length === 0) {
+    const completed = result.scan_completed !== false
+    items.push({ label: 'Web 问题', value: completed ? '0 个' : '无法判定', color: completed ? '#10b981' : '#f59e0b', icon: <GlobalOutlined /> })
+  }
   if (capability === 'sqlmap_scan' && !result.vulnerable) items.push({ label: 'SQL 注入', value: '未发现', color: '#10b981', icon: <SearchOutlined /> })
   if (['redis_check', 'mongodb_check', 'memcached_check'].includes(capability)) {
     items.push({ label: '未授权访问', value: result.unauthorized ? '存在' : '未发现', color: result.unauthorized ? '#ef4444' : '#10b981', icon: <DatabaseOutlined /> })
@@ -95,7 +99,8 @@ const buildAssetSummary = (assetData, capability) => {
   }
   if (capability === 'scan_ssl') {
     const sslDone = result.scan_completed !== false && result.reachable !== false
-    items.push({ label: 'SSL 状态', value: sslDone ? '已完成' : '未完成', color: sslDone ? '#10b981' : '#f59e0b', icon: <SafetyCertificateOutlined /> })
+    const sslStatus = result.outcome === 'not_applicable' ? '不适用' : sslDone ? '已完成' : '未完成'
+    items.push({ label: 'SSL 状态', value: sslStatus, color: sslDone ? '#10b981' : '#f59e0b', icon: <SafetyCertificateOutlined /> })
     if (result.tls_version) items.push({ label: 'TLS 版本', value: result.tls_version, color: '#3b82f6', icon: <LockOutlined /> })
     if (result.certificate) items.push({ label: '证书', value: '已获取', color: '#10b981', icon: <SafetyCertificateOutlined /> })
   }
@@ -112,15 +117,22 @@ const buildAssetSummary = (assetData, capability) => {
   }
   
   if (items.length === 0) {
+    const fallback = resultState.key === 'failed'
+      ? { title: '执行状态', value: '失败', color: '#ef4444', icon: <CloseCircleFilled /> }
+      : resultState.key === 'warning'
+        ? { title: '检测状态', value: '无法判定', color: '#f59e0b', icon: <ExclamationCircleFilled /> }
+        : resultState.key === 'not_applicable'
+          ? { title: '检测状态', value: '不适用', color: '#94a3b8', icon: <ExclamationCircleFilled /> }
+          : { title: '执行状态', value: '完成', color: '#10b981', icon: <CheckCircleFilled /> }
     return (
       <div className="result-summary">
         <div className="summary-item">
-          <div className="summary-icon" style={{ background: 'rgba(16, 185, 129, 0.2)' }}>
-            <CheckCircleFilled style={{ color: '#10b981' }} />
+          <div className="summary-icon" style={{ background: hexToRgba(fallback.color, 0.2) }}>
+            <span style={{ color: fallback.color }}>{fallback.icon}</span>
           </div>
           <div className="summary-content">
-            <div className="summary-title">执行状态</div>
-            <div className="summary-value">完成</div>
+            <div className="summary-title">{fallback.title}</div>
+            <div className="summary-value" style={{ color: fallback.color }}>{fallback.value}</div>
           </div>
         </div>
       </div>
@@ -169,22 +181,24 @@ const buildAssetDetails = (assetData, capability) => {
   }] : [])
   const errorMsg = assetData.error
   const errorDetail = assetData.error_detail || result.error_detail
+  const resultState = inferResultState(assetData)
   
   const sections = []
   
   // Error section
   if (errorMsg) {
+    const isFailure = resultState.key === 'failed'
     sections.push(
-      <div key="error" className="result-details-section error-section">
-        <div className="section-title danger">
+      <div key="error" className={`result-details-section ${isFailure ? 'error-section' : 'warning-section'}`}>
+        <div className={`section-title ${isFailure ? 'danger' : 'warning'}`}>
           <ExclamationCircleFilled style={{ marginRight: 8 }} />
-          错误信息
+          {isFailure ? '执行错误' : resultState.key === 'not_applicable' ? '不适用说明' : '检测限制'}
         </div>
         {errorDetail ? (
           <>
             <div className="baseline-target-item">
               <span>错误类型</span>
-              <Tag color="red">{errorDetail.error_type || 'tool_execution_failed'}</Tag>
+              <Tag color={isFailure ? 'red' : 'gold'}>{errorDetail.error_type || 'tool_execution_failed'}</Tag>
             </div>
             <div className="baseline-target-item">
               <span>具体原因</span>
@@ -198,6 +212,38 @@ const buildAssetDetails = (assetData, capability) => {
           </>
         ) : (
           <div className="error-message">{errorMsg}</div>
+        )}
+      </div>
+    )
+  }
+
+  if (result.preflight) {
+    const preflight = result.preflight
+    const ports = preflight.ports || (preflight.port ? [{ port: preflight.port, state: preflight.state }] : [])
+    sections.push(
+      <div key="preflight" className="result-details-section">
+        <div className="section-title">扫描前预检</div>
+        <div className="baseline-target-item">
+          <span>有效目标</span>
+          <span className="text-muted">{preflight.effective_url || preflight.host || result.target || '-'}</span>
+        </div>
+        {ports.length > 0 && (
+          <div className="baseline-target-item">
+            <span>端口状态</span>
+            <span className="text-muted">{ports.map(item => `${item.port}/${item.state}`).join('、')}</span>
+          </div>
+        )}
+        {preflight.protection_detected && (
+          <div className="baseline-target-item">
+            <span>访问防护</span>
+            <Tag color="gold">{preflight.protection_name || 'WAF/验证码'}</Tag>
+          </div>
+        )}
+        {preflight.soft_404 && (
+          <div className="baseline-target-item">
+            <span>不存在路径</span>
+            <span className="text-muted">返回 {preflight.probe_status || '非 404'}，长度 {preflight.probe_length || 0}</span>
+          </div>
         )}
       </div>
     )
@@ -336,9 +382,9 @@ const buildAssetDetails = (assetData, capability) => {
     const durationMs = result.metadata?.duration_ms
     const vulnDone = result.scan_completed !== false && (result.reachable === true || findings.length > 0)
     sections.push(
-      <div key="nuclei-summary" className={`result-details-section ${!vulnDone || findings.length ? 'weak-password-section' : 'success-section'}`}>
-        <div className={`section-title ${!vulnDone || findings.length ? 'danger' : 'success'}`}>
-          漏洞扫描：{!vulnDone ? '无法验证目标，未形成漏洞结论' : findings.length ? `发现 ${findings.length} 个漏洞/发现项` : '未发现漏洞'}
+      <div key="nuclei-summary" className={`result-details-section ${!vulnDone ? 'warning-section' : findings.length ? 'weak-password-section' : 'success-section'}`}>
+        <div className={`section-title ${!vulnDone ? 'warning' : findings.length ? 'danger' : 'success'}`}>
+          漏洞扫描：{!vulnDone ? (result.coverage_limited ? '受目标防护限制，未形成完整漏洞结论' : '无法验证目标，未形成漏洞结论') : findings.length ? `发现 ${findings.length} 个漏洞/发现项` : '未发现漏洞'}
         </div>
         <div className="baseline-target-item">
           <span>扫描目标</span>
@@ -350,7 +396,7 @@ const buildAssetDetails = (assetData, capability) => {
         </div>
         <div className="baseline-target-item">
           <span>模板/级别</span>
-          <span className="text-muted">{result.templates || '默认模板'} / {result.severity_filter || '全部级别'}</span>
+          <span className="text-muted">{result.templates || '受控默认模板'} / {result.severity_filter || '受控默认级别'}</span>
         </div>
         {durationMs !== undefined && (
           <div className="baseline-target-item">
@@ -418,7 +464,7 @@ const buildAssetDetails = (assetData, capability) => {
     sections.push(
       <div key="ssl-summary" className={`result-details-section ${sslDone ? (issues.length || vulnerabilities.length ? 'warning-section' : 'success-section') : 'warning-section'}`}>
         <div className={`section-title ${sslDone && !issues.length && !vulnerabilities.length ? 'success' : 'warning'}`}>
-          SSL/TLS 检测：{sslDone ? `问题 ${issues.length || 0} 个，漏洞 ${vulnerabilities.length || 0} 个` : '未完成'}
+          SSL/TLS 检测：{result.outcome === 'not_applicable' ? '目标未提供 TLS 服务，本项不适用' : sslDone ? `问题 ${issues.length || 0} 个，漏洞 ${vulnerabilities.length || 0} 个` : '未完成'}
         </div>
         <div className="baseline-target-item">
           <span>检测目标</span>
@@ -540,6 +586,9 @@ const buildAssetDetails = (assetData, capability) => {
   if (compositeResults.length > 0) {
     const describeSubResult = (sub) => {
       const data = sub.data || {}
+      if (data.outcome === 'not_applicable' || data.applicable === false) {
+        return `不适用${data.tool_error ? `：${data.tool_error}` : ''}`
+      }
       if (data.scan_completed === false || data.success === false) {
         return `未完成/无响应${data.tool_error ? `：${data.tool_error}` : ''}`
       }

@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react'
 import {
   Drawer, Tabs, Select, Button, Tooltip, Space, Tag, Input, Switch,
-  Slider, Form, Divider, message, Spin, Modal
+  Slider, Form, message, Spin, Modal
 } from 'antd'
 import {
   SettingOutlined, RobotOutlined, ThunderboltOutlined,
-  FileProtectOutlined, ExperimentOutlined, SaveOutlined,
-  ReloadOutlined, BulbOutlined, GlobalOutlined, FileTextOutlined,
+  SaveOutlined, ReloadOutlined, BulbOutlined, FileTextOutlined,
   DatabaseOutlined, DeleteOutlined, HddOutlined, WarningOutlined,
   DashboardOutlined,
 } from '@ant-design/icons'
@@ -24,9 +23,9 @@ const formatBytes = (value = 0) => {
   return `${(value / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`
 }
 
-function SystemConfig({ trigger, value, onChange, projectId, projectName, organizationId }) {
+function SystemConfig({ trigger, value, onChange, projectId, projectName, organizationId, embedded = false }) {
   const [open, setOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState('ai')
+  const [activeTab, setActiveTab] = useState(embedded ? 'runtime' : 'ai')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -46,10 +45,10 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
   const navigate = useNavigate()
 
   useEffect(() => {
-    if (open) {
+    if (open || embedded) {
       fetchAll()
     }
-  }, [open])
+  }, [open, embedded, organizationId, projectId])
 
   useEffect(() => {
     if (value !== undefined) {
@@ -60,16 +59,19 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [modelsRes, configRes, metaRes, runtimeRes] = await Promise.all([
-        api.get('/models/available'),
-        api.get('/config/'),
-        api.get('/config/meta'),
-        api.get('/config/runtime-status'),
-      ])
-      setModels(modelsRes.data)
-      setConfigs(configRes.data)
-      setMeta(metaRes.data)
-      setRuntimeStatus(runtimeRes.data)
+      if (embedded) {
+        const [configRes, metaRes, runtimeRes] = await Promise.all([
+          api.get('/config/'),
+          api.get('/config/meta'),
+          api.get('/config/runtime-status'),
+        ])
+        setConfigs(configRes.data)
+        setMeta(metaRes.data)
+        setRuntimeStatus(runtimeRes.data)
+      } else {
+        const modelsRes = await api.get('/models/available')
+        setModels(modelsRes.data)
+      }
       setPendingChanges({})
       try {
         const diagnosticsRes = await api.get('/diagnostics/operations', {
@@ -127,7 +129,7 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
       setRuntimeStatus(runtimeRes.data)
     } catch (error) {
       console.error('Failed to save config:', error)
-      message.error('保存失败')
+      message.error(error.response?.data?.detail || '保存失败')
     } finally {
       setSaving(false)
     }
@@ -254,11 +256,11 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
             icon={<SettingOutlined />}
             onClick={() => {
               setOpen(false)
-              navigate('/settings/models')
+              navigate('/settings/system')
             }}
             style={{ marginTop: 10, padding: 0, color: '#C5A55A' }}
           >
-            管理模型配置 →
+            打开全局系统设置 →
           </Button>
         </div>
       </div>
@@ -294,97 +296,6 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
           </Form>
         </div>
 
-        <div className="config-section">
-          <SectionTitle
-            icon={<ExperimentOutlined />}
-            title="性能优化"
-            subtitle="Prompt cache 和上下文注入"
-          />
-          <Form layout="vertical">
-            <Form.Item
-              label="启用 Prompt Cache"
-              help="Anthropic 节省 90% 成本，OpenAI 自动 cache 无需配置。"
-            >
-              <Switch
-                checked={getCurrentValue('ai.enable_cache') !== false}
-                onChange={(v) => handleConfigChange('ai.enable_cache', v)}
-              />
-            </Form.Item>
-
-            <Form.Item
-              label="注入测评状态"
-              help="在 prompt 中加入当前测评阶段和任务信息，让 AI 给出更精准建议。"
-            >
-              <Switch
-                checked={getCurrentValue('ai.enable_assessment_context') !== false}
-                onChange={(v) => handleConfigChange('ai.enable_assessment_context', v)}
-              />
-            </Form.Item>
-          </Form>
-        </div>
-
-      </div>
-    )
-  }
-
-  // --- Tab 3: 测评流程 ---
-  const renderAssessmentTab = () => {
-    return (
-      <div className="config-tab-content">
-        <div className="config-section">
-          <SectionTitle
-            icon={<FileProtectOutlined />}
-            title="自动化行为"
-            subtitle="创建测评后的默认动作"
-          />
-          <Form layout="vertical">
-            <Form.Item
-              label="创建后自动开始"
-              help="测评创建后是否自动启动第一阶段。"
-            >
-              <Switch
-                checked={getCurrentValue('assessment.auto_start') === true}
-                onChange={(v) => handleConfigChange('assessment.auto_start', v)}
-              />
-            </Form.Item>
-
-            <Form.Item
-              label="自动执行扫描任务"
-              help="是否自动执行 asset_discovery / vuln_scan 等扫描类任务。"
-            >
-              <Switch
-                checked={getCurrentValue('assessment.auto_execute_tasks') !== false}
-                onChange={(v) => handleConfigChange('assessment.auto_execute_tasks', v)}
-              />
-            </Form.Item>
-          </Form>
-        </div>
-
-        <div className="config-section">
-          <SectionTitle
-            icon={<GlobalOutlined />}
-            title="并发控制"
-            subtitle="多资产同时扫描的性能参数"
-          />
-          <Form layout="vertical">
-            <Form.Item
-              label="最大并发数"
-              help="多资产同时扫描时的最大并发数（1-10）。"
-            >
-              <div className="slider-row">
-                <Slider
-                  min={1}
-                  max={10}
-                  value={getCurrentValue('assessment.max_concurrent') || 5}
-                  onChange={(v) => handleConfigChange('assessment.max_concurrent', v)}
-                  marks={{ 1: '1', 5: '5', 10: '10' }}
-                />
-                <span className="slider-value">{getCurrentValue('assessment.max_concurrent') || 5}</span>
-              </div>
-            </Form.Item>
-          </Form>
-        </div>
-
       </div>
     )
   }
@@ -393,7 +304,7 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
   const renderDocumentTab = () => {
     return (
       <div className="config-tab-content">
-        <div className="config-section">
+        {embedded && <div className="config-section">
           <SectionTitle
             icon={<FileTextOutlined />}
             title="文档分析模式"
@@ -414,7 +325,7 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
               </Select>
             </Form.Item>
           </Form>
-        </div>
+        </div>}
         <div className="config-section">
           <SectionTitle
             icon={<DatabaseOutlined />}
@@ -446,7 +357,7 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
             </div>
           </div>
         </div>
-        <div className="config-section">
+        {projectId && <div className="config-section">
           <SectionTitle
             icon={<HddOutlined />}
             title="项目文档容量"
@@ -478,7 +389,7 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
           >
             清空当前项目文档数据
           </Button>
-        </div>
+        </div>}
       </div>
     )
   }
@@ -572,57 +483,60 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
             </Form.Item>
           </Form>
         </div>
-      </div>
-    )
-  }
-
-  // --- Tab 5: 报告 ---
-  const renderReportTab = () => {
-    return (
-      <div className="config-tab-content">
         <div className="config-section">
-          <SectionTitle
-            icon={<FileTextOutlined />}
-            title="报告格式"
-            subtitle="默认导出的报告类型"
-          />
-          <Form layout="vertical">
-            <Form.Item label="默认格式">
-              <Select
-                value={getCurrentValue('report.default_format') || 'html'}
-                onChange={(v) => handleConfigChange('report.default_format', v)}
-                className="full-width-select"
-              >
-                <Option value="html">HTML</Option>
-                <Option value="json">JSON</Option>
-              </Select>
-            </Form.Item>
-          </Form>
-        </div>
-
-        <div className="config-section">
-          <SectionTitle
-            icon={<FileTextOutlined />}
-            title="报告内容"
-            subtitle="控制报告详尽程度"
-          />
-          <Form layout="vertical">
-            <Form.Item
-              label="包含原始扫描数据"
-              help="报告 HTML/JSON 中是否包含完整的扫描原始数据（端口列表、SSL 详情等）。"
-            >
-              <Switch
-                checked={getCurrentValue('report.include_raw_scans') === true}
-                onChange={(v) => handleConfigChange('report.include_raw_scans', v)}
-              />
-            </Form.Item>
-          </Form>
+          <SectionTitle icon={<HddOutlined />} title="部署边界" subtitle="这些值由环境变量控制，修改后需要重启对应服务" />
+          <div className="runtime-limit-grid">
+            <div><span>任务执行</span><strong>{runtimeStatus?.operational_limits?.task_execution_mode || '-'}</strong></div>
+            <div><span>任务失败重试</span><strong>{runtimeStatus?.operational_limits?.task_recovery_attempts ?? '-'} 次</strong></div>
+            <div><span>文档单文件重试</span><strong>{runtimeStatus?.operational_limits?.document_file_retry_attempts ?? '-'} 次</strong></div>
+            <div><span>文档总页数</span><strong>{runtimeStatus?.operational_limits?.document_max_total_pages ?? '-'} 页</strong></div>
+            <div><span>单文件上限</span><strong>{runtimeStatus?.operational_limits?.upload_max_file_mb ?? '-'} MB</strong></div>
+            <div><span>批量解压上限</span><strong>{runtimeStatus?.operational_limits?.upload_max_batch_mb ?? '-'} MB</strong></div>
+            <div><span>活动对话保留</span><strong>{runtimeStatus?.operational_limits?.active_history_retention_days ?? '-'} 天</strong></div>
+          </div>
         </div>
       </div>
     )
   }
 
   const unsavedCount = Object.keys(pendingChanges).length
+  const configTabs = (
+    <Tabs activeKey={activeTab} onChange={setActiveTab} tabPosition="top" className="config-tabs">
+      {!embedded && (
+        <TabPane tab={<span><RobotOutlined /> 当前对话</span>} key="ai">{renderModelTab()}</TabPane>
+      )}
+      {embedded && (
+        <TabPane tab={<span><DashboardOutlined /> 运行资源</span>} key="runtime">{renderRuntimeTab()}</TabPane>
+      )}
+      {embedded && (
+        <TabPane tab={<span><BulbOutlined /> AI 行为</span>} key="ai-behavior">{renderAIBehaviorTab()}</TabPane>
+      )}
+      <TabPane tab={<span><FileTextOutlined /> {embedded ? '文档分析' : '项目文档'}</span>} key="document">
+        {renderDocumentTab()}
+      </TabPane>
+    </Tabs>
+  )
+
+  if (embedded) {
+    return (
+      <section className="system-config-embedded">
+        <header className="system-config-embedded-head">
+          <div>
+            <span>DEPLOYMENT CONTROL</span>
+            <h2>运行策略与资源调度</h2>
+            <p>配置对整套 CertiProof 部署全局生效，不属于某一个项目。</p>
+          </div>
+          <div className="system-config-embedded-actions">
+            {unsavedCount > 0 && <Tag color="gold">{unsavedCount} 项未保存</Tag>}
+            <Button icon={<ReloadOutlined />} onClick={fetchAll} disabled={loading || saving}>刷新</Button>
+            <Button onClick={handleReset} disabled={!unsavedCount || saving}>撤销</Button>
+            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving} disabled={!unsavedCount}>保存配置</Button>
+          </div>
+        </header>
+        {loading ? <div className="config-loading"><Spin /></div> : configTabs}
+      </section>
+    )
+  }
 
   return (
     <>
@@ -631,7 +545,7 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
           {trigger}
         </span>
       ) : (
-        <Tooltip title="系统配置">
+        <Tooltip title="当前项目设置">
           <Button
             type="text"
             icon={<SettingOutlined />}
@@ -645,7 +559,7 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
         title={
           <div className="drawer-title">
             <SettingOutlined style={{ color: '#D4AF37', marginRight: 8 }} />
-            <span>系统配置</span>
+            <span>当前项目设置</span>
           </div>
         }
         placement="right"
@@ -664,61 +578,24 @@ function SystemConfig({ trigger, value, onChange, projectId, projectName, organi
         footer={
           <div className="drawer-footer">
             <Button
-              icon={<ReloadOutlined />}
-              onClick={fetchAll}
-              disabled={loading || saving}
+              icon={<SettingOutlined />}
+              onClick={() => {
+                setOpen(false)
+                navigate('/settings/system')
+              }}
             >
-              刷新
-            </Button>
-            <Button
-              onClick={handleReset}
-              disabled={unsavedCount === 0 || saving}
-            >
-              撤销
+              打开全局系统设置
             </Button>
             <Button
               type="primary"
-              icon={<SaveOutlined />}
-              onClick={handleSave}
-              loading={saving}
-              disabled={unsavedCount === 0}
+              onClick={() => setOpen(false)}
             >
-              保存
+              完成
             </Button>
           </div>
         }
       >
-        {loading ? (
-          <div className="config-loading">
-            <Spin />
-          </div>
-        ) : (
-          <Tabs
-            activeKey={activeTab}
-            onChange={setActiveTab}
-            tabPosition="top"
-            className="config-tabs"
-          >
-            <TabPane tab={<span><RobotOutlined /> AI 模型</span>} key="ai">
-              {renderModelTab()}
-            </TabPane>
-            <TabPane tab={<span><BulbOutlined /> AI 行为</span>} key="ai-behavior">
-              {renderAIBehaviorTab()}
-            </TabPane>
-            <TabPane tab={<span><FileProtectOutlined /> 测评流程</span>} key="assessment">
-              {renderAssessmentTab()}
-            </TabPane>
-            <TabPane tab={<span><FileTextOutlined /> 文档分析</span>} key="document">
-              {renderDocumentTab()}
-            </TabPane>
-            <TabPane tab={<span><DashboardOutlined /> 运行资源</span>} key="runtime">
-              {renderRuntimeTab()}
-            </TabPane>
-            <TabPane tab={<span><FileTextOutlined /> 报告</span>} key="report">
-              {renderReportTab()}
-            </TabPane>
-          </Tabs>
-        )}
+        {loading ? <div className="config-loading"><Spin /></div> : configTabs}
       </Drawer>
     </>
   )

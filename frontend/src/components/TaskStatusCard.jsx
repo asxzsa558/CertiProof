@@ -138,7 +138,11 @@ function MultiAssetProgressCard({ msg, onPause, onStop, onResume }) {
                 )}
                 <span className="asset-name">{asset.name}</span>
                 {asset.status === 'running' && !isPaused && (
-                  <span className="asset-status">扫描中...</span>
+                  <span className="asset-status">
+                    {asset.tool_progress
+                      ? `扫描中 ${asset.tool_progress.progress || 0}% · ${asset.tool_progress.elapsed_seconds || 0} 秒`
+                      : '扫描中...'}
+                  </span>
                 )}
                 {asset.status === 'cancelled' && (
                   <span className="asset-status">已取消</span>
@@ -178,7 +182,10 @@ export default function TaskStatusCard({ msg, onPause, onStop, onResume }) {
   const isFailed = msg.taskStatus === 'failed'
   const isCompleted = msg.taskCompleted || ['completed', 'success', 'failed', 'stopped'].includes(msg.taskStatus)
   const displayStatus = isStopped ? '已停止' : isFailed ? '失败' : isPaused ? '已暂停' : isCompleted ? '已完成' : '执行中'
-  const progress = stepProgress?.total_steps > 0
+  const toolProgress = stepProgress?.tool_progress
+  const progress = !isCompleted && Number.isFinite(Number(toolProgress?.progress))
+    ? Math.max(0, Math.min(Number(toolProgress.progress), 99))
+    : stepProgress?.total_steps > 0
     ? Math.round(((stepProgress.step_index + 1) / stepProgress.total_steps) * 100)
     : isCompleted ? 100 : 0
   const completedLabel = completedStepLabel(currentStep)
@@ -215,7 +222,9 @@ export default function TaskStatusCard({ msg, onPause, onStop, onResume }) {
               size="small"
             />
             <span className="progress-text">
-              {stepProgress.step_index + 1} / {stepProgress.total_steps}
+              {toolProgress
+                ? `${progress}% · ${toolProgress.elapsed_seconds || 0} 秒`
+                : `${stepProgress.step_index + 1} / ${stepProgress.total_steps}`}
             </span>
           </div>
         )}

@@ -295,7 +295,7 @@ async def get_available_models(
     current_user: User = Depends(get_current_user),
 ):
     """Get list of available models for selection"""
-    await require_any_org_permission(db, current_user, "system:config")
+    await require_any_org_permission(db, current_user, "project:read")
     models = await llm_service.get_available_models(db, task_type)
     
     response = []

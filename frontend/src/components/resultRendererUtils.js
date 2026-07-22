@@ -18,6 +18,7 @@ const RESULT_STATES = {
   success: { key: 'success', label: '检测完成', color: 'success', risk: 'low' },
   risk: { key: 'risk', label: '发现问题', color: 'error', risk: 'high' },
   warning: { key: 'warning', label: '检测不完整', color: 'warning', risk: 'medium' },
+  not_applicable: { key: 'not_applicable', label: '不适用', color: 'default', risk: 'low' },
   failed: { key: 'failed', label: '执行失败', color: 'error', risk: 'high' },
 }
 
@@ -53,7 +54,7 @@ const inferResultState = (assetData = {}) => {
   const capability = assetData.capability || result.capability
   const explicit = String(assetData.display_status || assetData.status || result.status || '').toLowerCase()
   if (['failed', 'failure', 'error'].includes(explicit)) return RESULT_STATES.failed
-  if (assetData.error || result.error_detail) return RESULT_STATES.failed
+  if (explicit === 'not_applicable' || result.outcome === 'not_applicable' || result.applicable === false) return RESULT_STATES.not_applicable
   if (hasSecurityIssues(result)) return RESULT_STATES.risk
   if (['skipped', 'cancelled', 'canceled'].includes(explicit) || result.skipped) return RESULT_STATES.warning
   if (
@@ -64,6 +65,7 @@ const inferResultState = (assetData = {}) => {
   ) {
     return RESULT_STATES.warning
   }
+  if (assetData.error || result.error_detail) return RESULT_STATES.failed
   if (
     capability === 'scan_vulnerabilities' &&
     result.reachable !== true &&

@@ -22,10 +22,11 @@ import {
 } from '@ant-design/icons'
 import api from '../services/api'
 import ChatWorkspace from './ChatWorkspace'
+import IndependentIssuesPanel from './IndependentIssuesPanel'
 import MiniLineChart from './MiniLineChart'
 import VerificationWorkspace from './VerificationWorkspace'
 import { severityLabel } from './resultRendererUtils'
-import { scanTaskCapabilities, scanTaskConclusion } from './toolCatalog'
+import { scanTaskCapabilities, scanTaskConclusion, scanTaskTarget } from './toolCatalog'
 import './ProjectCommandCenter.css'
 
 const TOOL_GROUPS = [
@@ -67,7 +68,7 @@ const executionHasRisk = (result = {}) => {
     || Number(result.summary?.non_compliant || 0) > 0
 }
 
-function ProjectCommandCenter({ project, assets, assetsLoading = false, assessmentCollapsed = false, assessmentCode = 'dengbao', modelId, onOpenResults, onWorkspaceSummary }) {
+function ProjectCommandCenter({ project, assets, assetsLoading = false, assessmentCollapsed = false, assessmentCode = 'dengbao', workspaceMode = 'assessment', initialFindingId, modelId, onOpenResults, onWorkspaceSummary }) {
   const [scanTasks, setScanTasks] = useState([])
   const [assessment, setAssessment] = useState(null)
   const [verification, setVerification] = useState(null)
@@ -91,6 +92,14 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, assessme
   useEffect(() => {
     let mounted = true
     setWorkspaceLoading(true)
+    if (workspaceMode === 'independent') {
+      setAssessment(null)
+      setVerification(null)
+      setScoreSummary(null)
+      setReportHistory([])
+      setWorkspaceLoading(false)
+      return () => { mounted = false }
+    }
     const fetchWorkspace = async () => {
       if (!project?.id) return
       const assessmentResult = await api.get(`/assessments/projects/${project.id}`, {
@@ -136,7 +145,7 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, assessme
       window.clearInterval(timer)
       window.removeEventListener('certiproof:assessment-reset', reset)
     }
-  }, [project?.id, assessmentCode])
+  }, [project?.id, assessmentCode, workspaceMode])
 
   const issues = useMemo(() => flattenIssues(verification), [verification])
   const issueCounts = useMemo(() => ({
@@ -164,8 +173,15 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, assessme
     : Number.isFinite(currentScore)
       ? [{ version: '当前', score: currentScore, date: '' }]
       : []
+  const acceptanceAsset = assets?.find(item => String(item.value || '').toLowerCase() === 'e2e-target')
+  const acceptanceTasks = acceptanceAsset
+    ? scanTasks.filter(task => scanTaskTarget(task).toLowerCase().includes('e2e-target'))
+    : []
+  const acceptanceRunning = acceptanceTasks.filter(task => ['pending', 'running'].includes(task.status)).length
+  const acceptanceLatest = acceptanceTasks[0] ? scanTaskConclusion(acceptanceTasks[0]) : null
 
   useEffect(() => {
+    if (workspaceMode === 'independent') return
     onWorkspaceSummary?.({
       progress: assessmentProgress,
       score: currentScore,
@@ -174,7 +190,7 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, assessme
       unable: issueCounts.unable,
       fixed: issueCounts.fixed,
     })
-  }, [assessmentProgress, currentScore, scoreMetrics.coverage, issueCounts.open, issueCounts.unable, issueCounts.fixed, onWorkspaceSummary])
+  }, [assessmentProgress, currentScore, scoreMetrics.coverage, issueCounts.open, issueCounts.unable, issueCounts.fixed, workspaceMode, onWorkspaceSummary])
 
   const toolStatus = key => {
     if (workspaceLoading) return { state: 'idle', label: '加载中' }
@@ -268,6 +284,15 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, assessme
     <div className={`command-center-shell ${assessmentCollapsed ? 'assessment-panel-collapsed' : ''} ${detailCollapsed ? 'detail-panel-collapsed' : ''}`}>
       <div className={`command-center-grid ${detailCollapsed ? 'detail-collapsed' : ''}`}>
         <main className="ai-command-core">
+          {acceptanceAsset && (
+            <div className="acceptance-lab-banner">
+              <span className="acceptance-lab-icon"><ThunderboltOutlined /></span>
+              <span><strong>受控工具验收环境</strong><small>e2e-target · 执行进度与结果使用当前对话任务卡展示</small></span>
+              <em className={acceptanceRunning ? 'running' : acceptanceLatest?.key || 'idle'}>
+                {acceptanceRunning ? `${acceptanceRunning} 项执行中` : acceptanceLatest?.label || '等待验证'}
+              </em>
+            </div>
+          )}
           {detectedChanges.length > 0 && (
             <div className="reassessment-banner">
               <span><ExclamationCircleFilled /> {detectedChanges.length} 项资产或端口变化需要重新评估</span>
@@ -285,24 +310,30 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, assessme
             />
           </div>
           {detailCollapsed && (
-            <Tooltip title="展开测评详情">
-              <Button className="detail-reopen-button" type="text" icon={<RightOutlined />} onClick={() => setDetailCollapsed(false)} aria-label="展开测评详情" />
+            <Tooltip title={workspaceMode === 'independent' ? '展开独立检测追踪' : '展开测评详情'}>
+              <Button className="detail-reopen-button" type="text" icon={<RightOutlined />} onClick={() => setDetailCollapsed(false)} aria-label={workspaceMode === 'independent' ? '展开独立检测追踪' : '展开测评详情'} />
             </Tooltip>
           )}
         </main>
         {!detailCollapsed && <aside className="detail-workbench">
           <div className="detail-workbench-header">
-            <div><strong>测评详情</strong><span>{workspaceLoading ? '数据同步中' : assessment?.status === 'completed' ? '本轮测评已结束' : '实时同步'}</span></div>
+            <div><strong>{workspaceMode === 'independent' ? '独立检测追踪' : '测评详情'}</strong><span>{workspaceMode === 'independent' ? '不影响测评进度与合规评分' : workspaceLoading ? '数据同步中' : assessment?.status === 'completed' ? '本轮测评已结束' : '实时同步'}</span></div>
             <div className="detail-workbench-actions">
               <Tooltip title="检测记录">
                 <Button size="small" type="text" aria-label="检测记录" icon={<FileSearchOutlined />} onClick={onOpenResults} />
               </Tooltip>
-              <Tooltip title="收起测评详情">
-                <Button size="small" type="text" aria-label="收起测评详情" icon={<CloseOutlined />} onClick={() => setDetailCollapsed(true)} />
+              <Tooltip title={workspaceMode === 'independent' ? '收起独立检测追踪' : '收起测评详情'}>
+                <Button size="small" type="text" aria-label={workspaceMode === 'independent' ? '收起独立检测追踪' : '收起测评详情'} icon={<CloseOutlined />} onClick={() => setDetailCollapsed(true)} />
               </Tooltip>
             </div>
           </div>
-          <div className="detail-workbench-tabs" role="tablist">
+          {workspaceMode === 'independent' ? (
+            <IndependentIssuesPanel
+              project={project}
+              initialFindingId={initialFindingId}
+              onSummary={onWorkspaceSummary}
+            />
+          ) : <><div className="detail-workbench-tabs" role="tablist">
             {[
               ['current', '当前结果'],
               ['score', '评分解释'],
@@ -447,7 +478,7 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, assessme
               </section>
               {reportHistory.some(item => item.stale) && <div className="stale-report-warning"><ExclamationCircleFilled /> 过期报告只用于追溯，不能作为当前测评结论。</div>}
             </div>}
-          </div>
+          </div></>}
         </aside>}
       </div>
       <Drawer

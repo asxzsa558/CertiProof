@@ -5,10 +5,16 @@
 """
 
 import asyncio
+import contextlib
 import logging
+import socket
+import uuid
 from collections import defaultdict
 from typing import Dict, List, Any, Optional, Callable
 from datetime import datetime
+from urllib.parse import urlsplit, urlunsplit
+
+import httpx
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -205,13 +211,17 @@ class ExecutionEngine:
             "tool_status": "skipped",
         }
 
-    async def _call_ssh_checker(self, tool_name: str, parameters: Dict) -> Dict:
+    async def _call_ssh_checker(
+        self, tool_name: str, parameters: Dict, tool_progress_callback: Callable = None,
+    ) -> Dict:
         from app.mcp.gateway_client import MCPGatewayClient
 
         client = MCPGatewayClient()
         params = self._ssh_params(parameters)
         try:
-            result = await client.call_with_progress(tool_name, params)
+            result = await client.call_with_progress(
+                tool_name, params, on_progress=tool_progress_callback,
+            )
             return self._gateway_payload(result)
         except Exception as e:
             return self._ssh_unavailable_payload(parameters, e)
@@ -230,6 +240,10 @@ class ExecutionEngine:
     def _tool_display_status(self, data: Dict) -> str:
         if not isinstance(data, dict):
             return "success"
+        if data.get("outcome") == "not_applicable" or data.get("applicable") is False:
+            return "skipped"
+        if data.get("coverage_limited"):
+            return "warning"
         if data.get("tool_status") == "warning":
             return "warning"
         error = str(data.get("tool_error") or data.get("connection_error") or "").lower()
@@ -249,12 +263,36 @@ class ExecutionEngine:
         project_id: int,
         db: AsyncSession,
         label: str = None,
+        tool_progress_callback: Callable = None,
     ) -> Dict:
         """Run one child tool and always return the same result shape."""
         normalized = self._normalize_capability_name(capability_name)
         target = self._target_from_parameters(parameters)
+        def report_progress(progress: Dict) -> None:
+            if not tool_progress_callback:
+                return
+            tool_progress_callback({
+                **progress,
+                "capability": normalized,
+                "message": f"{label or normalized}：{progress.get('message') or '正在执行'}",
+            })
         try:
-            data = await self._execute_capability(normalized, dict(parameters), user_id, project_id, db)
+            report_progress({
+                "status": "running", "progress": 5, "elapsed_seconds": 0,
+                "alive": True, "message": "已启动",
+            })
+            data = await self._execute_capability(
+                normalized,
+                dict(parameters),
+                user_id,
+                project_id,
+                db,
+                tool_progress_callback=report_progress,
+            )
+            report_progress({
+                "status": "completed", "progress": 100, "elapsed_seconds": 0,
+                "alive": False, "message": "执行完成",
+            })
             metadata = data.get("metadata", {}) if isinstance(data, dict) else {}
             sub_status = self._tool_display_status(data)
             return {
@@ -268,6 +306,10 @@ class ExecutionEngine:
             }
         except Exception as e:
             logger.warning(f"Subtool {normalized}({target}) failed: {e}")
+            report_progress({
+                "status": "failed", "progress": 100, "elapsed_seconds": 0,
+                "alive": False, "message": f"执行失败：{e}",
+            })
             error_detail = self._error_detail(e, normalized)
             return {
                 "status": "failed",
@@ -310,6 +352,181 @@ class ExecutionEngine:
         if require_fuzz and "FUZZ" not in url:
             url = url.rstrip("/") + "/FUZZ"
         return url
+
+    @staticmethod
+    async def _probe_tcp_port(host: str, port: int, timeout: float = 2.5) -> Dict[str, Any]:
+        started = asyncio.get_running_loop().time()
+        try:
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
+            del reader
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+            state = "open"
+            detail = None
+        except ConnectionRefusedError:
+            state = "closed"
+            detail = "connection refused"
+        except (asyncio.TimeoutError, TimeoutError):
+            state = "filtered"
+            detail = "connection timeout"
+        except socket.gaierror as exc:
+            state = "unresolved"
+            detail = str(exc)
+        except OSError as exc:
+            state = "unreachable"
+            detail = str(exc)
+        return {
+            "port": port,
+            "state": state,
+            "detail": detail,
+            "latency_ms": int((asyncio.get_running_loop().time() - started) * 1000),
+        }
+
+    @staticmethod
+    def _web_target_parts(target: str) -> Dict[str, Any]:
+        raw = str(target or "").strip()
+        explicit_scheme = raw.startswith(("http://", "https://"))
+        parsed = urlsplit(raw if explicit_scheme else f"//{raw}")
+        if not parsed.hostname:
+            raise ValueError("目标 URL 缺少有效域名或 IP")
+        return {
+            "raw": raw,
+            "host": parsed.hostname,
+            "scheme": parsed.scheme if explicit_scheme else None,
+            "port": parsed.port,
+            "path": parsed.path or "/",
+            "query": parsed.query,
+        }
+
+    @staticmethod
+    def _detect_web_protection(headers: Dict[str, str], body: str) -> Optional[str]:
+        source = "\n".join([
+            str(headers.get("server") or ""),
+            str(headers.get("set-cookie") or ""),
+            str(headers.get("cf-ray") or ""),
+            str(headers.get("cf-mitigated") or ""),
+            str(body or "")[:12000],
+        ]).lower()
+        if any(marker in source for marker in ("challenge.rivers.chaitin.cn", "sl-session", "window.captcha")):
+            return "长亭雷池 WAF/验证码"
+        if any(marker in source for marker in ("cf-chl-", "cf-mitigated", "cloudflare ray id")):
+            return "Cloudflare 挑战/WAF"
+        if any(marker in source for marker in ("captcha", "access denied", "request blocked", "web application firewall")):
+            return "WAF/访问挑战"
+        return None
+
+    async def _web_preflight(self, target: str) -> Dict[str, Any]:
+        parts = self._web_target_parts(target)
+        if parts["port"]:
+            candidates = [(parts["scheme"] or ("https" if parts["port"] == 443 else "http"), parts["port"])]
+        elif parts["scheme"]:
+            candidates = [(parts["scheme"], 443 if parts["scheme"] == "https" else 80)]
+        else:
+            candidates = [("https", 443), ("http", 80)]
+
+        probes = await asyncio.gather(*[
+            self._probe_tcp_port(parts["host"], port)
+            for _, port in candidates
+        ])
+        selected = next((candidate for candidate, probe in zip(candidates, probes) if probe["state"] == "open"), None)
+        result = {
+            "requested_target": parts["raw"],
+            "host": parts["host"],
+            "ports": probes,
+            "reachable": selected is not None,
+            "effective_url": None,
+            "protection_detected": False,
+            "protection_name": None,
+            "soft_404": False,
+        }
+        if not selected:
+            return result
+
+        scheme, port = selected
+        host = f"[{parts['host']}]" if ":" in parts["host"] else parts["host"]
+        netloc = host if port == (443 if scheme == "https" else 80) else f"{host}:{port}"
+        effective_url = urlunsplit((scheme, netloc, parts["path"], parts["query"], ""))
+        result["effective_url"] = effective_url
+        result["selected_port"] = port
+        result["selected_scheme"] = scheme
+
+        probe_path = f"/.certiproof-preflight-{uuid.uuid4().hex}"
+        probe_url = urlunsplit((scheme, netloc, probe_path, "", ""))
+        try:
+            async with httpx.AsyncClient(
+                verify=False,
+                follow_redirects=True,
+                timeout=httpx.Timeout(8.0, connect=4.0),
+                headers={"User-Agent": "CertiProof-Preflight/1.0"},
+            ) as client:
+                root_response, probe_response = await asyncio.gather(
+                    client.get(effective_url),
+                    client.get(probe_url),
+                )
+            combined_headers = {
+                "server": " ".join(filter(None, [root_response.headers.get("server"), probe_response.headers.get("server")])),
+                "set-cookie": " ".join(filter(None, [root_response.headers.get("set-cookie"), probe_response.headers.get("set-cookie")])),
+                "cf-ray": probe_response.headers.get("cf-ray") or root_response.headers.get("cf-ray") or "",
+                "cf-mitigated": probe_response.headers.get("cf-mitigated") or root_response.headers.get("cf-mitigated") or "",
+            }
+            protection = self._detect_web_protection(
+                combined_headers,
+                f"{root_response.text[:6000]}\n{probe_response.text[:6000]}",
+            )
+            result.update({
+                "root_status": root_response.status_code,
+                "probe_status": probe_response.status_code,
+                "probe_length": len(probe_response.content),
+                "soft_404": probe_response.status_code not in {404, 410},
+                "protection_detected": protection is not None,
+                "protection_name": protection,
+            })
+        except httpx.HTTPError as exc:
+            result["http_probe_error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
+        return result
+
+    @staticmethod
+    def _web_unavailable_payload(target: str, preflight: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
+        states = {item.get("state") for item in preflight.get("ports") or []}
+        closed = states and states <= {"closed"}
+        if closed:
+            reason = f"目标未提供可连接的 Web 服务，{tool_name} 不适用"
+            outcome = "not_applicable"
+        else:
+            reason = f"目标 Web 端口无响应、无法解析或被网络策略过滤，{tool_name} 未执行"
+            outcome = "incomplete"
+        return {
+            "target": target,
+            "reachable": False,
+            "applicable": False if closed else None,
+            "outcome": outcome,
+            "execution_completed": True,
+            "scan_completed": False,
+            "tool_status": "skipped" if closed else "warning",
+            "tool_error": reason,
+            "preflight": preflight,
+        }
+
+    @staticmethod
+    def _protection_limited_payload(target: str, preflight: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
+        protection = preflight.get("protection_name") or "WAF/访问挑战"
+        reason = (
+            f"检测到 {protection}，自动化请求会被验证码或统一响应拦截；"
+            f"{tool_name} 已提前停止，本次不能形成源站无风险结论"
+        )
+        return {
+            "target": preflight.get("effective_url") or target,
+            "reachable": True,
+            "applicable": True,
+            "outcome": "incomplete",
+            "execution_completed": True,
+            "scan_completed": False,
+            "coverage_limited": True,
+            "tool_status": "warning",
+            "tool_error": reason,
+            "preflight": preflight,
+        }
 
     async def execute_plan(
         self,
@@ -404,7 +621,20 @@ class ExecutionEngine:
                 logger.info(f"Executing capability: {capability_name} with params: {safe_parameters}")
 
                 # 根据能力类型调用不同的处理器
-                result = await self._execute_capability(capability_name, parameters, user_id, project_id, db)
+                def report_tool_progress(detail: Dict[str, Any]) -> None:
+                    if progress_callback and task_id:
+                        progress_callback(
+                            task_id, i, len(plan), capability_name, "running", detail
+                        )
+
+                result = await self._execute_capability(
+                    capability_name,
+                    parameters,
+                    user_id,
+                    project_id,
+                    db,
+                    tool_progress_callback=report_tool_progress,
+                )
                 execution_status = self._tool_display_status(result)
 
                 results.append({
@@ -599,7 +829,8 @@ class ExecutionEngine:
         user_id: int,
         project_id: int,
         db: AsyncSession,
-        max_retries: int = 3
+        max_retries: int = 3,
+        tool_progress_callback: Callable = None,
     ) -> Dict:
         """带重试的执行"""
         last_error = None
@@ -611,7 +842,12 @@ class ExecutionEngine:
             try:
                 logger.info(f"Attempt {attempt + 1}/{max_retries} for {capability_name}({target})")
                 result = await self._execute_capability(
-                    capability_name, parameters, user_id, project_id, db
+                    capability_name,
+                    parameters,
+                    user_id,
+                    project_id,
+                    db,
+                    tool_progress_callback=tool_progress_callback,
                 )
                 logger.info(f"Attempt {attempt + 1} succeeded for {capability_name}({target})")
                 if attempt > 0:
@@ -739,9 +975,27 @@ class ExecutionEngine:
             # 这是 L2 Skill 的隔离原则（design-v2.md）
             from app.core.database import AsyncSessionLocal
             async with AsyncSessionLocal() as task_db:
+                def report_tool_progress(detail: Dict[str, Any]) -> None:
+                    if progress_callback and task_id:
+                        progress_callback(
+                            task_id,
+                            asset_index,
+                            total_assets,
+                            target,
+                            "running",
+                            capability_name,
+                            detail,
+                        )
+
                 # 执行（带重试）
                 result = await self._execute_with_retry(
-                    capability_name, parameters, user_id, project_id, task_db, max_retries
+                    capability_name,
+                    parameters,
+                    user_id,
+                    project_id,
+                    task_db,
+                    max_retries,
+                    tool_progress_callback=report_tool_progress,
                 )
 
                 # 通知完成
@@ -776,6 +1030,7 @@ class ExecutionEngine:
         user_id: int,
         project_id: int = None,
         db: AsyncSession = None,
+        tool_progress_callback: Callable = None,
     ) -> Dict:
         """
         执行单个能力
@@ -814,52 +1069,52 @@ class ExecutionEngine:
 
         # 扫描类能力
         if capability_name == "scan_ports":
-            return await self._scan_ports(parameters, user_id, project_id, db)
+            return await self._scan_ports(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "masscan_scan":
-            return await self._masscan_scan(parameters, user_id, project_id, db)
+            return await self._masscan_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "fping_scan":
             return await self._fping_scan(parameters, user_id, project_id, db)
 
         elif capability_name == "nikto_scan":
-            return await self._nikto_scan(parameters, user_id, project_id, db)
+            return await self._nikto_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "sqlmap_scan":
-            return await self._sqlmap_scan(parameters, user_id, project_id, db)
+            return await self._sqlmap_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "gobuster_scan":
-            return await self._gobuster_scan(parameters, user_id, project_id, db)
+            return await self._gobuster_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "ffuf_scan":
-            return await self._ffuf_scan(parameters, user_id, project_id, db)
+            return await self._ffuf_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "web_discovery_scan":
-            return await self._web_discovery_scan(parameters, user_id, project_id, db)
+            return await self._web_discovery_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "snmp_walk":
-            return await self._snmp_walk(parameters, user_id, project_id, db)
+            return await self._snmp_walk(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "snmp_bruteforce":
-            return await self._snmp_bruteforce(parameters, user_id, project_id, db)
+            return await self._snmp_bruteforce(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "snmp_get":
-            return await self._snmp_get(parameters, user_id, project_id, db)
+            return await self._snmp_get(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "network_device_scan":
-            return await self._network_device_scan(parameters, user_id, project_id, db)
+            return await self._network_device_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "enum4linux_scan":
-            return await self._enum4linux_scan(parameters, user_id, project_id, db)
+            return await self._enum4linux_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "crackmapexec_scan":
-            return await self._crackmapexec_scan(parameters, user_id, project_id, db)
+            return await self._crackmapexec_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "smb_enum":
-            return await self._smb_enum(parameters, user_id, project_id, db)
+            return await self._smb_enum(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "windows_security_scan":
-            return await self._windows_security_scan(parameters, user_id, project_id, db)
+            return await self._windows_security_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "redis_check":
             return await self._redis_check(parameters, user_id, project_id, db)
@@ -877,53 +1132,59 @@ class ExecutionEngine:
             return await self._mysql_check(parameters, user_id, project_id, db)
 
         elif capability_name == "database_security_scan":
-            return await self._database_security_scan(parameters, user_id, project_id, db)
+            return await self._database_security_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "scan_ssl":
-            return await self._scan_ssl(parameters, user_id, project_id, db)
+            return await self._scan_ssl(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "crypto_transport_scan":
-            return await self._crypto_transport_scan(parameters, user_id, project_id, db)
+            return await self._crypto_transport_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "crypto_certificate_check":
-            return await self._crypto_certificate_check(parameters, user_id, project_id, db)
+            return await self._crypto_certificate_check(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "crypto_onsite_assessment":
-            return await self._crypto_onsite_assessment(parameters, user_id, project_id, db)
+            return await self._crypto_onsite_assessment(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "scan_vulnerabilities":
-            return await self._scan_vulnerabilities(parameters, user_id, project_id, db)
+            return await self._scan_vulnerabilities(
+                parameters,
+                user_id,
+                project_id,
+                db,
+                tool_progress_callback=tool_progress_callback,
+            )
 
         elif capability_name == "scan_weak_passwords":
-            return await self._scan_weak_passwords(parameters, user_id, project_id, db)
+            return await self._scan_weak_passwords(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "full_compliance_scan":
-            return await self._full_compliance_scan(parameters, user_id, project_id, db)
+            return await self._full_compliance_scan(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "tech_assessment":
-            return await self._tech_assessment(parameters, user_id, project_id, db)
+            return await self._tech_assessment(parameters, user_id, project_id, db, tool_progress_callback)
 
         # SSH 白盒配置核查能力
         elif capability_name == "baseline_check":
-            return await self._baseline_check(parameters, user_id, project_id, db)
+            return await self._baseline_check(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "password_policy_check":
-            return await self._password_policy_check(parameters, user_id, project_id, db)
+            return await self._password_policy_check(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "ssh_config_check":
-            return await self._ssh_config_check(parameters, user_id, project_id, db)
+            return await self._ssh_config_check(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "audit_config_check":
-            return await self._audit_config_check(parameters, user_id, project_id, db)
+            return await self._audit_config_check(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "service_port_check":
-            return await self._service_port_check(parameters, user_id, project_id, db)
+            return await self._service_port_check(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "file_permission_check":
-            return await self._file_permission_check(parameters, user_id, project_id, db)
+            return await self._file_permission_check(parameters, user_id, project_id, db, tool_progress_callback)
 
         elif capability_name == "mac_check":
-            return await self._mac_check(parameters, user_id, project_id, db)
+            return await self._mac_check(parameters, user_id, project_id, db, tool_progress_callback)
 
         # 查询类能力
         elif capability_name == "view_open_ports":
@@ -1003,7 +1264,10 @@ class ExecutionEngine:
         else:
             raise ValueError(f"未实现的能力: {capability_name}")
 
-    async def _scan_ports(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _scan_ports(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """端口扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
 
@@ -1012,6 +1276,8 @@ class ExecutionEngine:
         # 使用 call_with_progress 避免长时间阻塞
         def on_progress(progress):
             logger.info(f"Scan progress: {progress}")
+            if tool_progress_callback:
+                tool_progress_callback(progress)
 
         result = await client.call_with_progress(
             "nmap_scan",
@@ -1052,7 +1318,10 @@ class ExecutionEngine:
             raise ValueError(tool_error or "工具执行失败")
         return payload
 
-    async def _masscan_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _masscan_scan(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """masscan 超高速端口扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
 
@@ -1066,7 +1335,9 @@ class ExecutionEngine:
         if "banner_grab" in parameters:
             params["banner_grab"] = parameters["banner_grab"]
 
-        result = await client.call("masscan_scan", params)
+        result = await client.call_with_progress(
+            "masscan_scan", params, on_progress=tool_progress_callback,
+        )
 
         data = result.get("data", {})
         return self._gateway_payload(result)
@@ -1088,30 +1359,46 @@ class ExecutionEngine:
         result = await client.call("fping_scan", params)
         return self._gateway_payload(result)
 
-    async def _nikto_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _nikto_scan(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """nikto Web 服务器扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
 
         client = MCPGatewayClient()
-        # 标准化目标：移除 scheme 前缀（如果用户传了完整 URL）
         target = parameters["target"]
-        if target.startswith("http://"):
-            target = target[7:]  # 去掉 "http://"
-        elif target.startswith("https://"):
-            target = target[8:]  # 去掉 "https://"
+        parts = self._web_target_parts(target)
+        if "port" in parameters or "ssl" in parameters:
+            scheme = "https" if parameters.get("ssl") else "http"
+            port = parameters.get("port") or (443 if scheme == "https" else 80)
+            host = f"[{parts['host']}]" if ":" in parts["host"] else parts["host"]
+            preflight_target = f"{scheme}://{host}:{port}"
+        else:
+            preflight_target = target
+        preflight = await self._web_preflight(preflight_target)
+        if not preflight.get("reachable"):
+            return self._web_unavailable_payload(target, preflight, "Nikto Web 扫描")
+        if preflight.get("protection_detected"):
+            return self._protection_limited_payload(target, preflight, "Nikto Web 扫描")
 
-        params = {"target": target}
-        if "port" in parameters:
-            params["port"] = parameters["port"]
-        if "ssl" in parameters:
-            params["ssl"] = parameters["ssl"]
+        params = {
+            "target": preflight["host"],
+            "port": preflight["selected_port"],
+            "ssl": preflight["selected_scheme"] == "https",
+        }
         if "timeout" in parameters:
             params["timeout"] = parameters["timeout"]
 
-        result = await client.call("nikto_scan", params)
-        return self._gateway_payload(result)
+        result = await client.call_with_progress(
+            "nikto_scan", params, on_progress=tool_progress_callback,
+        )
+        return {**self._gateway_payload(result), "preflight": preflight}
 
-    async def _sqlmap_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _sqlmap_scan(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """sqlmap SQL 注入检测"""
         from app.mcp.gateway_client import MCPGatewayClient
 
@@ -1126,17 +1413,29 @@ class ExecutionEngine:
         if "timeout" in parameters:
             params["timeout"] = parameters["timeout"]
 
-        result = await client.call("sqlmap_scan", params)
+        result = await client.call_with_progress(
+            "sqlmap_scan", params, on_progress=tool_progress_callback,
+        )
         return self._gateway_payload(result)
 
-    async def _gobuster_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _gobuster_scan(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """gobuster 目录/文件爆破"""
         from app.mcp.gateway_client import MCPGatewayClient
 
         client = MCPGatewayClient()
-        url = self._url_param(parameters)
+        url = parameters.get("url") or parameters.get("target")
+        if not url:
+            raise ValueError("缺少目标 URL")
+        preflight = await self._web_preflight(url)
+        if not preflight.get("reachable"):
+            return self._web_unavailable_payload(url, preflight, "目录扫描")
+        if preflight.get("protection_detected"):
+            return self._protection_limited_payload(url, preflight, "目录扫描")
 
-        params = {"url": url}
+        params = {"url": preflight.get("effective_url") or url}
         if "wordlist" in parameters:
             params["wordlist"] = parameters["wordlist"]
         if "extensions" in parameters:
@@ -1146,17 +1445,44 @@ class ExecutionEngine:
         if "timeout" in parameters:
             params["timeout"] = parameters["timeout"]
 
-        result = await client.call("gobuster_scan", params)
-        return self._gateway_payload(result)
+        result = await client.call_with_progress(
+            "gobuster_scan", params, on_progress=tool_progress_callback,
+        )
+        payload = self._gateway_payload(result)
+        payload["preflight"] = preflight
+        if preflight.get("soft_404"):
+            payload["coverage_limited"] = True
+            payload["execution_completed"] = payload.get("scan_completed") is not False
+            payload["scan_completed"] = False
+            payload["tool_status"] = "warning"
+            payload["tool_error"] = (
+                "目标对不存在路径返回非 404 响应；已进行自动校准，但目录发现范围受限，"
+                "不能据此判断不存在隐藏路径"
+            )
+        return payload
 
-    async def _ffuf_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _ffuf_scan(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """ffuf Web 模糊测试"""
         from app.mcp.gateway_client import MCPGatewayClient
 
         client = MCPGatewayClient()
-        url = self._url_param(parameters, require_fuzz=True)
+        url = parameters.get("url") or parameters.get("target")
+        if not url:
+            raise ValueError("缺少目标 URL")
+        if "FUZZ" not in url:
+            url = url.rstrip("/") + "/FUZZ"
+        preflight_url = url.replace("FUZZ", "")
+        preflight = await self._web_preflight(preflight_url)
+        if not preflight.get("reachable"):
+            return self._web_unavailable_payload(preflight_url, preflight, "Web 模糊测试")
+        if preflight.get("protection_detected"):
+            return self._protection_limited_payload(preflight_url, preflight, "Web 模糊测试")
 
-        params = {"url": url}
+        effective_url = (preflight.get("effective_url") or preflight_url).rstrip("/") + "/FUZZ"
+        params = {"url": effective_url}
         if "wordlist" in parameters:
             params["wordlist"] = parameters["wordlist"]
         if "method" in parameters:
@@ -1164,18 +1490,33 @@ class ExecutionEngine:
         if "timeout" in parameters:
             params["timeout"] = parameters["timeout"]
 
-        result = await client.call("ffuf_scan", params)
-        return self._gateway_payload(result)
+        result = await client.call_with_progress(
+            "ffuf_scan", params, on_progress=tool_progress_callback,
+        )
+        payload = self._gateway_payload(result)
+        payload["preflight"] = preflight
+        if preflight.get("soft_404"):
+            payload["coverage_limited"] = True
+            payload["execution_completed"] = payload.get("scan_completed") is not False
+            payload["scan_completed"] = False
+            payload["tool_status"] = "warning"
+            payload["tool_error"] = (
+                "目标对不存在路径返回非 404 响应；FFUF 已自动校准，但模糊测试可见性受限，"
+                "不能据此判断不存在隐藏端点"
+            )
+        return payload
 
-    async def _web_discovery_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _web_discovery_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """Web 路径/目录发现：组合 gobuster 与 ffuf。"""
-        url = self._url_param(parameters)
+        url = parameters.get("url") or parameters.get("target")
+        if not url:
+            raise ValueError("缺少目标 URL")
         sub_params = {"url": url}
         if "timeout" in parameters:
             sub_params["timeout"] = parameters["timeout"]
         sub_results = await asyncio.gather(
-            self._run_subtool("gobuster_scan", sub_params, user_id, project_id, db, "目录爆破"),
-            self._run_subtool("ffuf_scan", sub_params, user_id, project_id, db, "Web 模糊测试"),
+            self._run_subtool("gobuster_scan", sub_params, user_id, project_id, db, "目录爆破", tool_progress_callback),
+            self._run_subtool("ffuf_scan", sub_params, user_id, project_id, db, "Web 模糊测试", tool_progress_callback),
         )
         return {
             "target": url,
@@ -1183,7 +1524,10 @@ class ExecutionEngine:
             "summary": self._summarize_subtools(sub_results),
         }
 
-    async def _snmp_walk(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _snmp_walk(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """snmpwalk 获取 SNMP 信息"""
         from app.mcp.gateway_client import MCPGatewayClient
 
@@ -1196,10 +1540,15 @@ class ExecutionEngine:
         if "oid" in parameters:
             params["oid"] = parameters["oid"]
 
-        result = await client.call("snmp_walk", params)
+        result = await client.call_with_progress(
+            "snmp_walk", params, on_progress=tool_progress_callback,
+        )
         return self._gateway_payload(result, allow_tool_failed=True)
 
-    async def _snmp_bruteforce(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _snmp_bruteforce(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """SNMP 团体字爆破"""
         from app.mcp.gateway_client import MCPGatewayClient
 
@@ -1208,10 +1557,15 @@ class ExecutionEngine:
         if "wordlist" in parameters:
             params["wordlist"] = parameters["wordlist"]
 
-        result = await client.call("snmp_bruteforce", params)
+        result = await client.call_with_progress(
+            "snmp_bruteforce", params, on_progress=tool_progress_callback,
+        )
         return self._gateway_payload(result, allow_tool_failed=True)
 
-    async def _snmp_get(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _snmp_get(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """snmpget 获取单个 OID 值"""
         from app.mcp.gateway_client import MCPGatewayClient
 
@@ -1222,15 +1576,17 @@ class ExecutionEngine:
         if "version" in parameters:
             params["version"] = parameters["version"]
 
-        result = await client.call("snmp_get", params)
+        result = await client.call_with_progress(
+            "snmp_get", params, on_progress=tool_progress_callback,
+        )
         return self._gateway_payload(result, allow_tool_failed=True)
 
-    async def _network_device_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _network_device_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """网络设备检测：组合 SNMP 信息读取与默认团体字检测。"""
         target = parameters["target"]
         sub_results = await asyncio.gather(
-            self._run_subtool("snmp_walk", {"target": target}, user_id, project_id, db, "SNMP 信息读取"),
-            self._run_subtool("snmp_bruteforce", {"target": target}, user_id, project_id, db, "SNMP 团体字检测"),
+            self._run_subtool("snmp_walk", {"target": target}, user_id, project_id, db, "SNMP 信息读取", tool_progress_callback),
+            self._run_subtool("snmp_bruteforce", {"target": target}, user_id, project_id, db, "SNMP 团体字检测", tool_progress_callback),
         )
         return {
             "target": target,
@@ -1238,7 +1594,10 @@ class ExecutionEngine:
             "summary": self._summarize_subtools(sub_results),
         }
 
-    async def _enum4linux_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _enum4linux_scan(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """enum4linux Windows 信息枚举"""
         from app.mcp.gateway_client import MCPGatewayClient
 
@@ -1251,10 +1610,15 @@ class ExecutionEngine:
         if "scan_type" in parameters:
             params["scan_type"] = parameters["scan_type"]
 
-        result = await client.call("enum4linux_scan", params)
+        result = await client.call_with_progress(
+            "enum4linux_scan", params, on_progress=tool_progress_callback,
+        )
         return self._gateway_payload(result, allow_tool_failed=True)
 
-    async def _crackmapexec_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _crackmapexec_scan(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """crackmapexec SMB/Windows 枚举"""
         from app.mcp.gateway_client import MCPGatewayClient
 
@@ -1267,10 +1631,15 @@ class ExecutionEngine:
         if "scan_type" in parameters:
             params["scan_type"] = parameters["scan_type"]
 
-        result = await client.call("crackmapexec_scan", params)
+        result = await client.call_with_progress(
+            "crackmapexec_scan", params, on_progress=tool_progress_callback,
+        )
         return self._gateway_payload(result, allow_tool_failed=True)
 
-    async def _smb_enum(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _smb_enum(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """SMB 共享枚举"""
         from app.mcp.gateway_client import MCPGatewayClient
 
@@ -1281,10 +1650,12 @@ class ExecutionEngine:
         if "password" in parameters:
             params["password"] = parameters["password"]
 
-        result = await client.call("smb_enum", params)
+        result = await client.call_with_progress(
+            "smb_enum", params, on_progress=tool_progress_callback,
+        )
         return self._gateway_payload(result, allow_tool_failed=True)
 
-    async def _windows_security_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _windows_security_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """Windows/AD 安全检测：组合用户、SID 与 SMB 共享枚举。"""
         target = parameters["target"]
         base = {"target": target}
@@ -1293,9 +1664,9 @@ class ExecutionEngine:
         if "password" in parameters:
             base["password"] = parameters["password"]
         sub_results = await asyncio.gather(
-            self._run_subtool("enum4linux_scan", base, user_id, project_id, db, "Windows 用户/组枚举"),
-            self._run_subtool("crackmapexec_scan", base, user_id, project_id, db, "Windows SID 枚举"),
-            self._run_subtool("smb_enum", base, user_id, project_id, db, "SMB 共享枚举"),
+            self._run_subtool("enum4linux_scan", base, user_id, project_id, db, "Windows 用户/组枚举", tool_progress_callback),
+            self._run_subtool("crackmapexec_scan", base, user_id, project_id, db, "Windows SID 枚举", tool_progress_callback),
+            self._run_subtool("smb_enum", base, user_id, project_id, db, "SMB 共享枚举", tool_progress_callback),
         )
         return {
             "target": target,
@@ -1365,7 +1736,7 @@ class ExecutionEngine:
         result = await client.call("mysql_check", params)
         return self._gateway_payload(result, allow_tool_failed=True)
 
-    async def _database_security_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _database_security_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """数据库安全组合检测：Redis/MySQL/MongoDB/Memcached/Oracle。"""
         target = parameters["target"]
         sub_tasks = [
@@ -1376,7 +1747,7 @@ class ExecutionEngine:
             ("oracle_check", {"target": target}, "Oracle TNS 检测"),
         ]
         sub_results = await asyncio.gather(*[
-            self._run_subtool(capability, params, user_id, project_id, db, label)
+            self._run_subtool(capability, params, user_id, project_id, db, label, tool_progress_callback)
             for capability, params, label in sub_tasks
         ])
 
@@ -1386,31 +1757,79 @@ class ExecutionEngine:
             "summary": self._summarize_subtools(sub_results),
         }
 
-    async def _scan_ssl(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _scan_ssl(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """SSL 扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
 
         client = MCPGatewayClient()
-        result = await client.call_with_progress("testssl_scan", {
-            "target": parameters["target"],
-            "port": parameters.get("port", 443),
-            **({"timeout": parameters["timeout"]} if "timeout" in parameters else {}),
-        })
+        target = parameters["target"]
+        parts = self._web_target_parts(target)
+        port = parameters.get("port", 443)
+        tcp_probe = await self._probe_tcp_port(parts["host"], port)
+        preflight = {
+            "requested_target": target,
+            "host": parts["host"],
+            "port": port,
+            "state": tcp_probe["state"],
+            "latency_ms": tcp_probe["latency_ms"],
+            "detail": tcp_probe["detail"],
+        }
+        if tcp_probe["state"] != "open":
+            closed = tcp_probe["state"] == "closed"
+            reason = (
+                f"目标 {parts['host']}:{port} 明确拒绝连接，未提供 TLS 服务，SSL/TLS 检测不适用"
+                if closed else
+                f"目标 {parts['host']}:{port} 无响应、无法解析或被网络策略过滤，SSL/TLS 检测未执行"
+            )
+            return {
+                "target": parts["host"],
+                "port": port,
+                "reachable": False,
+                "applicable": False if closed else None,
+                "outcome": "not_applicable" if closed else "incomplete",
+                "execution_completed": True,
+                "scan_completed": False,
+                "tool_status": "skipped" if closed else "warning",
+                "tool_error": reason,
+                "preflight": preflight,
+                "issues": [],
+                "vulnerabilities": [],
+                "certificate": None,
+            }
+        result = await client.call_with_progress(
+            "testssl_scan",
+            {
+                "target": parts["host"],
+                "port": port,
+                **({"timeout": parameters["timeout"]} if "timeout" in parameters else {}),
+            },
+            on_progress=tool_progress_callback,
+        )
 
-        return self._gateway_payload(result)
+        return {**self._gateway_payload(result), "preflight": preflight}
 
-    async def _crypto_transport_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _crypto_transport_scan(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         from app.mcp.gateway_client import MCPGatewayClient
 
-        result = await MCPGatewayClient().call("crypto_transport_scan", {
-            "target": parameters["target"],
-            "port": parameters.get("port", 443),
-            **({"timeout": parameters["timeout"]} if "timeout" in parameters else {}),
-        })
+        result = await MCPGatewayClient().call_with_progress(
+            "crypto_transport_scan",
+            {
+                "target": parameters["target"],
+                "port": parameters.get("port", 443),
+                **({"timeout": parameters["timeout"]} if "timeout" in parameters else {}),
+            },
+            on_progress=tool_progress_callback,
+        )
         return self._gateway_payload(result, allow_tool_failed=True)
 
-    async def _crypto_certificate_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
-        result = await self._crypto_transport_scan(parameters, user_id, project_id, db)
+    async def _crypto_certificate_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
+        result = await self._crypto_transport_scan(parameters, user_id, project_id, db, tool_progress_callback)
         return {
             **result,
             "check_focus": "certificate",
@@ -1418,12 +1837,12 @@ class ExecutionEngine:
             "checks": [item for item in result.get("checks", []) if item.get("id") in {"certificate-chain", "national-algorithm-marker"}],
         }
 
-    async def _crypto_onsite_assessment(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _crypto_onsite_assessment(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         target = parameters["target"]
         port = parameters.get("port", 443)
         sub_results = await asyncio.gather(*[
-            self._run_subtool("scan_ports", {"target": target, "port_range": str(port)}, user_id, project_id, db, "密码服务端口核验"),
-            self._run_subtool("crypto_transport_scan", {"target": target, "port": port}, user_id, project_id, db, "密码协议与证书核验"),
+            self._run_subtool("scan_ports", {"target": target, "port_range": str(port)}, user_id, project_id, db, "密码服务端口核验", tool_progress_callback),
+            self._run_subtool("crypto_transport_scan", {"target": target, "port": port}, user_id, project_id, db, "密码协议与证书核验", tool_progress_callback),
         ])
         return {
             "target": target,
@@ -1433,37 +1852,89 @@ class ExecutionEngine:
             "limitations": ["自动工具只覆盖网络和通信层的可远程核验项，其他七个层面必须结合材料或现场证据。"],
         }
 
-    async def _scan_vulnerabilities(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _scan_vulnerabilities(
+        self,
+        parameters: Dict,
+        user_id: int,
+        project_id: int,
+        db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """漏洞扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
 
         client = MCPGatewayClient()
-        params = {"target": parameters["target"]}
+        target = parameters["target"]
+        preflight = await self._web_preflight(target)
+        parsed_target = urlsplit(target if "://" in target else f"//{target}")
+        acceptance_target = (parsed_target.hostname or "").lower() == "e2e-target"
 
-        if "templates" in parameters:
-            params["templates"] = parameters["templates"]
-        if "severity" in parameters:
-            params["severity"] = parameters["severity"]
-        if "timeout" in parameters:
-            params["timeout"] = parameters["timeout"]
+        scan_profile = parameters.get("scan_profile") or ("acceptance" if acceptance_target else "safe")
+        params = {
+            "target": "http://e2e-target" if acceptance_target else preflight.get("effective_url") or target,
+            "scan_profile": scan_profile,
+            "protection_detected": preflight.get("protection_detected", False),
+        }
 
-        result = await client.call_with_progress("nuclei_scan", params)
-        return self._gateway_payload(result, allow_tool_failed=True)
+        if acceptance_target:
+            params["templates"] = parameters.get("templates", "misconfig,exposure")
+            params["severity"] = parameters.get("severity", "critical,high,medium")
+            if "timeout" in parameters:
+                params["timeout"] = parameters["timeout"]
+        else:
+            if "templates" in parameters:
+                params["templates"] = parameters["templates"]
+            if "severity" in parameters:
+                params["severity"] = parameters["severity"]
+            if "timeout" in parameters:
+                params["timeout"] = parameters["timeout"]
+            elif preflight.get("protection_detected"):
+                params["timeout"] = 150
 
-    async def _scan_weak_passwords(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        result = await client.call_with_progress(
+            "nuclei_scan",
+            params,
+            on_progress=tool_progress_callback,
+        )
+        payload = self._gateway_payload(result, allow_tool_failed=True)
+        payload["preflight"] = preflight
+        payload["requested_target"] = target
+        if preflight.get("protection_detected"):
+            payload["coverage_limited"] = True
+            payload["execution_completed"] = payload.get("scan_completed") is not False
+            payload["scan_completed"] = False
+            payload["tool_status"] = "warning"
+            protection = preflight.get("protection_name") or "WAF/访问挑战"
+            original_error = payload.get("tool_error")
+            payload["tool_error"] = (
+                f"检测到 {protection}，本轮已自动缩小模板范围并降低请求压力；"
+                "结果仅代表防护层外部可见范围，不能作为源站无风险结论"
+                + (f"；工具提示：{original_error}" if original_error else "")
+            )
+        return payload
+
+    async def _scan_weak_passwords(
+        self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession,
+        tool_progress_callback: Callable = None,
+    ) -> Dict:
         """弱口令扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
 
         client = MCPGatewayClient()
-        result = await client.call_with_progress("hydra_bruteforce", {
-            "target": parameters["target"],
-            "service": parameters.get("service", "ssh"),
-            "port": parameters.get("port", 22),
-        })
+        result = await client.call_with_progress(
+            "hydra_bruteforce",
+            {
+                "target": parameters["target"],
+                "service": parameters.get("service", "ssh"),
+                "port": parameters.get("port", 22),
+                **({"timeout": parameters["timeout"]} if "timeout" in parameters else {}),
+            },
+            on_progress=tool_progress_callback,
+        )
 
         return self._gateway_payload(result)
 
-    async def _full_compliance_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _full_compliance_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """全量合规扫描"""
         target = parameters["target"]
         sub_tasks = [
@@ -1473,7 +1944,7 @@ class ExecutionEngine:
             ("scan_weak_passwords", {"target": target}, "弱口令检测"),
         ]
         sub_results = await asyncio.gather(*[
-            self._run_subtool(capability, params, user_id, project_id, db, label)
+            self._run_subtool(capability, params, user_id, project_id, db, label, tool_progress_callback)
             for capability, params, label in sub_tasks
         ])
 
@@ -1483,7 +1954,7 @@ class ExecutionEngine:
             "summary": self._summarize_subtools(sub_results),
         }
 
-    async def _tech_assessment(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _tech_assessment(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """等保技术要求测评（10项检查）"""
         target = parameters["target"]
 
@@ -1492,14 +1963,14 @@ class ExecutionEngine:
         has_ssh_credential = bool(ssh_params.get("password") or ssh_params.get("key_file"))
 
         sub_coroutines = [
-            self._run_subtool("scan_ports", {"target": target}, user_id, project_id, db, "端口扫描"),
-            self._run_subtool("scan_vulnerabilities", {"target": target}, user_id, project_id, db, "漏洞扫描"),
-            self._run_subtool("nikto_scan", {"target": target}, user_id, project_id, db, "Web 扫描"),
-            self._run_subtool("scan_ssl", {"target": target}, user_id, project_id, db, "SSL/TLS 检测"),
-            self._run_subtool("redis_check", {"target": target}, user_id, project_id, db, "Redis 检测"),
-            self._run_subtool("mysql_check", {"target": target}, user_id, project_id, db, "MySQL 检测"),
-            self._run_subtool("mongodb_check", {"target": target}, user_id, project_id, db, "MongoDB 检测"),
-            self._run_subtool("snmp_walk", {"target": target}, user_id, project_id, db, "SNMP 检测"),
+            self._run_subtool("scan_ports", {"target": target}, user_id, project_id, db, "端口扫描", tool_progress_callback),
+            self._run_subtool("scan_vulnerabilities", {"target": target}, user_id, project_id, db, "漏洞扫描", tool_progress_callback),
+            self._run_subtool("nikto_scan", {"target": target}, user_id, project_id, db, "Web 扫描", tool_progress_callback),
+            self._run_subtool("scan_ssl", {"target": target}, user_id, project_id, db, "SSL/TLS 检测", tool_progress_callback),
+            self._run_subtool("redis_check", {"target": target}, user_id, project_id, db, "Redis 检测", tool_progress_callback),
+            self._run_subtool("mysql_check", {"target": target}, user_id, project_id, db, "MySQL 检测", tool_progress_callback),
+            self._run_subtool("mongodb_check", {"target": target}, user_id, project_id, db, "MongoDB 检测", tool_progress_callback),
+            self._run_subtool("snmp_walk", {"target": target}, user_id, project_id, db, "SNMP 检测", tool_progress_callback),
         ]
 
         sub_results = await asyncio.gather(*sub_coroutines)
@@ -1511,6 +1982,7 @@ class ExecutionEngine:
                 project_id,
                 db,
                 "安全基线",
+                tool_progress_callback,
             ))
             sub_results.append(await self._run_subtool(
                 "scan_weak_passwords",
@@ -1519,6 +1991,7 @@ class ExecutionEngine:
                 project_id,
                 db,
                 "弱口令检测",
+                tool_progress_callback,
             ))
         else:
             sub_results.append(self._skipped_subtool("baseline_check", target, "未提供 SSH 凭据", "安全基线"))
@@ -1532,33 +2005,33 @@ class ExecutionEngine:
 
     # ========== SSH 白盒配置核查方法 ==========
 
-    async def _baseline_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _baseline_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """安全基线核查：由工具侧自动识别操作系统。"""
-        return await self._call_ssh_checker("linux_baseline", parameters)
+        return await self._call_ssh_checker("linux_baseline", parameters, tool_progress_callback)
 
-    async def _password_policy_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _password_policy_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """密码策略检查"""
-        return await self._call_ssh_checker("password_policy_check", parameters)
+        return await self._call_ssh_checker("password_policy_check", parameters, tool_progress_callback)
 
-    async def _ssh_config_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _ssh_config_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """SSH 配置检查"""
-        return await self._call_ssh_checker("ssh_config_check", parameters)
+        return await self._call_ssh_checker("ssh_config_check", parameters, tool_progress_callback)
 
-    async def _audit_config_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _audit_config_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """审计配置检查"""
-        return await self._call_ssh_checker("audit_config_check", parameters)
+        return await self._call_ssh_checker("audit_config_check", parameters, tool_progress_callback)
 
-    async def _service_port_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _service_port_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """服务端口检查"""
-        return await self._call_ssh_checker("service_port_check", parameters)
+        return await self._call_ssh_checker("service_port_check", parameters, tool_progress_callback)
 
-    async def _file_permission_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _file_permission_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """文件权限检查"""
-        return await self._call_ssh_checker("file_permission_check", parameters)
+        return await self._call_ssh_checker("file_permission_check", parameters, tool_progress_callback)
 
-    async def _mac_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+    async def _mac_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession, tool_progress_callback: Callable = None) -> Dict:
         """强制访问控制检查"""
-        return await self._call_ssh_checker("mac_check", parameters)
+        return await self._call_ssh_checker("mac_check", parameters, tool_progress_callback)
 
     async def _view_open_ports(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """Read persisted port observations; a query must never start a scan."""

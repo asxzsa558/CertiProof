@@ -54,6 +54,15 @@ def test_incomplete_subtool_keeps_specific_reason_and_becomes_coverage_finding()
 def test_closed_service_is_skipped_but_timeout_is_warning():
     engine = ExecutionEngine()
     assert engine._tool_display_status({
+        "applicable": False,
+        "outcome": "not_applicable",
+        "scan_completed": False,
+    }) == "skipped"
+    assert engine._tool_display_status({
+        "coverage_limited": True,
+        "scan_completed": False,
+    }) == "warning"
+    assert engine._tool_display_status({
         "reachable": False,
         "scan_completed": False,
         "tool_error": "[Errno 111] Connection refused",
@@ -63,6 +72,171 @@ def test_closed_service_is_skipped_but_timeout_is_warning():
         "scan_completed": False,
         "tool_error": "Timeout: No Response",
     }) == "warning"
+
+
+def test_web_protection_detection_recognizes_chaitin_challenge():
+    protection = ExecutionEngine._detect_web_protection(
+        {"set-cookie": "sl-session=example; Path=/"},
+        '<script src="https://challenge.rivers.chaitin.cn/captcha.js"></script>',
+    )
+    assert protection == "长亭雷池 WAF/验证码"
+
+
+def test_nikto_stops_before_scanner_when_waf_blocks_visibility(monkeypatch):
+    engine = ExecutionEngine()
+
+    async def protected(_target):
+        return {
+            "host": "example.test",
+            "reachable": True,
+            "effective_url": "http://example.test",
+            "selected_port": 80,
+            "selected_scheme": "http",
+            "protection_detected": True,
+            "protection_name": "长亭雷池 WAF/验证码",
+        }
+
+    async def must_not_run(*_args, **_kwargs):
+        raise AssertionError("Nikto must not run against a CAPTCHA response")
+
+    monkeypatch.setattr(engine, "_web_preflight", protected)
+    monkeypatch.setattr(MCPGatewayClient, "call", must_not_run)
+    result = asyncio.run(engine._nikto_scan(
+        {"target": "example.test"}, user_id=1, project_id=None, db=None,
+    ))
+
+    assert result["coverage_limited"] is True
+    assert result["scan_completed"] is False
+    assert result["tool_status"] == "warning"
+    assert "不能形成源站无风险结论" in result["tool_error"]
+
+
+def test_ssl_closed_port_is_not_applicable_without_running_testssl(monkeypatch):
+    engine = ExecutionEngine()
+
+    async def closed(_host, port, timeout=2.5):
+        return {"port": port, "state": "closed", "detail": "connection refused", "latency_ms": 1}
+
+    async def must_not_run(*_args, **_kwargs):
+        raise AssertionError("testssl must not run when the TLS port is closed")
+
+    monkeypatch.setattr(engine, "_probe_tcp_port", closed)
+    monkeypatch.setattr(MCPGatewayClient, "call_with_progress", must_not_run)
+    result = asyncio.run(engine._scan_ssl(
+        {"target": "example.test"}, user_id=1, project_id=None, db=None,
+    ))
+
+    assert result["outcome"] == "not_applicable"
+    assert result["applicable"] is False
+    assert result["tool_status"] == "skipped"
+
+
+def test_vulnerability_scan_uses_safe_profile_and_keeps_waf_limit(monkeypatch):
+    engine = ExecutionEngine()
+    captured = {}
+
+    async def protected(_target):
+        return {
+            "host": "example.test",
+            "reachable": True,
+            "effective_url": "http://example.test",
+            "protection_detected": True,
+            "protection_name": "长亭雷池 WAF/验证码",
+        }
+
+    async def run(_self, tool_name, params, **_kwargs):
+        captured.update({"tool": tool_name, "params": params})
+        return {
+            "status": "success",
+            "data": {"target": params["target"], "reachable": True, "scan_completed": True, "findings": []},
+        }
+
+    monkeypatch.setattr(engine, "_web_preflight", protected)
+    monkeypatch.setattr(MCPGatewayClient, "call_with_progress", run)
+    result = asyncio.run(engine._scan_vulnerabilities(
+        {"target": "example.test"}, user_id=1, project_id=None, db=None,
+    ))
+
+    assert captured["tool"] == "nuclei_scan"
+    assert captured["params"]["scan_profile"] == "safe"
+    assert captured["params"]["protection_detected"] is True
+    assert captured["params"]["timeout"] == 150
+    assert result["coverage_limited"] is True
+    assert result["scan_completed"] is False
+    assert "不能作为源站无风险结论" in result["tool_error"]
+
+
+def test_vulnerability_scan_without_web_service_still_uses_nuclei_service_preflight(monkeypatch):
+    engine = ExecutionEngine()
+    captured = {}
+
+    async def no_web(_target):
+        return {
+            "host": "example.test",
+            "reachable": False,
+            "effective_url": None,
+            "ports": [{"port": 443, "state": "closed"}, {"port": 80, "state": "closed"}],
+            "protection_detected": False,
+        }
+
+    async def run(_self, tool_name, params, **_kwargs):
+        captured.update({"tool": tool_name, "params": params})
+        return {
+            "status": "warning",
+            "error": "SSH reachable but no matching finding",
+            "data": {"target": params["target"], "reachable": True, "scan_completed": True, "findings": []},
+        }
+
+    monkeypatch.setattr(engine, "_web_preflight", no_web)
+    monkeypatch.setattr(MCPGatewayClient, "call_with_progress", run)
+    result = asyncio.run(engine._scan_vulnerabilities(
+        {"target": "example.test"}, user_id=1, project_id=None, db=None,
+    ))
+
+    assert captured["tool"] == "nuclei_scan"
+    assert captured["params"]["target"] == "example.test"
+    assert result["scan_completed"] is True
+    assert result["preflight"]["reachable"] is False
+
+
+def test_vulnerability_scan_uses_repeatable_acceptance_profile_for_e2e_target(monkeypatch):
+    engine = ExecutionEngine()
+    captured = {}
+    progress_events = []
+
+    async def reachable(_target):
+        return {
+            "host": "e2e-target",
+            "reachable": True,
+            "effective_url": "https://e2e-target/",
+            "protection_detected": False,
+        }
+
+    async def run(_self, tool_name, params, **_kwargs):
+        captured.update({"tool": tool_name, "params": params})
+        _kwargs["on_progress"]({"progress": 42, "elapsed_seconds": 30, "alive": True})
+        return {
+            "status": "success",
+            "data": {"target": params["target"], "reachable": True, "scan_completed": True, "findings": []},
+        }
+
+    monkeypatch.setattr(engine, "_web_preflight", reachable)
+    monkeypatch.setattr(MCPGatewayClient, "call_with_progress", run)
+    result = asyncio.run(engine._scan_vulnerabilities(
+        {"target": "e2e-target"}, user_id=1, project_id=None, db=None,
+        tool_progress_callback=progress_events.append,
+    ))
+
+    assert captured["tool"] == "nuclei_scan"
+    assert captured["params"] == {
+        "target": "http://e2e-target",
+        "scan_profile": "acceptance",
+        "protection_detected": False,
+        "templates": "misconfig,exposure",
+        "severity": "critical,high,medium",
+    }
+    assert progress_events == [{"progress": 42, "elapsed_seconds": 30, "alive": True}]
+    assert result["scan_completed"] is True
 
 
 def test_network_capability_enforces_scan_execute_permission(monkeypatch):
@@ -548,9 +722,38 @@ def test_composite_summary_counts_child_outcomes_not_successful_wrapper():
     scan_results = orchestrator._extract_scan_results_from_execution(execution)
     assert "共 4 个执行项，成功 1，未完成/不可判定 1，失败 1，跳过 1" in description
     assert scan_results["quality"]["verdict"] == "partial"
-    assert scan_results["quality"]["warning"] == 2
+    assert scan_results["quality"]["warning"] == 1
     assert scan_results["quality"]["failed"] == 1
+    assert scan_results["quality"]["skipped"] == 1
     assert "组合检测未完整覆盖" in scan_results["asset_results"]["192.0.2.10"]["error"]
+
+
+def test_not_applicable_result_keeps_reason_without_becoming_incomplete():
+    execution = {
+        "results": [{
+            "capability": "scan_ssl",
+            "target": "example.test",
+            "status": "skipped",
+            "result": {
+                "outcome": "not_applicable",
+                "applicable": False,
+                "scan_completed": False,
+                "tool_error": "目标明确拒绝 443 端口连接，未提供 TLS 服务",
+            },
+        }],
+        "success_count": 0,
+        "warning_count": 0,
+        "failed_count": 0,
+    }
+
+    scan_results = Orchestrator()._extract_scan_results_from_execution(execution)
+    asset = scan_results["asset_results"]["example.test"]
+    assert asset["display_status"] == "not_applicable"
+    assert asset["result"]["outcome"] == "not_applicable"
+    assert "未提供 TLS 服务" in asset["error"]
+    assert scan_results["quality"]["verdict"] == "complete"
+    assert scan_results["quality"]["warning"] == 0
+    assert scan_results["quality"]["skipped"] == 1
 
 
 def test_web_tool_timeout_contract_is_warning():
@@ -602,7 +805,10 @@ def test_nuclei_reachable_target_can_complete_with_no_findings(monkeypatch):
     async def open_port(*_args, **_kwargs):
         return [{"port": 443, "protocol": "tcp", "state": "open"}]
 
-    async def create_process(*_args, **_kwargs):
+    command = []
+
+    async def create_process(*args, **_kwargs):
+        command.extend(args)
         return Process()
 
     monkeypatch.setattr(module, "verify_tcp_open_ports", open_port)
@@ -613,6 +819,43 @@ def test_nuclei_reachable_target_can_complete_with_no_findings(monkeypatch):
     assert result["data"]["reachable"] is True
     assert result["data"]["scan_completed"] is True
     assert result["data"]["findings"] == []
+    assert result["data"]["scan_profile"] == "safe"
+    assert result["data"]["severity_filter"] == "critical,high,medium"
+    assert command[command.index("-rl") + 1] == "25"
+    assert command[command.index("-retries") + 1] == "1"
+
+
+def test_async_nuclei_continues_while_process_is_alive(monkeypatch):
+    path = Path(__file__).resolve().parents[1] / "mcp-servers" / "security-tools" / "server.py"
+    spec = importlib.util.spec_from_file_location("certiproof_security_tools_continuous", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    class Process:
+        returncode = 0
+        pid = 1
+
+        async def communicate(self):
+            return b"", b""
+
+    async def open_port(*_args, **_kwargs):
+        return [{"port": 80, "protocol": "tcp", "state": "open"}]
+
+    async def create_process(*_args, **_kwargs):
+        return Process()
+
+    async def must_not_apply_wall_clock_timeout(*_args, **_kwargs):
+        raise AssertionError("async nuclei must continue while its process is alive")
+
+    monkeypatch.setattr(module, "verify_tcp_open_ports", open_port)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", create_process)
+    monkeypatch.setattr(module.asyncio, "wait_for", must_not_apply_wall_clock_timeout)
+    result = asyncio.run(module.nuclei_scan(
+        {"target": "http://e2e-target"}, continuous=True,
+    ))
+
+    assert result["status"] == "success"
+    assert result["data"]["scan_completed"] is True
 
 
 def test_crypto_transport_unreachable_is_unable_not_clean(monkeypatch):
@@ -653,15 +896,15 @@ def test_crypto_transport_reports_protocol_evidence_and_risk(monkeypatch):
     assert any(item["id"] == "crypto:weak-protocol:TLS1" for item in result["data"]["findings"])
 
 
-def test_crypto_transport_uses_gateway_sync_route(monkeypatch):
+def test_crypto_transport_uses_gateway_async_route(monkeypatch):
     calls = []
 
     async def call(_self, tool_name, params):
+        raise AssertionError("crypto_transport_scan must use the live async route")
+
+    async def call_with_progress(_self, tool_name, params, **_kwargs):
         calls.append((tool_name, params))
         return {"status": "success", "data": {"scan_completed": True, "findings": []}}
-
-    async def call_with_progress(*_args, **_kwargs):
-        raise AssertionError("crypto_transport_scan is not an async gateway tool")
 
     monkeypatch.setattr(MCPGatewayClient, "call", call)
     monkeypatch.setattr(MCPGatewayClient, "call_with_progress", call_with_progress)

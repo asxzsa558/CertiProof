@@ -209,7 +209,7 @@ class TaskExecutor:
                 "risk_key": "execution:unable",
                 "remediation": "确认目标服务是否适用并恢复网络、凭据或工具条件后重新检测；未完成前不得视为通过。",
             })
-        if capability == "scan_ports":
+        if capability in {"scan_ports", "masscan_scan"}:
             risky = {21, 23, 135, 139, 445, 1433, 1521, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017}
             items.extend(
                 {
@@ -270,6 +270,8 @@ class TaskExecutor:
                 },
                 sub.get("target") or target,
             ))
+        for item in items:
+            item.setdefault("capability", capability)
         return items
 
     async def _sync_findings(self, scan_task: ScanTask, results: list[dict], target: str) -> int:
@@ -283,7 +285,6 @@ class TaskExecutor:
         }
         for result in results:
             capability = result["capability"]
-            clause_id = f"TECH-{capability.upper()[:40]}"
             current = self._risk_items(capability, result, target)
             unable_fingerprint = make_finding_fingerprint("technical", target, capability, "execution:unable")
             if not any(item.get("judgment") == "not_tested" for item in current):
@@ -300,7 +301,9 @@ class TaskExecutor:
                     recovered.scan_task_id = scan_task.id
                     await add_finding_event(self.db, recovered, "execution_recovered", data={"scan_task_id": scan_task.id})
             for item in current:
-                fingerprint = make_finding_fingerprint("technical", target, capability, item.get("risk_key") or item["description"])
+                item_capability = item.get("capability") or capability
+                item_clause_id = f"TECH-{item_capability.upper()[:40]}"
+                fingerprint = make_finding_fingerprint("technical", target, item_capability, item.get("risk_key") or item["description"])
                 judgment = Judgment.NOT_TESTED if item.get("judgment") == "not_tested" else Judgment.FAIL
                 if judgment != Judgment.NOT_TESTED:
                     current_risk_count += 1
@@ -312,10 +315,14 @@ class TaskExecutor:
                     )
                 )).scalar_one_or_none()
                 if finding:
+                    finding.asset_id = scan_task.asset_id
                     finding.scan_task_id = scan_task.id
+                    finding.source_channel = "assessment"
                     finding.description = item["description"]
                     finding.severity = severity_map.get(str(item["severity"]).lower(), Severity.MEDIUM)
                     finding.judgment = judgment
+                    finding.last_seen_at = datetime.utcnow()
+                    finding.occurrence_count = (finding.occurrence_count or 0) + 1
                     if finding.status == FindingStatus.FIXED:
                         finding.status = FindingStatus.OPEN
                         finding.resolved_at = None
@@ -324,19 +331,23 @@ class TaskExecutor:
                 finding = Finding(
                     project_id=scan_task.project_id,
                     assessment_id=scan_task.assessment_id,
+                    asset_id=scan_task.asset_id,
                     scan_task_id=scan_task.id,
                     fingerprint=fingerprint,
                     source_type="technical",
-                    source_key=capability,
+                    source_channel="assessment",
+                    source_key=item_capability,
                     scope_key=target,
-                    clause_id=clause_id,
-                    clause_name=CAPABILITY_NAMES.get(capability, capability),
+                    clause_id=item_clause_id,
+                    clause_name=CAPABILITY_NAMES.get(item_capability, item_capability),
                     severity=severity_map.get(str(item["severity"]).lower(), Severity.MEDIUM),
                     judgment=judgment,
                     judgment_engine=JudgmentEngine.RULE,
                     description=item["description"],
                     remediation_suggestion=item.get("remediation") or "确认风险是否为业务必要；按最小暴露原则修复配置后重新检测。",
                     status=FindingStatus.OPEN,
+                    last_seen_at=datetime.utcnow(),
+                    occurrence_count=1,
                 )
                 self.db.add(finding)
                 await self.db.flush()

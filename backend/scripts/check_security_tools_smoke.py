@@ -21,6 +21,7 @@ from app.services.execution_engine import ExecutionEngine
 
 GATEWAY_URL = os.getenv("MCP_GATEWAY_URL", "http://mcp-gateway:9000").rstrip("/")
 CURRENT_STEP = "startup"
+_ASYNC_TOOLS: set[str] | None = None
 
 
 def _request(method: str, path: str, body: dict | None = None, timeout: int = 180) -> dict:
@@ -36,9 +37,32 @@ def _request(method: str, path: str, body: dict | None = None, timeout: int = 18
 
 
 def _call(tool: str, params: dict, timeout: int = 180) -> dict:
-    global CURRENT_STEP
+    global CURRENT_STEP, _ASYNC_TOOLS
     CURRENT_STEP = f"gateway:{tool}"
-    result = _request("POST", "/call", {"tool": tool, "params": params}, timeout)
+    if _ASYNC_TOOLS is None:
+        registry = _request("GET", "/tools")
+        _ASYNC_TOOLS = {
+            item["name"] for item in registry.get("tools", []) if item.get("supports_async")
+        }
+
+    if tool in _ASYNC_TOOLS:
+        started = _request("POST", "/call/async", {"tool": tool, "params": params}, 30)
+        task_id = started.get("task_id")
+        assert task_id, started
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            progress = _request("GET", f"/progress/{tool}/{task_id}", timeout=15)
+            assert "heartbeat_at" in progress and "alive" in progress, progress
+            if progress.get("status") == "completed":
+                result = _request("GET", f"/result/{tool}/{task_id}", timeout=30)
+                break
+            assert progress.get("status") == "running", progress
+            time.sleep(1)
+        else:
+            _request("POST", f"/cancel/{tool}/{task_id}", {}, 15)
+            raise AssertionError(f"async tool did not finish within smoke-test deadline: {tool}")
+    else:
+        result = _request("POST", "/call", {"tool": tool, "params": params}, timeout)
     assert result.get("tool"), result
     assert result.get("status") in {"success", "failed"}, result
     assert isinstance(result.get("data"), dict), result

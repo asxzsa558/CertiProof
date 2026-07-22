@@ -23,6 +23,7 @@ from app.models.context import (
     ConversationSummary,
 )
 from app.core.redaction import redact_sensitive
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class ContextManager:
     SUMMARY_SEGMENT_TOKENS = 20000
     AUTO_ROLLOVER_MESSAGES = 160
     AUTO_ROLLOVER_TOKENS = 120000
-    ACTIVE_HISTORY_RETENTION_DAYS = 90
+    ACTIVE_HISTORY_RETENTION_DAYS = settings.ACTIVE_HISTORY_RETENTION_DAYS
     MAX_ACTION_HISTORY = 200  # 最大操作历史记录数（增加到 200）
     MAX_CACHE_ENTRIES = 100  # 最大缓存条目数
     

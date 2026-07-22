@@ -8,6 +8,7 @@ const Login = lazy(() => import('./pages/Login'))
 const Register = lazy(() => import('./pages/Register'))
 const ChatPage = lazy(() => import('./pages/ChatPage'))
 const ModelSettings = lazy(() => import('./pages/ModelSettings'))
+const SystemSettings = lazy(() => import('./pages/SystemSettings'))
 const ResultsPage = lazy(() => import('./pages/ResultsPage'))
 const ResultDetailPage = lazy(() => import('./pages/ResultDetailPage'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -172,6 +173,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ScanNodes />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings/system"
+              element={
+                <ProtectedRoute>
+                  <SystemSettings />
                 </ProtectedRoute>
               }
             />

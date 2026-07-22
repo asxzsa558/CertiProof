@@ -273,6 +273,7 @@ async def get_task_result(
                 "step_index": progress.get("step_index", 0),
                 "total_steps": progress.get("total_steps", 0),
                 "steps": progress.get("steps", []),
+                "tool_progress": progress.get("tool_progress"),
             },
         )
 
@@ -300,6 +301,7 @@ async def get_task_result(
                 "step_index": (scan_task.progress or {}).get("step_index", 0),
                 "total_steps": (scan_task.progress or {}).get("total_steps", 0),
                 "steps": (scan_task.progress or {}).get("steps", []),
+                "tool_progress": (scan_task.progress or {}).get("tool_progress"),
             },
         )
     

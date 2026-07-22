@@ -31,7 +31,7 @@ from app.services.verification_service import (
 
 
 router = APIRouter(prefix="/projects/{project_id}/verification", tags=["Verification"])
-MAX_VERIFICATION_UPLOAD_SIZE = 100 * 1024 * 1024
+MAX_VERIFICATION_UPLOAD_SIZE = settings.UPLOAD_MAX_FILE_MB * 1024 * 1024
 
 
 class TechnicalVerificationRequest(BaseModel):

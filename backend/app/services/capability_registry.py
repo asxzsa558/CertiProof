@@ -165,6 +165,7 @@ class CapabilityRegistry:
                     "target": {"type": "string", "description": "目标主机（IP 或域名）"},
                     "port": {"type": "integer", "description": "端口，默认 80"},
                     "ssl": {"type": "boolean", "description": "是否使用 HTTPS，默认 false"},
+                    "timeout": {"type": "integer", "description": "超时秒数，默认 120"},
                 },
                 "required": ["target"]
             },
@@ -502,6 +503,8 @@ class CapabilityRegistry:
                     "target": {"type": "string", "description": "目标地址（URL或IP）"},
                     "templates": {"type": "string", "description": "模板标签，如 'cve'、'misconfig'、'exposure'"},
                     "severity": {"type": "string", "description": "严重级别过滤，如 'critical,high'"},
+                    "scan_profile": {"type": "string", "enum": ["safe", "full"], "description": "safe 为受控默认范围，full 为手动深度扫描"},
+                    "timeout": {"type": "integer", "description": "超时秒数"},
                 },
                 "required": ["target"]
             },

@@ -30,14 +30,23 @@ class FindingUpdate(BaseModel):
 class FindingResponse(FindingBase):
     id: int
     project_id: int
+    assessment_id: Optional[int] = None
+    asset_id: Optional[int] = None
     scan_task_id: Optional[int] = None
     document_run_id: Optional[int] = None
+    source_type: str = "manual"
+    source_channel: str = "assessment"
+    source_key: Optional[str] = None
+    scope_key: Optional[str] = None
+    origin_finding_id: Optional[int] = None
     status: FindingStatus
     assigned_to: Optional[int] = None
     evidence_ids: Optional[List[int]] = None
     created_at: datetime
     updated_at: datetime
     resolved_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
+    occurrence_count: int = 1
     
     model_config = ConfigDict(from_attributes=True)
 

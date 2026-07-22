@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Layout, Card, Button, Table, Space, Tag, Modal, Form, Input, Select, Switch, message, Popconfirm, Tabs, Statistic, Row, Col } from 'antd'
+import { Card, Button, Table, Space, Tag, Modal, Form, Input, Select, Switch, message, Popconfirm, Tabs, Statistic, Row, Col } from 'antd'
 import {
-  ArrowLeftOutlined,
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
@@ -12,17 +10,20 @@ import {
   DollarOutlined,
 } from '@ant-design/icons'
 import api from '../services/api'
+import { useAuthStore } from '../store/authStore'
+import OrganizationSettingsLayout from '../components/OrganizationSettingsLayout'
 import './ModelSettings.css'
 
-const { Header, Content } = Layout
 const { TabPane } = Tabs
 
 function ModelSettings() {
-  const navigate = useNavigate()
+  const currentOrgId = useAuthStore((state) => state.currentOrgId)
   const [providers, setProviders] = useState([])
   const [models, setModels] = useState([])
   const [usage, setUsage] = useState([])
   const [runtimeStatus, setRuntimeStatus] = useState(null)
+  const [permissions, setPermissions] = useState([])
+  const [permissionScope, setPermissionScope] = useState('受限权限')
   const [loading, setLoading] = useState(false)
   const [providerModalVisible, setProviderModalVisible] = useState(false)
   const [modelModalVisible, setModelModalVisible] = useState(false)
@@ -30,26 +31,26 @@ function ModelSettings() {
   const [editingModel, setEditingModel] = useState(null)
   const [providerForm] = Form.useForm()
   const [modelForm] = Form.useForm()
-  const lastProjectId = localStorage.getItem('lastProjectId')
-  const returnToWorkspace = () => navigate(lastProjectId ? `/projects/${lastProjectId}` : '/projects')
-
   useEffect(() => {
     fetchData()
-  }, [])
+  }, [currentOrgId])
 
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [providersRes, modelsRes, usageRes, runtimeRes] = await Promise.all([
+      const [providersRes, modelsRes, usageRes, runtimeRes, accessRes] = await Promise.all([
         api.get('/models/providers'),
         api.get('/models/configs'),
         api.get('/models/usage'),
         api.get('/models/runtime'),
+        api.get('/dashboard/organization-command', { params: { organization_id: currentOrgId } }),
       ])
       setProviders(providersRes.data)
       setModels(modelsRes.data)
       setUsage(usageRes.data)
       setRuntimeStatus(runtimeRes.data)
+      setPermissions(accessRes.data?.current_role?.permissions || [])
+      setPermissionScope(accessRes.data?.current_role?.permission_scope || '受限权限')
     } catch (error) {
       message.error('加载数据失败')
     } finally {
@@ -301,22 +302,17 @@ function ModelSettings() {
   ]
 
   return (
-    <Layout className="model-settings-layout">
-      <Header className="model-settings-header">
-        <div className="header-left">
-          <Button
-            type="text"
-            icon={<ArrowLeftOutlined />}
-            onClick={returnToWorkspace}
-            className="back-btn"
-          >
-            返回项目对话
-          </Button>
-          <h1>模型配置</h1>
-        </div>
-      </Header>
-
-      <Content className="model-settings-content">
+    <OrganizationSettingsLayout
+      activeKey="system"
+      eyebrow="系统设置 / 模型运行时"
+      title="模型与推理端点"
+      description="维护云端与本地模型提供商、用途配置、连接状态和调用统计。"
+      permissions={permissions}
+      permissionScope={permissionScope}
+      loading={loading}
+      onRefresh={fetchData}
+    >
+      <div className="model-settings-content">
         <Card className="runtime-status-card" style={{ marginBottom: 16 }}>
           <Row gutter={[16, 12]}>
             <Col xs={24} md={6}><Statistic title="当前策略" value={runtimeStatus?.model_policy || '-'} /></Col>
@@ -405,7 +401,7 @@ function ModelSettings() {
             </Card>
           </TabPane>
         </Tabs>
-      </Content>
+      </div>
 
       {/* Provider Modal */}
       <Modal
@@ -488,7 +484,7 @@ function ModelSettings() {
           </Form.Item>
         </Form>
       </Modal>
-    </Layout>
+    </OrganizationSettingsLayout>
   )
 }
 

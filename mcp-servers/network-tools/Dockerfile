@@ -15,7 +15,7 @@ RUN apt-get update && \
 
 # 创建 SNMP 字典文件
 RUN mkdir -p /usr/share/wordlists && \
-    echo -e "public\nprivate\ncommunity\nsnmp\nmonitor\nadmin\nmanager\ndefault\nread\nwrite" > /usr/share/wordlists/snmp-common.txt
+    printf '%s\n' public private community snmp monitor admin manager default read write > /usr/share/wordlists/snmp-common.txt
 
 # 安装 Python 依赖
 WORKDIR /app

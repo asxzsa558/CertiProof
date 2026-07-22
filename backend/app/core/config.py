@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     TASK_LEASE_MINUTES: int = 2
     TASK_HEARTBEAT_SECONDS: int = 10
     TASK_MAX_RECOVERY_ATTEMPTS: int = 3
+    MCP_PROGRESS_STALE_SECONDS: int = 90
     MONITORING_WORKER_BATCH_SIZE: int = 5
     REMOTE_NODE_HEARTBEAT_SECONDS: int = 10
     REMOTE_NODE_OFFLINE_SECONDS: int = 45
@@ -85,6 +86,9 @@ class Settings(BaseSettings):
     DOCUMENT_ANALYSIS_MODE: str = "standard"  # standard/deep
     DOCUMENT_EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large"
     DOCUMENT_EMBEDDING_DIMENSION: int = 1024
+    UPLOAD_MAX_FILE_MB: int = 100
+    UPLOAD_MAX_BATCH_MB: int = 300
+    ACTIVE_HISTORY_RETENTION_DAYS: int = 90
 
     # 报告配置
     REPORT_DEFAULT_FORMAT: str = "html"  # 默认报告格式
@@ -99,6 +103,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Invalid configuration: unsupported WORKER_ROLE")
         if self.INTERACTIVE_SCAN_MAX_CONCURRENT < 1:
             raise RuntimeError("Invalid configuration: INTERACTIVE_SCAN_MAX_CONCURRENT must be positive")
+        if self.MCP_PROGRESS_STALE_SECONDS < 10:
+            raise RuntimeError("Invalid configuration: MCP_PROGRESS_STALE_SECONDS must be at least 10")
         if min(self.REMOTE_NODE_HEARTBEAT_SECONDS, self.REMOTE_NODE_OFFLINE_SECONDS, self.REMOTE_JOB_LEASE_SECONDS, self.REMOTE_JOB_TIMEOUT_SECONDS) < 1:
             raise RuntimeError("Invalid configuration: remote node timing values must be positive")
         if self.LOGIN_RATE_LIMIT_ATTEMPTS < 1 or self.LOGIN_RATE_LIMIT_WINDOW_SECONDS < 1:

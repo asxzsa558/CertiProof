@@ -20,6 +20,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   LockOutlined,
+  RadarChartOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../store/authStore'
 import SystemConfig from '../components/SystemConfig'
@@ -83,6 +84,7 @@ function ChatPage() {
   const [profileVisible, setProfileVisible] = useState(false)
   const [currentPermissions, setCurrentPermissions] = useState([])
   const [assessmentCode, setAssessmentCode] = useState(searchParams.get('assessment') || 'dengbao')
+  const [workspaceMode, setWorkspaceMode] = useState(searchParams.get('workspace') === 'independent' ? 'independent' : 'assessment')
   const [assessmentDraft, setAssessmentDraft] = useState({})
 
   const assessmentTypes = (selectedProject?.assessment_types || [])
@@ -90,12 +92,17 @@ function ChatPage() {
     .filter(item => ['dengbao', 'miping'].includes(item?.code))
   const assessmentTypeCodes = assessmentTypes.map(item => item.code)
   const assessmentLabel = assessmentCode === 'miping' ? '密评自查' : '等保自查'
+  const workspaceLabel = workspaceMode === 'independent' ? '独立检测' : assessmentLabel
   const currentProjectAssessment = (managerProject?.assessment_types || []).find(
     item => item.assessment_type?.code === assessmentCode
   )
   const selectedProjectAssessment = (selectedProject?.assessment_types || []).find(
     item => item.assessment_type?.code === assessmentCode
   )
+
+  useEffect(() => {
+    setWorkspaceMode(searchParams.get('workspace') === 'independent' ? 'independent' : 'assessment')
+  }, [searchParams.get('workspace')])
 
   useEffect(() => {
     if (!selectedProject) return
@@ -114,10 +121,19 @@ function ChatPage() {
     }
   }, [selectedProject?.id, assessmentTypeCodes.join(','), searchParams.get('assessment')])
 
-  const switchAssessment = (code) => {
+  const switchWorkspace = (code) => {
     setWorkspaceSummary({})
-    setAssessmentCode(code)
     const params = new URLSearchParams(searchParams)
+    if (code === 'independent') {
+      setWorkspaceMode('independent')
+      params.set('workspace', 'independent')
+      setSearchParams(params, { replace: true })
+      return
+    }
+    setWorkspaceMode('assessment')
+    setAssessmentCode(code)
+    params.delete('workspace')
+    params.delete('finding')
     params.set('assessment', code)
     setSearchParams(params, { replace: true })
   }
@@ -321,7 +337,7 @@ function ChatPage() {
 
   const handleUserMenu = ({ key }) => {
     if (key === 'profile') setProfileVisible(true)
-    if (key === 'settings') navigate('/settings/models')
+    if (key === 'settings') navigate('/settings/system')
     if (key === 'logout') handleLogout()
   }
 
@@ -466,7 +482,7 @@ function ChatPage() {
     { key: 'dashboard', title: '态势总览', label: '总览', icon: <DashboardOutlined />, action: () => navigate('/dashboard') },
     { key: 'projects', title: '项目与资产', label: '项目', icon: <ProjectOutlined />, action: () => navigate('/projects') },
     { key: 'assets', title: '资产清单', label: '资产', icon: <CloudServerOutlined />, action: () => navigate('/projects?view=assets') },
-    { key: 'assessment', title: `${assessmentLabel}流程`, label: '测评', icon: assessmentCode === 'miping' ? <LockOutlined /> : <SafetyCertificateOutlined />, active: true, action: () => setSiderCollapsed(false) },
+    { key: 'assessment', title: workspaceMode === 'independent' ? '独立检测追踪' : `${assessmentLabel}流程`, label: workspaceMode === 'independent' ? '检测' : '测评', icon: workspaceMode === 'independent' ? <RadarChartOutlined /> : assessmentCode === 'miping' ? <LockOutlined /> : <SafetyCertificateOutlined />, active: true, action: () => setSiderCollapsed(false) },
     { key: 'results', title: '检测结果', label: '结果', icon: <FileSearchOutlined />, action: () => selectedProject && navigate(`/projects/${selectedProject.id}/results`) },
     { key: 'reports', title: '报告中心', label: '报告', icon: <FileTextOutlined />, action: () => navigate('/reports') },
   ]
@@ -496,9 +512,15 @@ function ChatPage() {
           <>
             <div className="workspace-header-metrics">
               <div className="workspace-online"><i />在线</div>
-              <div><span>合规分</span><strong style={{ color: getScoreColor(workspaceSummary.score ?? selectedProjectAssessment?.score ?? 0) }}>{workspaceSummary.score ?? selectedProjectAssessment?.score ?? '—'}</strong></div>
-              <div><span>可靠覆盖率</span><strong className="good">{Number.isFinite(workspaceSummary.coverage) ? `${workspaceSummary.coverage}%` : '—'}</strong></div>
-              <div><span>待处理</span><strong className="danger">{workspaceSummary.open ?? '—'}</strong></div>
+              {workspaceMode === 'independent' ? <>
+                <div><span>全部问题</span><strong>{workspaceSummary.total ?? '—'}</strong></div>
+                <div><span>严重 / 高危</span><strong className="danger">{workspaceSummary.criticalHigh ?? '—'}</strong></div>
+                <div><span>待处理</span><strong className="danger">{workspaceSummary.open ?? '—'}</strong></div>
+              </> : <>
+                <div><span>合规分</span><strong style={{ color: getScoreColor(workspaceSummary.score ?? selectedProjectAssessment?.score ?? 0) }}>{workspaceSummary.score ?? selectedProjectAssessment?.score ?? '—'}</strong></div>
+                <div><span>可靠覆盖率</span><strong className="good">{Number.isFinite(workspaceSummary.coverage) ? `${workspaceSummary.coverage}%` : '—'}</strong></div>
+                <div><span>待处理</span><strong className="danger">{workspaceSummary.open ?? '—'}</strong></div>
+              </>}
             </div>
             <Space size="small" className="workspace-header-actions">
               <Tooltip title="检测记录">
@@ -565,12 +587,12 @@ function ChatPage() {
 
       {siderCollapsed && (
         <div className="assessment-reopen-rail">
-          <Tooltip title={`展开${assessmentLabel}流程`} placement="right">
+          <Tooltip title={`展开${workspaceLabel}${workspaceMode === 'independent' ? '追踪' : '流程'}`} placement="right">
             <Button
               type="text"
               icon={<MenuUnfoldOutlined />}
               onClick={() => setSiderCollapsed(false)}
-              aria-label={`展开${assessmentLabel}流程`}
+              aria-label={`展开${workspaceLabel}${workspaceMode === 'independent' ? '追踪' : '流程'}`}
             />
           </Tooltip>
         </div>
@@ -584,23 +606,24 @@ function ChatPage() {
         >
           <div className="assessment-drawer-header">
             <div>
-              <strong className="assessment-drawer-kicker">{assessmentLabel}流程</strong>
-              {assessmentTypes.length > 1 && (
-                <Segmented
-                  size="small"
-                  value={assessmentCode}
-                  onChange={switchAssessment}
-                  options={assessmentTypes.map(item => ({ label: item.name, value: item.code }))}
-                  className="assessment-type-switch"
-                />
-              )}
+              <strong className="assessment-drawer-kicker">{workspaceMode === 'independent' ? '独立检测追踪' : `${assessmentLabel}流程`}</strong>
+              <Segmented
+                size="small"
+                value={workspaceMode === 'independent' ? 'independent' : assessmentCode}
+                onChange={switchWorkspace}
+                options={[
+                  ...['dengbao', 'miping'].flatMap(code => assessmentTypes.filter(item => item.code === code).map(item => ({ label: code === 'miping' ? '密评' : '等保', value: code }))),
+                  { label: '独立检测', value: 'independent' },
+                ]}
+                className="assessment-type-switch"
+              />
             </div>
             <Tooltip title="收起测评栏">
               <Button type="text" icon={<MenuFoldOutlined />} onClick={() => setSiderCollapsed(true)} aria-label="收起测评栏" />
             </Tooltip>
           </div>
           <div className="assessment-drawer-scroll">
-            {selectedProject && (
+            {selectedProject && workspaceMode === 'assessment' && (
               <div className="assessment-drawer-flow">
                 <AssessmentProgress
                   projectId={selectedProject.id}
@@ -609,6 +632,22 @@ function ChatPage() {
                   openIssues={workspaceSummary.open}
                   assessmentCode={assessmentCode}
                 />
+              </div>
+            )}
+            {selectedProject && workspaceMode === 'independent' && (
+              <div className="independent-workspace-overview">
+                <div className="independent-overview-status"><i /><span>问题台账实时同步</span></div>
+                <div className="independent-overview-metrics">
+                  <div><strong>{workspaceSummary.total ?? 0}</strong><span>全部</span></div>
+                  <div className="danger"><strong>{workspaceSummary.open ?? 0}</strong><span>待处理</span></div>
+                  <div className="danger"><strong>{workspaceSummary.criticalHigh ?? 0}</strong><span>严重 / 高危</span></div>
+                  <div className="fixed"><strong>{workspaceSummary.fixed ?? 0}</strong><span>已修复</span></div>
+                </div>
+                <div className="independent-overview-scope">
+                  <span>记录范围</span>
+                  <strong>对话检测 · 快捷指令 · 定时检测</strong>
+                </div>
+                <div className="independent-overview-note">独立检测问题单独跟踪，不改变本轮测评进度与合规评分。</div>
               </div>
             )}
           </div>
@@ -728,6 +767,8 @@ function ChatPage() {
               onOpenResults={() => selectedProject && navigate(`/projects/${selectedProject.id}/results`)}
               onWorkspaceSummary={setWorkspaceSummary}
               assessmentCode={assessmentCode}
+              workspaceMode={workspaceMode}
+              initialFindingId={searchParams.get('finding')}
             />
           )}
         </Content>

@@ -4,11 +4,14 @@ Web Tools MCP Server - Web 安全检测工具集
 """
 
 import asyncio
+import contextlib
 import json
 import time
 import re
+import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+from urllib.parse import unquote, urlsplit
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -27,6 +30,26 @@ app.add_middleware(
 class ExecuteRequest(BaseModel):
     tool: str
     params: Dict[str, Any]
+
+
+SCAN_TASKS: Dict[str, Dict[str, Any]] = {}
+
+
+async def _communicate(process, timeout: int, continuous: bool):
+    if continuous:
+        return await process.communicate()
+    return await asyncio.wait_for(process.communicate(), timeout=timeout)
+
+
+async def _terminate_process(process) -> None:
+    if not process or process.returncode is not None:
+        return
+    process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=3)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
 
 
 def completed_or_error(returncode: int, stderr: str, discovered_count: int) -> tuple[bool, Optional[str]]:
@@ -86,7 +109,7 @@ def parse_nikto_findings(output: str) -> List[Dict[str, str]]:
             findings.append({"description": value, "severity": "medium"})
     return findings
 
-async def nikto_scan(params: Dict[str, Any]) -> Dict[str, Any]:
+async def nikto_scan(params: Dict[str, Any], process_callback=None, continuous: bool = False) -> Dict[str, Any]:
     """执行 nikto Web 服务器扫描"""
     target = params.get("target")
     if not target:
@@ -113,9 +136,11 @@ async def nikto_scan(params: Dict[str, Any]) -> Dict[str, Any]:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
-        
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        if process_callback:
+            process_callback(process)
+        stdout, stderr = await _communicate(process, timeout, continuous and "timeout" not in params)
         
         output = stdout.decode("utf-8", errors="replace")
         stderr_output = stderr.decode("utf-8", errors="replace")
@@ -163,7 +188,7 @@ async def nikto_scan(params: Dict[str, Any]) -> Dict[str, Any]:
 
 # ============== SQLMap ==============
 
-async def sqlmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
+async def sqlmap_scan(params: Dict[str, Any], process_callback=None, continuous: bool = False) -> Dict[str, Any]:
     """执行 sqlmap SQL 注入检测"""
     url = params.get("url")
     if not url:
@@ -178,13 +203,13 @@ async def sqlmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         "sqlmap",
         "-u", url,
         "--batch",
+        "--flush-session",
         "--level", str(level),
         "--risk", str(risk),
-        "--output-format", "json",
     ]
     
     if data:
-        cmd.extend(["-d", data])
+        cmd.extend(["--data", data])
     
     start_time = time.time()
     
@@ -193,9 +218,11 @@ async def sqlmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
-        
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        if process_callback:
+            process_callback(process)
+        stdout, stderr = await _communicate(process, timeout, continuous and "timeout" not in params)
         
         output = stdout.decode("utf-8", errors="replace")
         stderr_output = stderr.decode("utf-8", errors="replace")
@@ -205,13 +232,21 @@ async def sqlmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         vulnerable = False
         injection_points = []
         
-        # 检查是否发现注入点
-        if "is vulnerable" in output.lower() or "parameter" in output.lower():
+        lowered_output = output.lower()
+        # SQLMap CLI has no stable JSON output; only its explicit finding markers count.
+        if any(marker in lowered_output for marker in (
+            "is vulnerable",
+            "appears to be injectable",
+            "sqlmap identified the following injection point",
+        )):
             vulnerable = True
             
             # 提取注入点信息
             for line in output.split('\n'):
-                if 'parameter' in line.lower() and ('GET' in line or 'POST' in line):
+                lowered_line = line.lower()
+                if ('parameter' in lowered_line or 'payload:' in lowered_line) and (
+                    'get' in lowered_line or 'post' in lowered_line or 'payload:' in lowered_line
+                ):
                     injection_points.append({
                         "description": line.strip(),
                         "type": "sql_injection",
@@ -259,7 +294,7 @@ async def sqlmap_scan(params: Dict[str, Any]) -> Dict[str, Any]:
 
 # ============== Gobuster ==============
 
-async def gobuster_scan(params: Dict[str, Any]) -> Dict[str, Any]:
+async def gobuster_scan(params: Dict[str, Any], process_callback=None, continuous: bool = False) -> Dict[str, Any]:
     """执行 gobuster 目录/文件爆破"""
     url = params.get("url") or params.get("target")
     if not url:
@@ -295,8 +330,11 @@ async def gobuster_scan(params: Dict[str, Any]) -> Dict[str, Any]:
             *current_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
-        return process, await asyncio.wait_for(process.communicate(), timeout=timeout)
+        if process_callback:
+            process_callback(process)
+        return process, await _communicate(process, timeout, continuous and "timeout" not in params)
 
     start_time = time.time()
     retried_with = None
@@ -321,8 +359,9 @@ async def gobuster_scan(params: Dict[str, Any]) -> Dict[str, Any]:
         # 解析 gobuster 输出
         discovered = []
         for line in output.split('\n'):
-            if line.startswith('/') or line.startswith('http'):
-                parts = line.split()
+            clean_line = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", line).strip()
+            if clean_line.startswith('/') or clean_line.startswith('http'):
+                parts = clean_line.split()
                 if len(parts) >= 2:
                     path = parts[0]
                     status = parts[1] if len(parts) > 1 else ""
@@ -373,7 +412,7 @@ async def gobuster_scan(params: Dict[str, Any]) -> Dict[str, Any]:
 
 # ============== FFuf ==============
 
-async def ffuf_scan(params: Dict[str, Any]) -> Dict[str, Any]:
+async def ffuf_scan(params: Dict[str, Any], process_callback=None, continuous: bool = False) -> Dict[str, Any]:
     """执行 ffuf Web 模糊测试"""
     url = params.get("url")
     if not url:
@@ -405,9 +444,11 @@ async def ffuf_scan(params: Dict[str, Any]) -> Dict[str, Any]:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
-        
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        if process_callback:
+            process_callback(process)
+        stdout, stderr = await _communicate(process, timeout, continuous and "timeout" not in params)
         
         output = stdout.decode("utf-8", errors="replace")
         stderr_output = stderr.decode("utf-8", errors="replace")
@@ -420,13 +461,17 @@ async def ffuf_scan(params: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             try:
                 result = json.loads(line)
+                result_url = result.get("url", "")
+                input_value = result.get("input", {}).get("FUZZ", "")
+                if result_url:
+                    input_value = unquote(urlsplit(result_url).path.rstrip('/').rsplit('/', 1)[-1])
                 discovered.append({
-                    "input": result.get("input", {}).get("FUZZ", ""),
+                    "input": input_value,
                     "status": result.get("status", 0),
                     "length": result.get("length", 0),
                     "words": result.get("words", 0),
                     "lines": result.get("lines", 0),
-                    "url": result.get("url", ""),
+                    "url": result_url,
                 })
             except json.JSONDecodeError:
                 continue
@@ -523,6 +568,127 @@ async def execute(request: ExecuteRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _run_async_web_tool(task_id: str, tool_name: str, params: Dict[str, Any]) -> None:
+    labels = {
+        "nikto_scan": "Nikto Web 漏洞扫描",
+        "sqlmap_scan": "SQLMap 注入检测",
+        "gobuster_scan": "Gobuster 目录扫描",
+        "ffuf_scan": "FFUF 模糊测试",
+    }
+    runners = {
+        "nikto_scan": nikto_scan,
+        "sqlmap_scan": sqlmap_scan,
+        "gobuster_scan": gobuster_scan,
+        "ffuf_scan": ffuf_scan,
+    }
+    task = SCAN_TASKS[task_id]
+    label = labels[tool_name]
+    task.update(
+        status="running",
+        progress=0,
+        started_at=datetime.utcnow().isoformat(),
+        heartbeat_at=datetime.utcnow().isoformat(),
+        elapsed_seconds=0,
+        message=f"{label}已启动",
+    )
+
+    async def heartbeat():
+        started = time.time()
+        while task["status"] == "running":
+            elapsed = int(time.time() - started)
+            task.update(
+                progress=min(95, 5 + elapsed // 3),
+                elapsed_seconds=elapsed,
+                heartbeat_at=datetime.utcnow().isoformat(),
+                message=f"{label}正在执行，已运行 {elapsed} 秒",
+            )
+            await asyncio.sleep(2)
+
+    heartbeat_task = asyncio.create_task(heartbeat())
+    try:
+        task["result"] = await runners[tool_name](
+            params,
+            process_callback=lambda process: task.update(process=process),
+            continuous=True,
+        )
+        task.update(status="completed", progress=100, message=f"{label}执行完成")
+    except asyncio.CancelledError:
+        task.update(status="cancelled", error="用户已停止扫描", message=f"{label}已停止")
+        raise
+    except Exception as exc:
+        task.update(status="failed", error=str(exc), message=f"{label}执行失败")
+    finally:
+        heartbeat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat_task
+
+
+@app.post("/scan/start")
+async def start_scan(request: ExecuteRequest):
+    if request.tool not in {"nikto_scan", "sqlmap_scan", "gobuster_scan", "ffuf_scan"}:
+        raise HTTPException(status_code=400, detail=f"Tool {request.tool} does not support async mode")
+    task_id = str(uuid.uuid4())
+    SCAN_TASKS[task_id] = {
+        "task_id": task_id,
+        "tool": request.tool,
+        "status": "pending",
+        "progress": 0,
+        "result": None,
+        "error": None,
+    }
+    SCAN_TASKS[task_id]["handle"] = asyncio.create_task(
+        _run_async_web_tool(task_id, request.tool, request.params)
+    )
+    return {"task_id": task_id, "status": "running", "message": "Scan started"}
+
+
+@app.get("/scan/{task_id}/progress")
+async def get_scan_progress(task_id: str):
+    task = SCAN_TASKS.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+    return {
+        "task_id": task_id,
+        "status": task["status"],
+        "progress": task.get("progress", 0),
+        "message": task.get("message"),
+        "elapsed_seconds": task.get("elapsed_seconds", 0),
+        "heartbeat_at": task.get("heartbeat_at"),
+        "alive": task["status"] == "running" and (
+            task.get("process") is None or task["process"].returncode is None
+        ),
+        "error": task.get("error"),
+    }
+
+
+@app.get("/scan/{task_id}/result")
+async def get_scan_result(task_id: str):
+    task = SCAN_TASKS.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+    if task["status"] != "completed":
+        raise HTTPException(status_code=400, detail=f"Task not completed. Status: {task['status']}")
+    return task["result"]
+
+
+@app.post("/scan/{task_id}/cancel")
+async def cancel_scan(task_id: str):
+    task = SCAN_TASKS.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+    if task["status"] in {"completed", "failed", "cancelled"}:
+        return {"task_id": task_id, "status": task["status"]}
+    task.update(status="cancelled", error="用户已停止扫描")
+    handle = task.get("handle")
+    if handle:
+        handle.cancel()
+    await _terminate_process(task.get("process"))
+    if handle:
+        with contextlib.suppress(asyncio.CancelledError):
+            await handle
+    return {"task_id": task_id, "status": "cancelled"}
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ Fast Scanner MCP Server - 快速端口扫描工具
 """
 
 import asyncio
+import contextlib
 import json
 import time
 from datetime import datetime
@@ -152,7 +153,11 @@ def parse_masscan_output(output: str, target: str) -> List[Dict]:
     return open_ports
 
 
-async def masscan_scan(params: Dict[str, Any]) -> Dict[str, Any]:
+async def masscan_scan(
+    params: Dict[str, Any],
+    process_callback=None,
+    continuous: bool = False,
+) -> Dict[str, Any]:
     """执行 masscan 全端口扫描"""
     target = params.get("target")
     if not target:
@@ -180,9 +185,14 @@ async def masscan_scan(params: Dict[str, Any]) -> Dict[str, Any]:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
-        
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        if process_callback:
+            process_callback(process)
+        if continuous and "timeout" not in params:
+            stdout, stderr = await process.communicate()
+        else:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         
         output = stdout.decode("utf-8", errors="replace")
         stderr_output = stderr.decode("utf-8", errors="replace")
@@ -401,110 +411,46 @@ async def execute(request: ExecuteRequest):
 
 
 async def run_async_masscan(task_id: str, params: Dict[str, Any]):
-    """异步执行 masscan 扫描 - 带真实进度更新"""
-    target = params.get("target")
-    port_range, rate, timeout = _validate_masscan_params(params)
-    banner_grab = params.get("banner_grab", False)
-    
-    # 解析端口范围估算时长
-    def parse_port_count(port_range: str) -> int:
-        try:
-            if '-' in port_range:
-                start, end = map(int, port_range.split('-'))
-                return end - start + 1
-            return 1
-        except:
-            return 1000
-    
-    estimated_ports = parse_port_count(port_range)
-    # masscan 在 rate=10000 时约 0.0001 秒/端口，给 3 倍余量
-    estimated_duration = max(estimated_ports * 0.0003, 5)
-    
-    cmd = [
-        "masscan",
-        target,
-        "-p", port_range,
-        "--rate", str(rate),
-        "-oJ", "-",  # JSON 输出到 stdout
-    ]
-    
-    if banner_grab:
-        cmd.append("--banners")
-    
-    start_time = time.time()
-    
+    """异步执行 masscan；默认由进程生命期决定结束。"""
+    task = SCAN_TASKS[task_id]
+    task.update(
+        status="running",
+        progress=0,
+        started_at=datetime.utcnow().isoformat(),
+        heartbeat_at=datetime.utcnow().isoformat(),
+        elapsed_seconds=0,
+        message="Masscan 已启动",
+    )
+
+    async def heartbeat():
+        started = time.time()
+        while task["status"] == "running":
+            elapsed = int(time.time() - started)
+            task.update(
+                progress=min(95, 5 + elapsed // 2),
+                elapsed_seconds=elapsed,
+                heartbeat_at=datetime.utcnow().isoformat(),
+                message=f"Masscan 正在扫描，已运行 {elapsed} 秒",
+            )
+            await asyncio.sleep(2)
+
+    heartbeat_task = asyncio.create_task(heartbeat())
     try:
-        SCAN_TASKS[task_id]["status"] = "running"
-        SCAN_TASKS[task_id]["progress"] = 0
-        
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        task["result"] = await masscan_scan(
+            params,
+            process_callback=lambda process: task.update(process=process),
+            continuous=True,
         )
-        
-        # 基于时间的进度估算
-        async def estimate_progress():
-            while SCAN_TASKS[task_id]["status"] == "running":
-                elapsed = time.time() - start_time
-                progress = min(int((elapsed / estimated_duration) * 90), 89)
-                SCAN_TASKS[task_id]["progress"] = progress
-                await asyncio.sleep(1)
-        
-        progress_task = asyncio.create_task(estimate_progress())
-        
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-        
-        progress_task.cancel()
-        
-        output = stdout.decode("utf-8", errors="replace")
-        stderr_output = stderr.decode("utf-8", errors="replace").strip()
-        duration_ms = int((time.time() - start_time) * 1000)
-        
-        # 解析结果
-        open_ports = parse_masscan_output(output, target)
-        
-        critical_count = sum(1 for p in open_ports if p["risk_level"] == "critical")
-        high_count = sum(1 for p in open_ports if p["risk_level"] == "high")
-        scan_completed = process.returncode == 0
-        tool_error = None if scan_completed else (
-            stderr_output or output.strip() or "masscan execution failed"
-        )
-        
-        result = {
-            "tool": "masscan_scan",
-            "version": "1.0",
-            "status": "success",
-            "data": {
-                "target": target,
-                "host_status": "up" if open_ports else "unknown",
-                "open_ports": open_ports,
-                "total_open": len(open_ports),
-                "critical_ports": critical_count,
-                "high_risk_ports": high_count,
-                "scan_completed": scan_completed,
-                "tool_error": tool_error,
-            },
-            "metadata": {
-                "duration_ms": duration_ms,
-                "scan_time": datetime.utcnow().isoformat(),
-                "port_range": port_range,
-                "rate": rate,
-                "banner_grab": banner_grab,
-                "returncode": process.returncode,
-            },
-        }
-        
-        SCAN_TASKS[task_id]["status"] = "completed"
-        SCAN_TASKS[task_id]["progress"] = 100
-        SCAN_TASKS[task_id]["result"] = result
-        
-    except asyncio.TimeoutError:
-        SCAN_TASKS[task_id]["status"] = "failed"
-        SCAN_TASKS[task_id]["error"] = "masscan scan timeout"
-    except Exception as e:
-        SCAN_TASKS[task_id]["status"] = "failed"
-        SCAN_TASKS[task_id]["error"] = str(e)
+        task.update(status="completed", progress=100, message="Masscan 扫描完成")
+    except asyncio.CancelledError:
+        task.update(status="cancelled", error="用户已停止扫描", message="Masscan 已停止")
+        raise
+    except Exception as exc:
+        task.update(status="failed", error=str(exc), message="Masscan 执行失败")
+    finally:
+        heartbeat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat_task
 
 
 @app.post("/scan/start")
@@ -531,7 +477,7 @@ async def start_scan(request: ExecuteRequest):
         "error": None,
     }
     
-    asyncio.create_task(run_async_masscan(task_id, params))
+    SCAN_TASKS[task_id]["handle"] = asyncio.create_task(run_async_masscan(task_id, params))
     
     return {
         "task_id": task_id,
@@ -552,9 +498,39 @@ async def get_scan_progress(task_id: str):
         "task_id": task_id,
         "status": task["status"],
         "progress": task["progress"],
-        "elapsed_ms": int((time.time() - task["start_time"]) * 1000) if task["start_time"] else 0,
+        "message": task.get("message"),
+        "elapsed_seconds": task.get("elapsed_seconds", 0),
+        "heartbeat_at": task.get("heartbeat_at"),
+        "alive": task["status"] == "running" and (
+            task.get("process") is None or task["process"].returncode is None
+        ),
         "error": task["error"],
     }
+
+
+@app.post("/scan/{task_id}/cancel")
+async def cancel_scan(task_id: str):
+    task = SCAN_TASKS.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+    if task["status"] in {"completed", "failed", "cancelled"}:
+        return {"task_id": task_id, "status": task["status"]}
+    task.update(status="cancelled", error="用户已停止扫描")
+    handle = task.get("handle")
+    if handle:
+        handle.cancel()
+    process = task.get("process")
+    if process and process.returncode is None:
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=3)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+    if handle:
+        with contextlib.suppress(asyncio.CancelledError):
+            await handle
+    return {"task_id": task_id, "status": "cancelled"}
 
 
 @app.get("/scan/{task_id}/result")

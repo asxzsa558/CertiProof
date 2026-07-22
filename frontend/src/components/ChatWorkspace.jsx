@@ -822,6 +822,7 @@ function ChatWorkspace({ projectId, projectName, assessmentCode = 'dengbao', mod
                         name: data.asset_name,
                         status: data.status,
                         capability: data.capability,
+                        tool_progress: data.tool_progress,
                       }
                     }
                   }
@@ -833,11 +834,12 @@ function ChatWorkspace({ projectId, projectName, assessmentCode = 'dengbao', mod
               setMessages(prev => prev.map(m =>
                 m.taskId === taskId ? {
                   ...m,
-                  currentStep: data.display_name ? `正在执行: ${data.display_name}...` : data.current_step,
+                  currentStep: data.current_step || (data.display_name ? `正在执行: ${data.display_name}...` : m.currentStep),
                   stepProgress: data.total_steps ? {
                     step_index: data.step_index || 0,
                     total_steps: data.total_steps,
                     steps: data.steps || [],
+                    tool_progress: data.tool_progress,
                   } : m.stepProgress,
                 } : m
               ))

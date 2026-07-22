@@ -174,6 +174,46 @@ def test_gateway_cancels_remote_task_when_caller_is_cancelled(monkeypatch):
     asyncio.run(run())
 
 
+def test_gateway_keeps_running_after_transient_progress_disconnect(monkeypatch):
+    async def run():
+        client = MCPGatewayClient("http://gateway.invalid")
+        attempts = 0
+        progress_events = []
+
+        async def call_async(_tool, _params):
+            return "remote-task"
+
+        async def get_progress(_tool, _task_id):
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise Exception("temporary gateway disconnect")
+            return {"status": "completed", "progress": 100, "alive": False}
+
+        async def get_result(_tool, _task_id):
+            return {"status": "success", "data": {"findings": []}}
+
+        monkeypatch.setattr(client, "call_async", call_async)
+        monkeypatch.setattr(client, "get_progress", get_progress)
+        monkeypatch.setattr(client, "get_result", get_result)
+        result = await client.call_with_progress(
+            "nuclei_scan",
+            {"target": "example.test"},
+            on_progress=progress_events.append,
+            poll_interval=0,
+        )
+
+        assert attempts == 3
+        assert result["status"] == "success"
+        assert [event.get("connection_state") for event in progress_events[:2]] == [
+            "reconnecting",
+            "reconnecting",
+        ]
+        assert progress_events[-1]["status"] == "completed"
+
+    asyncio.run(run())
+
+
 def test_partial_technical_results_are_not_reported_as_complete():
     result = _aggregate(
         "basic_baseline_check",

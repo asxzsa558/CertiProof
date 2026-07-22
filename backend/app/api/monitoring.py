@@ -351,7 +351,7 @@ async def execute_scheduled_scan(db: AsyncSession, scheduled_scan: ScheduledScan
         port_range = scan_parameters.get("port_range", "high-risk")
 
         # Execute scan via MCP Gateway
-        scan_result = await mcp_gateway_client.call(
+        scan_result = await mcp_gateway_client.call_with_progress(
             tool_name="nmap_scan",
             params={"target": asset.value, "port_range": port_range}
         )
@@ -360,59 +360,39 @@ async def execute_scheduled_scan(db: AsyncSession, scheduled_scan: ScheduledScan
         ssl_result = None
         open_ports = _normalize_open_ports(scan_result)
         if any(p["port"] == 443 for p in open_ports):
-            ssl_result = await mcp_gateway_client.call(
+            ssl_result = await mcp_gateway_client.call_with_progress(
                 tool_name="testssl_scan",
                 params={"target": asset.value, "port": 443}
             )
         
-        created_findings = []
-        for port in open_ports:
-            if port["port"] in {22, 80, 443}:
-                continue
-            finding = Finding(
-                project_id=scheduled_scan.project_id,
-                scan_task_id=scan_task.id,
-                clause_id="8.1.3.1",
-                clause_name="边界访问控制",
-                severity=_severity_for_port(port["port"]),
-                judgment=Judgment.FAIL,
-                judgment_engine=JudgmentEngine.RULE,
-                description=f"监控发现 {asset.value} 开放 {port['protocol']}/{port['port']} {port.get('service') or ''}".strip(),
-                remediation_suggestion="确认该端口是否为业务必要端口；若非必要，应通过防火墙/安全组限制访问。",
-                status=FindingStatus.OPEN,
-            )
-            db.add(finding)
-            created_findings.append(finding)
-
         ssl_payload = _result_payload(ssl_result)
         ssl_issues = ssl_payload.get("issues") or ssl_payload.get("findings") or []
-        if ssl_issues:
-            finding = Finding(
-                project_id=scheduled_scan.project_id,
-                scan_task_id=scan_task.id,
-                clause_id="8.1.4.5",
-                clause_name="通信传输安全",
-                severity=_severity_for_port(443),
-                judgment=Judgment.FAIL,
-                judgment_engine=JudgmentEngine.RULE,
-                description=f"监控发现 {asset.value} 存在 SSL/TLS 风险 {len(ssl_issues)} 项",
-                remediation_suggestion="检查证书有效期、协议版本和弱加密套件配置。",
-                status=FindingStatus.OPEN,
-            )
-            db.add(finding)
-            created_findings.append(finding)
-        await db.flush()
+        from app.services.independent_finding_tracker import sync_independent_findings
+        issue_tracking = await sync_independent_findings(db, scan_task, [
+            {
+                "capability": "scan_ports",
+                "target": asset.value,
+                "status": "success" if scan_result.get("status") == "success" else "warning",
+                "result": _result_payload(scan_result),
+            },
+            *([{
+                "capability": "scan_ssl",
+                "target": asset.value,
+                "status": "success" if ssl_result.get("status") == "success" else "warning",
+                "result": ssl_payload,
+            }] if ssl_result else []),
+        ])
         
         # Update scan task
         scan_task.status = ScanTaskStatus.COMPLETED
         scan_task.control_state = "completed"
         scan_task.completed_at = datetime.utcnow()
-        scan_task.findings_count = len(created_findings)
         scan_task.result_summary = {
             "target": asset.value,
             "open_ports": open_ports,
             "ssl_issues": ssl_issues,
-            "findings_count": len(created_findings),
+            "findings_count": issue_tracking["tracked"],
+            "issue_tracking": issue_tracking,
         }
         
         previous_result = await db.execute(
@@ -454,7 +434,7 @@ async def execute_scheduled_scan(db: AsyncSession, scheduled_scan: ScheduledScan
         return {
             "status": "completed",
             "scan_task_id": scan_task.id,
-            "findings_count": len(created_findings),
+            "findings_count": issue_tracking["tracked"],
             "next_run_at": scheduled_scan.next_run_at.isoformat(),
         }
         

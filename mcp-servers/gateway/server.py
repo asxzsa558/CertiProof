@@ -152,7 +152,10 @@ SERVER_ROUTES = {
 
 # 支持异步扫描的工具
 ASYNC_TOOLS = [
-    "nmap_scan", "masscan_scan", "nuclei_scan", "hydra_bruteforce", "testssl_scan",
+    "nmap_scan", "masscan_scan", "nuclei_scan", "hydra_bruteforce", "testssl_scan", "crypto_transport_scan",
+    "nikto_scan", "sqlmap_scan", "gobuster_scan", "ffuf_scan",
+    "snmp_walk", "snmp_bruteforce", "snmp_get",
+    "enum4linux_scan", "crackmapexec_scan", "smb_enum",
     "linux_baseline", "password_policy_check", "ssh_config_check", "audit_config_check",
     "service_port_check", "file_permission_check", "mac_check",
 ]
@@ -260,10 +263,19 @@ async def call_tool(request: ToolCallRequest):
             status_code=404,
             detail=f"Tool not found: {tool_name}. Available tools: {list(TOOL_ROUTES.keys())}"
         )
+
+    if tool_name in ASYNC_TOOLS:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Tool {tool_name} is long-running and must use /call/async so progress, "
+                "heartbeat, refresh recovery, and cancellation remain available."
+            ),
+        )
     
     # 2. 转发
     try:
-        async with httpx.AsyncClient(timeout=600) as client:
+        async with httpx.AsyncClient(timeout=90) as client:
             response = await client.post(
                 f"{server_url}/execute",
                 json={

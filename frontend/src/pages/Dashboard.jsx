@@ -42,11 +42,11 @@ const NAV_ITEMS = [
   { key: 'scan-nodes', group: '治理中心', label: '扫描节点', icon: <CloudServerOutlined />, path: '/settings/scan-nodes', permission: 'node:read' },
   { key: 'access', group: '治理中心', label: '角色权限', icon: <TeamOutlined />, path: '/settings/access', permission: 'role:read' },
   { key: 'data', group: '系统', label: '数据与生命周期', icon: <DatabaseOutlined />, path: '/settings/data-lifecycle', permission: 'system:config' },
-  { key: 'settings', group: '系统', label: '系统设置', icon: <SettingOutlined />, path: '/settings/models', permission: 'system:config' },
+  { key: 'settings', group: '系统', label: '系统设置', icon: <SettingOutlined />, path: '/settings/system', permission: 'system:config' },
 ]
 
 const statusLabel = {
-  open: '待确认',
+  open: '待处理',
   in_progress: '处理中',
   fixed: '已修复',
   verified: '已验证',
@@ -82,7 +82,10 @@ function emptyDashboard() {
   return {
     summary: {
       project_count: 0,
+      active_project_count: 0,
+      completed_project_count: 0,
       asset_count: 0,
+      asset_type_counts: {},
       high_risk_count: 0,
       unknown_count: 0,
       average_progress: 0,
@@ -119,7 +122,6 @@ function Dashboard() {
   const [loadError, setLoadError] = useState('')
   const [selectedToolIndex, setSelectedToolIndex] = useState(0)
   const [riskFilter, setRiskFilter] = useState('all')
-  const [riskActionId, setRiskActionId] = useState(null)
   const [operations, setOperations] = useState(emptyOperations)
   const [operationsState, setOperationsState] = useState('loading')
 
@@ -130,7 +132,6 @@ function Dashboard() {
 
   const currentPermissions = dashboard.current_role?.permissions || []
   const permissionScope = dashboard.current_role?.permission_scope || (currentOrg?.role === 'admin' ? '全局权限' : '受限权限')
-  const canManageAssessments = currentPermissions.includes('assessment:manage') || currentOrg?.role === 'admin'
   const canViewOperations = currentPermissions.includes('tool:diagnose') || currentOrg?.role === 'admin'
   const visibleNavItems = NAV_ITEMS.filter((item) => (
     !item.permission || currentOrg?.role === 'admin' || currentPermissions.includes(item.permission)
@@ -177,7 +178,11 @@ function Dashboard() {
 
   const handleRiskAction = (risk) => {
     if (!risk.project_id) return
-    navigate(`/projects/${risk.project_id}`)
+    const params = new URLSearchParams()
+    if (risk.assessment_code) params.set('assessment', risk.assessment_code)
+    else params.set('workspace', 'independent')
+    if (risk.finding_id) params.set('finding', risk.finding_id)
+    navigate(`/projects/${risk.project_id}?${params}`)
   }
 
   const handleLogout = () => {
@@ -190,8 +195,7 @@ function Dashboard() {
   const selectedTool = dashboard.tool_health[selectedToolIndex] || dashboard.tool_health[0]
   const riskFilters = [
     { key: 'all', label: '全部', count: dashboard.risk_queue.length },
-    { key: 'open', label: '待确认', count: dashboard.risk_queue.filter((risk) => risk.status === 'open').length },
-    { key: 'in_progress', label: '处理中', count: dashboard.risk_queue.filter((risk) => risk.status === 'in_progress').length },
+    { key: 'open', label: '待处理', count: dashboard.risk_queue.filter((risk) => risk.status === 'open').length },
     { key: 'closed', label: '已处置', count: dashboard.risk_queue.filter((risk) => closedRiskStatuses.has(risk.status)).length },
   ]
   const filteredRisks = riskFilter === 'all'
@@ -290,11 +294,18 @@ function Dashboard() {
         ) : null}
 
         <section className="org-kpis">
-          <Kpi label="项目" value={summary.project_count} icon={<ProjectOutlined />} />
-          <Kpi label="资产" value={summary.asset_count} icon={<DatabaseOutlined />} />
-          <Kpi label="高风险" value={summary.high_risk_count} icon={<AlertOutlined />} tone="danger" />
-          <Kpi label="平均测评进度" value={`${summary.average_progress}%`} icon={<SafetyCertificateOutlined />} />
-          <Kpi label="待处理事项" value={summary.todo_count} icon={<CheckCircleFilled />} tone="warning" />
+          <Kpi
+            label="项目总数"
+            value={summary.project_count}
+            icon={<ProjectOutlined />}
+            detail={`测评中 ${summary.active_project_count || 0} · 已完成 ${summary.completed_project_count || 0}`}
+          />
+          <Kpi
+            label="资产总数"
+            value={summary.asset_count}
+            icon={<DatabaseOutlined />}
+            detail={`IP ${summary.asset_type_counts?.ip || 0} · 域名 ${summary.asset_type_counts?.domain || 0} · 云资源 ${summary.asset_type_counts?.cloud_resource || 0}`}
+          />
         </section>
 
         <section className="org-grid">
@@ -399,7 +410,7 @@ function Dashboard() {
             </div>
           </section>
 
-          <Panel className="risk-panel" title="风险处置队列" meta={`${filteredRisks.length}/${dashboard.risk_queue.length} 项`}>
+          <Panel className="risk-panel" title="问题追踪" meta={`显示 ${filteredRisks.length} / 共 ${dashboard.risk_queue.length} 项`}>
             <div className="risk-filter-bar">
               {riskFilters.map((filter) => (
                 <button
@@ -415,9 +426,19 @@ function Dashboard() {
             <div className="risk-table scroll-region scroll-fade">
               {filteredRisks.length ? filteredRisks.map((risk, index) => (
                 <div key={risk.finding_id || `${risk.control}-${index}`} className="risk-row">
-                  <strong>{risk.asset}</strong>
-                  <span>{risk.risk}</span>
-                  <Tag color="blue">{risk.control}</Tag>
+                  <div className="risk-project-cell">
+                    <strong>{risk.project}</strong>
+                    <span>{risk.source}</span>
+                  </div>
+                  <div className="risk-asset-cell">
+                    <strong>{risk.asset}</strong>
+                    <span>{risk.asset_name || '未设置资产名称'}</span>
+                  </div>
+                  <div className="risk-copy-cell">
+                    <strong>{risk.title || risk.risk}</strong>
+                    <Tooltip title={risk.risk}><span>{risk.risk}</span></Tooltip>
+                    <small>{risk.tool || '人工记录'} · 出现 {risk.occurrence_count || 1} 次{risk.last_seen_at ? ` · ${new Date(risk.last_seen_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}</small>
+                  </div>
                   <Tag color={risk.severity === 'high' || risk.severity === 'critical' ? 'red' : 'gold'}>
                     {severityLabel[risk.severity] || risk.severity}
                   </Tag>
@@ -425,11 +446,9 @@ function Dashboard() {
                   <Button
                     size="small"
                     type="text"
-                    disabled={!canManageAssessments && risk.action === '整改与复测'}
-                    loading={riskActionId === risk.finding_id}
                     onClick={() => handleRiskAction(risk)}
                   >
-                    {risk.action}
+                    查看详情
                   </Button>
                 </div>
               )) : (
@@ -444,13 +463,14 @@ function Dashboard() {
   )
 }
 
-function Kpi({ label, value, icon, tone = '' }) {
+function Kpi({ label, value, icon, tone = '', detail }) {
   return (
     <div className={`org-kpi ${tone}`}>
       <span>{icon}</span>
       <div>
         <strong>{value}</strong>
         <em>{label}</em>
+        {detail ? <small>{detail}</small> : null}
       </div>
     </div>
   )

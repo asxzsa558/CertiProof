@@ -38,8 +38,14 @@ x-worker-common: &worker-common
     TASK_EXECUTION_MODE: worker
     TASK_WORKER_POLL_SECONDS: ${TASK_WORKER_POLL_SECONDS:-3}
     TASK_LEASE_MINUTES: ${TASK_LEASE_MINUTES:-2}
+    MCP_PROGRESS_STALE_SECONDS: ${MCP_PROGRESS_STALE_SECONDS:-90}
     MONITORING_WORKER_BATCH_SIZE: ${MONITORING_WORKER_BATCH_SIZE:-5}
     DOCUMENT_ANALYSIS_MODE: ${DOCUMENT_ANALYSIS_MODE:-standard}
+    DOCUMENT_MAX_TOTAL_PAGES: ${DOCUMENT_MAX_TOTAL_PAGES:-200}
+    DOCUMENT_FILE_RETRY_ATTEMPTS: ${DOCUMENT_FILE_RETRY_ATTEMPTS:-3}
+    UPLOAD_MAX_FILE_MB: ${UPLOAD_MAX_FILE_MB:-100}
+    UPLOAD_MAX_BATCH_MB: ${UPLOAD_MAX_BATCH_MB:-300}
+    ACTIVE_HISTORY_RETENTION_DAYS: ${ACTIVE_HISTORY_RETENTION_DAYS:-90}
     GRAPH_NAME: ${GRAPH_NAME:-certiproof}
     GRAPH_REQUIRED: ${GRAPH_REQUIRED:-true}
     EMBEDDING_SERVER_URL: http://embedding-server:8017
@@ -178,7 +184,13 @@ services:
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
       OLLAMA_THINK: ${OLLAMA_THINK:-false}
       TASK_EXECUTION_MODE: ${TASK_EXECUTION_MODE:-worker}
+      MCP_PROGRESS_STALE_SECONDS: ${MCP_PROGRESS_STALE_SECONDS:-90}
       DOCUMENT_ANALYSIS_MODE: ${DOCUMENT_ANALYSIS_MODE:-standard}
+      DOCUMENT_MAX_TOTAL_PAGES: ${DOCUMENT_MAX_TOTAL_PAGES:-200}
+      DOCUMENT_FILE_RETRY_ATTEMPTS: ${DOCUMENT_FILE_RETRY_ATTEMPTS:-3}
+      UPLOAD_MAX_FILE_MB: ${UPLOAD_MAX_FILE_MB:-100}
+      UPLOAD_MAX_BATCH_MB: ${UPLOAD_MAX_BATCH_MB:-300}
+      ACTIVE_HISTORY_RETENTION_DAYS: ${ACTIVE_HISTORY_RETENTION_DAYS:-90}
       GRAPH_NAME: ${GRAPH_NAME:-certiproof}
       GRAPH_REQUIRED: ${GRAPH_REQUIRED:-true}
       EMBEDDING_SERVER_URL: http://embedding-server:8017
@@ -307,7 +319,7 @@ services:
       dockerfile: docker/e2e-target/Dockerfile
     container_name: certiproof-e2e-target
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; [socket.create_connection(('127.0.0.1', p), 2).close() for p in (22, 80, 443)]"]
+      test: ["CMD", "python", "-c", "import socket; [socket.create_connection(('127.0.0.1', p), 2).close() for p in (22,80,443,1521,3306,6379,11211,27017)]"]
       interval: 5s
       timeout: 3s
       retries: 12

@@ -188,6 +188,110 @@
   margin-bottom: 12px;
 }
 
+.runtime-limit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.runtime-limit-grid > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(137, 185, 207, 0.12);
+  background: rgba(2, 10, 24, 0.35);
+}
+
+.runtime-limit-grid span {
+  color: rgba(167, 186, 207, 0.62);
+  font-size: 10px;
+}
+
+.runtime-limit-grid strong {
+  color: #eaf9ff;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.system-config-embedded {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(72, 210, 232, 0.17);
+  background: linear-gradient(150deg, rgba(7, 19, 36, 0.96), rgba(6, 16, 31, 0.9));
+  box-shadow: inset 0 1px 0 rgba(235, 248, 255, 0.045), 0 18px 48px rgba(0, 0, 0, 0.2);
+}
+
+.system-config-embedded-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(137, 185, 207, 0.12);
+}
+
+.system-config-embedded-head > div:first-child {
+  min-width: 0;
+}
+
+.system-config-embedded-head span {
+  color: #53def1;
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.system-config-embedded-head h2 {
+  margin: 5px 0 3px;
+  color: #f1fbff;
+  font-size: 16px;
+}
+
+.system-config-embedded-head p {
+  margin: 0;
+  color: rgba(167, 186, 207, 0.66);
+  font-size: 11px;
+}
+
+.system-config-embedded-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
+.system-config-embedded .config-tabs {
+  min-height: 520px;
+}
+
+.system-config-embedded .config-tabs .ant-tabs-content-holder {
+  overflow: visible;
+}
+
+.system-config-embedded .config-tab-content {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.system-config-embedded .config-section {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .system-config-embedded-head,
+  .system-config-embedded-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .system-config-embedded .config-tab-content,
+  .runtime-limit-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .runtime-hardware-grid > div {
   min-width: 0;
   padding: 10px 12px;

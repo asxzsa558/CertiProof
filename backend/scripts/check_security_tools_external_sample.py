@@ -25,13 +25,12 @@ def _validate(tool: str, result: dict) -> dict:
 
 async def _run() -> None:
     client = MCPGatewayClient()
-    port_result = await client.call("nmap_scan", {
+    port_result = await client.call_with_progress("nmap_scan", {
         "target": TARGET,
         "port_range": "high-risk",
-        "host_timeout": 60,
     })
-    ssl_result = await client.call("testssl_scan", {"target": TARGET, "port": 443, "timeout": 90})
-    web_result = await client.call("nikto_scan", {"target": TARGET, "port": 80, "timeout": 120})
+    ssl_result = await client.call_with_progress("testssl_scan", {"target": TARGET, "port": 443})
+    web_result = await client.call_with_progress("nikto_scan", {"target": TARGET, "port": 80})
 
     ports = _validate("nmap_scan", port_result)
     ssl = _validate("testssl_scan", ssl_result)
