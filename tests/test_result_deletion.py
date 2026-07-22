@@ -70,12 +70,13 @@ def test_scan_record_deletion_removes_all_dependents():
             db.add(asset)
             await db.flush()
             scheduled = ScheduledScan(project_id=project.id, asset_id=asset.id, name="check", frequency=ScheduleFrequency.DAILY)
-            task = ScanTask(project_id=project.id, asset_id=asset.id, task_type=ScanTaskType.TARGETED, status=ScanTaskStatus.COMPLETED, triggered_by=TriggeredBy.MANUAL)
+            task = ScanTask(project_id=project.id, assessment_id=assessment.id, asset_id=asset.id, task_type=ScanTaskType.TARGETED, status=ScanTaskStatus.COMPLETED, triggered_by=TriggeredBy.MANUAL)
             second_task = ScanTask(project_id=project.id, asset_id=asset.id, task_type=ScanTaskType.TARGETED, status=ScanTaskStatus.FAILED, triggered_by=TriggeredBy.MANUAL)
             db.add_all([scheduled, task, second_task])
             await db.flush()
             finding = Finding(
                 project_id=project.id,
+                assessment_id=assessment.id,
                 scan_task_id=task.id,
                 fingerprint="a" * 64,
                 source_type="technical",

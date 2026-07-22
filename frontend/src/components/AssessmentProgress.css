@@ -461,6 +461,103 @@
   border-radius: 6px;
 }
 
+.miping-domain-section {
+  padding: 16px;
+  border: 1px solid rgba(91, 202, 226, 0.18);
+  background: rgba(7, 17, 27, 0.72);
+}
+
+.miping-domain-heading,
+.miping-domain-card > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.miping-domain-heading span {
+  color: rgba(238, 247, 252, 0.95);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.miping-domain-heading p {
+  margin: 4px 0 0;
+  color: rgba(183, 207, 220, 0.64);
+  font-size: 12px;
+}
+
+.miping-domain-heading > small {
+  flex: none;
+  color: #72d9e8;
+  font-variant-numeric: tabular-nums;
+}
+
+.miping-domain-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.miping-domain-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(131, 165, 183, 0.16);
+  border-left: 3px solid rgba(131, 165, 183, 0.34);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.miping-domain-card.pass { border-left-color: #10b981; }
+.miping-domain-card.partial { border-left-color: #f59e0b; }
+.miping-domain-card.fail,
+.miping-domain-card.unable { border-left-color: #ef4444; }
+.miping-domain-card.running { border-left-color: #38bdf8; }
+
+.miping-domain-card strong {
+  min-width: 0;
+  color: rgba(238, 247, 252, 0.92);
+  font-size: 13px;
+}
+
+.miping-domain-card > small {
+  display: block;
+  margin-top: 5px;
+  color: rgba(167, 195, 210, 0.58);
+  font-size: 11px;
+}
+
+.miping-domain-card details {
+  margin-top: 9px;
+  color: rgba(175, 207, 220, 0.72);
+  font-size: 11px;
+}
+
+.miping-domain-card summary { cursor: pointer; }
+
+.miping-domain-card details p {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(131, 165, 183, 0.12);
+}
+
+.miping-domain-card details b {
+  color: rgba(224, 239, 246, 0.82);
+  font-weight: 600;
+}
+
+.miping-domain-card details span {
+  color: rgba(167, 195, 210, 0.62);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .miping-domain-grid { grid-template-columns: 1fr; }
+}
+
 .verification-document-track {
   min-height: 0;
   margin-bottom: 14px;

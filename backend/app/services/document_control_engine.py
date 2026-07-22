@@ -23,6 +23,11 @@ DocumentKey = Literal[
     "security_management_policy", "security_org_setup", "personnel_security_policy",
     "secure_construction_policy", "security_operations_policy", "incident_response_plan",
     "incident_management_policy", "security_audit_policy", "system_security_plan", "security_strategy",
+    "system_crypto_scope", "crypto_application_plan", "crypto_algorithm_protocol_inventory",
+    "crypto_management_policy", "key_management_policy", "crypto_product_inventory",
+    "crypto_personnel_records", "crypto_operation_records", "crypto_incident_plan",
+    "physical_environment_evidence", "network_communication_evidence",
+    "device_computing_evidence", "application_data_evidence",
 ]
 
 
@@ -58,10 +63,11 @@ class DocumentControlEngine:
         self.documents = self.library.get("documents", {})
 
     @classmethod
-    async def from_graph(cls, db):
-        from app.services.knowledge_graph import knowledge_graph
+    async def from_graph(cls, db, assessment_type_code: str = "dengbao"):
+        from app.services.knowledge_graph import STANDARD_BUNDLES, knowledge_graph
 
-        return cls(await knowledge_graph.load_standard_library(db))
+        library_name, _ = STANDARD_BUNDLES.get(assessment_type_code, STANDARD_BUNDLES["dengbao"])
+        return cls(await knowledge_graph.load_standard_library(db, library_name))
 
     def analyze(self, text: str, file_name: str = "", expected_doc_name: str | None = None) -> dict[str, Any]:
         text = text or ""
@@ -589,7 +595,7 @@ class DocumentControlEngine:
             {
                 "role": "system",
                 "content": (
-                    "你是等保文档证据复核器。只判断证据是否支持必检点，不直接给合规结论。"
+                    "你是企业合规文档证据复核器。只判断证据是否支持当前标准库必检点，不直接给合规结论。"
                     "返回严格 JSON 对象 {decisions: [...]}，数组每项包含 control_id, point_id, "
                     "decision(pass|partial|fail|contradict), confidence(0到1), reason。"
                     "contradict 表示证据明确违反要求；reason 不超过 60 个汉字。"

@@ -9,7 +9,7 @@ import mimetypes
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -103,6 +103,7 @@ class AssessmentResponse(BaseModel):
     id: int
     project_id: int
     template_id: int
+    assessment_type_code: str
     name: str
     target_system: Optional[str]
     assessment_level: int
@@ -156,6 +157,7 @@ class TemplateResponse(BaseModel):
     name: str
     description: Optional[str]
     compliance_level: int
+    assessment_type_code: str
     version: str
     phases_count: int
     is_active: bool
@@ -228,12 +230,13 @@ class CreateTaskRequest(BaseModel):
 
 @router.get("/templates", response_model=List[TemplateResponse])
 async def list_templates(
+    assessment_code: Optional[str] = Query(None, pattern="^(dengbao|miping)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """列出流程模板"""
     engine = get_flow_engine(db)
-    templates = await engine.list_templates()
+    templates = await engine.list_templates(assessment_type_code=assessment_code)
     
     result = []
     for t in templates:
@@ -242,6 +245,7 @@ async def list_templates(
             name=t.name,
             description=t.description,
             compliance_level=t.compliance_level,
+            assessment_type_code=t.assessment_type_code,
             version=t.version,
             phases_count=len(t.phases_config) if t.phases_config else 0,
             is_active=t.is_active,
@@ -284,6 +288,7 @@ async def create_assessment(
         id=assessment.id,
         project_id=assessment.project_id,
         template_id=assessment.template_id,
+        assessment_type_code=assessment.assessment_type_code,
         name=assessment.name,
         target_system=assessment.target_system,
         assessment_level=assessment.assessment_level,
@@ -300,19 +305,21 @@ async def create_assessment(
 @router.get("/projects/{project_id}", response_model=List[AssessmentResponse])
 async def list_assessments(
     project_id: int,
+    assessment_code: Optional[str] = Query(None, pattern="^(dengbao|miping)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """列出项目的测评实例"""
     await require_project_permission(db, project_id, current_user, "assessment:read")
     engine = get_flow_engine(db)
-    assessments = await engine.list_assessments(project_id)
+    assessments = await engine.list_assessments(project_id, assessment_code)
     
     return [
         AssessmentResponse(
             id=a.id,
             project_id=a.project_id,
             template_id=a.template_id,
+            assessment_type_code=a.assessment_type_code,
             name=a.name,
             target_system=a.target_system,
             assessment_level=a.assessment_level,
@@ -346,6 +353,7 @@ async def get_assessment(
         id=assessment.id,
         project_id=assessment.project_id,
         template_id=assessment.template_id,
+        assessment_type_code=assessment.assessment_type_code,
         name=assessment.name,
         target_system=assessment.target_system,
         assessment_level=assessment.assessment_level,
@@ -378,6 +386,7 @@ async def start_assessment(
         id=assessment.id,
         project_id=assessment.project_id,
         template_id=assessment.template_id,
+        assessment_type_code=assessment.assessment_type_code,
         name=assessment.name,
         target_system=assessment.target_system,
         assessment_level=assessment.assessment_level,
@@ -909,6 +918,7 @@ async def execute_task(
                 project_id=assessment.project_id,
                 user_id=current_user.id,
                 params=target_params,
+                assessment_id=assessment.id,
             )
         else:
             # 多目标并发执行
@@ -926,6 +936,7 @@ async def execute_task(
                         project_id=assessment.project_id,
                         user_id=current_user.id,
                         params=target_params,
+                        assessment_id=assessment.id,
                     )
 
             semaphore = asyncio.Semaphore(max(1, min(settings.ASSESSMENT_MAX_CONCURRENT, 10)))
@@ -1086,8 +1097,8 @@ async def upload_phase_documents(
 ):
     """Upload documents or a supported archive, classify them, then run matching checks."""
     phase, assessment = await require_phase_permission(db, phase_id, current_user, "evidence:manage")
-    if phase.phase_id not in {"gap_analysis", "remediation_verification"}:
-        raise HTTPException(status_code=400, detail="批量文档归类仅适用于差距分析或整改与复测阶段")
+    if phase.phase_id not in {"gap_analysis", "field_assessment", "remediation_verification"}:
+        raise HTTPException(status_code=400, detail="批量文档归类仅适用于差距分析、现场评估或整改与复测阶段")
     if not files:
         raise HTTPException(status_code=400, detail="请至少上传一个文件或压缩包")
     active_batch = (await db.execute(select(DocumentAnalysisRun.id).where(
@@ -1098,7 +1109,7 @@ async def upload_phase_documents(
     if active_batch:
         raise HTTPException(status_code=409, detail="已有批量文档任务正在执行，请先等待或停止该任务")
     verification_batch = phase.phase_id == "remediation_verification"
-    document_phase = phase
+    document_phases = [phase]
     if verification_batch:
         active_verification = (await db.execute(select(VerificationRun.id).where(
             VerificationRun.project_id == assessment.project_id,
@@ -1107,16 +1118,20 @@ async def upload_phase_documents(
         ).limit(1))).scalar_one_or_none()
         if active_verification:
             raise HTTPException(status_code=409, detail="已有文档重新检查正在执行，请先等待或停止该任务")
-        document_phase = (await db.execute(select(PhaseInstance).where(
+        document_phase_ids = ["gap_analysis", "field_assessment"] if assessment.assessment_type_code == "miping" else ["gap_analysis"]
+        document_phases = list((await db.execute(select(PhaseInstance).where(
             PhaseInstance.assessment_id == assessment.id,
-            PhaseInstance.phase_id == "gap_analysis",
-        ))).scalar_one_or_none()
-        if not document_phase:
-            raise HTTPException(status_code=400, detail="当前测评缺少差距分析文档任务")
-    document_tasks = [
-        task for task in await get_flow_engine(db).get_tasks(document_phase.id, official_only=True)
-        if task.task_type == "doc_review"
-    ]
+            PhaseInstance.phase_id.in_(document_phase_ids),
+        ))).scalars().all())
+        if not document_phases:
+            raise HTTPException(status_code=400, detail="当前测评缺少可复测的文档任务")
+    flow = get_flow_engine(db)
+    document_tasks = []
+    for document_phase in document_phases:
+        document_tasks.extend(
+            task for task in await flow.get_tasks(document_phase.id, official_only=True)
+            if task.task_type == "doc_review"
+        )
     if not document_tasks:
         raise HTTPException(status_code=400, detail="当前阶段没有文档检查任务")
     if any(task.status == "in_progress" for task in document_tasks):
@@ -1179,7 +1194,12 @@ async def upload_phase_documents(
         document_file_ids.append(document_file.id)
         saved_files.append({"id": document_file.id, "file_name": file_name})
     from app.services.report_service import invalidate_report_artifacts
-    await invalidate_report_artifacts(db, assessment.project_id, "已上传新的批量文档")
+    await invalidate_report_artifacts(
+        db,
+        assessment.project_id,
+        "已上传新的批量文档",
+        assessment_id=assessment.id,
+    )
     await db.commit()
     run = await create_document_batch_run(
         db,
@@ -1192,7 +1212,7 @@ async def upload_phase_documents(
         duplicate_files,
         {
             "verification_batch": verification_batch,
-            "document_task_phase_id": document_phase.id,
+            "document_task_phase_ids": [item.id for item in document_phases],
         },
     )
     return {
@@ -1286,7 +1306,12 @@ async def upload_task_documents(
         saved.append({"id": document_file.id, "file_name": file_name, "duplicate": False})
 
     from app.services.report_service import invalidate_report_artifacts
-    await invalidate_report_artifacts(db, assessment.project_id, "已上传新的文档材料")
+    await invalidate_report_artifacts(
+        db,
+        assessment.project_id,
+        "已上传新的文档材料",
+        assessment_id=assessment.id,
+    )
     await db.commit()
     run = await create_document_run(db, task, assessment.project_id, current_user.id, configured_mode)
     return {"status": "queued", "task_id": task.id, "run_id": run.id, "analysis_mode": configured_mode, "files": saved}
@@ -1471,6 +1496,7 @@ async def _sync_document_gap_findings(
     unable_fingerprint = make_finding_fingerprint("document", f"task:{task.id}", "analysis", "unable")
     unable_finding = (await db.execute(select(Finding).where(
         Finding.project_id == project_id,
+        Finding.assessment_id == document_run.assessment_id,
         Finding.fingerprint == unable_fingerprint,
     ))).scalar_one_or_none()
     if analysis.get("status") == "unable":
@@ -1484,6 +1510,7 @@ async def _sync_document_gap_findings(
         else:
             unable_finding = Finding(
                 project_id=project_id,
+                assessment_id=document_run.assessment_id,
                 scan_task_id=None,
                 document_run_id=document_run.id,
                 fingerprint=unable_fingerprint,
@@ -1548,6 +1575,7 @@ async def _sync_document_gap_findings(
             fingerprint = make_finding_fingerprint("document", f"task:{task.id}", control.get("id") or task.name, point.get("id") or clause_id)
             result = await db.execute(select(Finding).where(
                 Finding.project_id == project_id,
+                Finding.assessment_id == document_run.assessment_id,
                 Finding.fingerprint == fingerprint,
             ))
             finding = result.scalar_one_or_none()
@@ -1583,6 +1611,7 @@ async def _sync_document_gap_findings(
             else:
                 finding = Finding(
                     project_id=project_id,
+                    assessment_id=document_run.assessment_id,
                     scan_task_id=None,
                     document_run_id=document_run.id,
                     fingerprint=fingerprint,
@@ -1948,6 +1977,7 @@ async def get_assessment_summary(
     phase_summaries = []
     findings = (await db.execute(select(Finding).where(
         Finding.project_id == assessment.project_id,
+        Finding.assessment_id == assessment.id,
         Finding.status != FindingStatus.FALSE_POSITIVE,
     ))).scalars().all()
     disposition = {
@@ -1957,6 +1987,7 @@ async def get_assessment_summary(
     }
     verification_runs = list((await db.execute(select(VerificationRun).where(
         VerificationRun.project_id == assessment.project_id,
+        VerificationRun.assessment_id == assessment.id,
     ).order_by(VerificationRun.created_at.desc()).limit(8))).scalars().all())
     if disposition["open"]:
         completion_state = "needs_remediation"
@@ -2002,6 +2033,7 @@ async def get_assessment_summary(
     processed_tasks = completed_tasks + failed_tasks + cancelled_tasks
     return {
         "assessment_id": assessment_id,
+        "assessment_type_code": assessment.assessment_type_code,
         "project": {
             "id": project.id if project else None,
             "name": project.name if project else "",
@@ -2025,6 +2057,22 @@ async def get_assessment_summary(
             "completion_rate": round(processed_tasks / total_tasks * 100, 1) if total_tasks > 0 else 0,
         },
     }
+
+
+@router.get("/{assessment_id}/miping-matrix")
+async def get_miping_domain_matrix(
+    assessment_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Build the eight Miping domains from persisted document and tool evidence."""
+    from app.services.miping_matrix import build_miping_domain_matrix
+
+    assessment = await require_assessment_permission(db, assessment_id, current_user, "assessment:read")
+    try:
+        return await build_miping_domain_matrix(db, assessment)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 async def _calculate_phase_coverage(engine, phase) -> float:

@@ -19,6 +19,7 @@ cp .env.example .env
 # 可用 openssl rand -hex 24 生成数据库密码，openssl rand -hex 32 生成 SECRET_KEY
 ./scripts/cloud-preflight.sh
 ./scripts/start-production.sh
+./scripts/verify-deployment.sh
 ```
 
 CPU 包会拉取业务镜像并调用 `.env` 中的云模型。GPU 包会额外拉取 `VLLM_IMAGE`，首次启动下载 `VLLM_MODEL` 到持久卷，时间取决于带宽。发布包不包含大体积镜像层和模型权重；对应版本必须已经由 `Publish cloud images` 工作流发布到 GHCR。
@@ -30,12 +31,13 @@ docker compose ps
 curl -fsS https://你的域名/health
 ```
 
-随后登录模型设置页执行“测试模型”，它会验证真实结构化输出，不只检查端口存活。
+验收脚本会等待核心服务与 Worker 进入健康状态，并真实验证模型结构化输出和本地向量模型。低配置主机首次加载向量模型可能较慢；仅排查容器启动时可临时使用 `VERIFY_DEEP_DEPLOYMENT=false ./scripts/verify-deployment.sh`，正式验收不能跳过。
 
 ## 更新与停止
 
 ```bash
 ./scripts/start-production.sh
+./scripts/rollback-production.sh <历史不可变版本>
 docker compose --profile production down
 ```
 

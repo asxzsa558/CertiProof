@@ -306,7 +306,7 @@ def main() -> None:
         "system_name": "受控内网业务系统",
         "description": "保留项目：真实 DOCX/PDF/扫描件、受控 SSH/Web 靶机、错误凭据重试、整改文档复测与 HTML 报告验收。",
         "compliance_level": "三级",
-        "assessment_type_ids": [],
+        "assessment_configs": [{"code": "dengbao", "level": "三级"}],
     })
     project_id = project["id"]
     save_state(project_id=project_id, project_name=project["name"], status="project_created", target=TARGET)

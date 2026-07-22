@@ -21,10 +21,25 @@ from app.models.assessment import (
 logger = logging.getLogger(__name__)
 
 
-def current_template_task_keys(assessment_level: int, phase_id: str) -> set[tuple[str, str]]:
-    from app.services.assessment_templates import LEVEL_2_TEMPLATE, LEVEL_3_TEMPLATE
+def current_template_task_keys(
+    assessment_level: int,
+    phase_id: str,
+    assessment_type_code: str = "dengbao",
+) -> set[tuple[str, str]]:
+    from app.services.assessment_templates import (
+        LEVEL_2_TEMPLATE,
+        LEVEL_3_TEMPLATE,
+        MIPING_LEVEL_2_TEMPLATE,
+        MIPING_LEVEL_3_TEMPLATE,
+    )
 
-    template_config = LEVEL_2_TEMPLATE if assessment_level == 2 else LEVEL_3_TEMPLATE
+    templates = {
+        ("dengbao", 2): LEVEL_2_TEMPLATE,
+        ("dengbao", 3): LEVEL_3_TEMPLATE,
+        ("miping", 2): MIPING_LEVEL_2_TEMPLATE,
+        ("miping", 3): MIPING_LEVEL_3_TEMPLATE,
+    }
+    template_config = templates[(assessment_type_code, 2 if assessment_level == 2 else 3)]
     phase_config = next((phase for phase in template_config["phases_config"] if phase["id"] == phase_id), None)
     if not phase_config:
         return set()
@@ -93,19 +108,32 @@ class FlowEngine:
         )
         return result.scalar_one_or_none()
     
-    async def list_templates(self, active_only: bool = True) -> List[FlowTemplate]:
+    async def list_templates(
+        self,
+        active_only: bool = True,
+        assessment_type_code: str | None = None,
+    ) -> List[FlowTemplate]:
         """列出流程模板"""
         query = select(FlowTemplate)
         if active_only:
             query = query.where(FlowTemplate.is_active == True)
-        result = await self.db.execute(query.order_by(FlowTemplate.compliance_level))
+        if assessment_type_code:
+            query = query.where(FlowTemplate.assessment_type_code == assessment_type_code)
+        result = await self.db.execute(query.order_by(FlowTemplate.assessment_type_code, FlowTemplate.compliance_level))
         return result.scalars().all()
     
-    async def create_template(self, name: str, compliance_level: int, phases_config: dict) -> FlowTemplate:
+    async def create_template(
+        self,
+        name: str,
+        compliance_level: int,
+        phases_config: dict,
+        assessment_type_code: str = "dengbao",
+    ) -> FlowTemplate:
         """创建流程模板"""
         template = FlowTemplate(
             name=name,
             compliance_level=compliance_level,
+            assessment_type_code=assessment_type_code,
             phases_config=phases_config,
         )
         self.db.add(template)
@@ -114,25 +142,63 @@ class FlowEngine:
         return template
 
     async def upsert_default_templates(self) -> List[FlowTemplate]:
-        """创建或更新默认四阶段等保企业自查模板。"""
-        from app.services.assessment_templates import LEVEL_2_TEMPLATE, LEVEL_3_TEMPLATE
+        """创建或更新等保、密评两套独立企业自查模板。"""
+        from app.services.assessment_templates import (
+            LEVEL_2_TEMPLATE,
+            LEVEL_3_TEMPLATE,
+            MIPING_LEVEL_2_TEMPLATE,
+            MIPING_LEVEL_3_TEMPLATE,
+        )
 
         templates = []
-        for config in (LEVEL_2_TEMPLATE, LEVEL_3_TEMPLATE):
+        for config in (LEVEL_2_TEMPLATE, LEVEL_3_TEMPLATE, MIPING_LEVEL_2_TEMPLATE, MIPING_LEVEL_3_TEMPLATE):
             result = await self.db.execute(
-                select(FlowTemplate).where(FlowTemplate.compliance_level == config["compliance_level"])
+                select(FlowTemplate).where(
+                    FlowTemplate.compliance_level == config["compliance_level"],
+                    FlowTemplate.assessment_type_code == config["assessment_type_code"],
+                )
             )
             template = result.scalars().first()
             if not template:
-                template = FlowTemplate(compliance_level=config["compliance_level"])
+                template = FlowTemplate(
+                    compliance_level=config["compliance_level"],
+                    assessment_type_code=config["assessment_type_code"],
+                )
                 self.db.add(template)
             template.name = config["name"]
-            template.description = "被测企业四阶段等保自查流程"
-            template.version = "3.0"
+            template.description = "被测企业四阶段等保自查流程" if config["assessment_type_code"] == "dengbao" else "被测企业四阶段密码应用安全自查流程"
+            template.version = "4.0"
             template.phases_config = config["phases_config"]
             template.is_active = True
             templates.append(template)
         await self.db.commit()
+
+        # Empty, never-started instances carry no evidence and can safely adopt the current template.
+        empty_assessments = list((await self.db.execute(select(Assessment).where(
+            Assessment.status == "not_started",
+            Assessment.progress == 0,
+        ))).scalars().all())
+        rebuilt = 0
+        for assessment in empty_assessments:
+            template = next((item for item in templates if item.id == assessment.template_id), None)
+            if not template:
+                continue
+            expected = [
+                (phase["id"], task["type"], task["name"])
+                for phase in template.phases_config
+                for task in phase.get("default_tasks", [])
+            ]
+            actual = []
+            actual_phases = await self.get_phases(assessment.id)
+            for phase in actual_phases:
+                actual.extend((phase.phase_id, task.task_type, task.name) for task in await self.get_tasks(phase.id))
+            expected_phase_ids = [phase["id"] for phase in template.phases_config]
+            if [phase.phase_id for phase in actual_phases] != expected_phase_ids or sorted(actual) != sorted(expected):
+                await self._rebuild_assessment_structure(assessment)
+                rebuilt += 1
+        if rebuilt:
+            await self.db.commit()
+            logger.info("Rebuilt %s empty assessment instance(s) from current templates", rebuilt)
         return templates
     
     # ========== 测评管理 ==========
@@ -153,24 +219,28 @@ class FlowEngine:
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
+        # 加载流程模板后，按测评类型复用对应实例；同项目可同时拥有等保和密评。
+        template = await self.get_template(template_id)
+        if not template:
+            raise ValueError(f"Template {template_id} not found")
+
         existing = (await self.db.execute(
             select(Assessment)
-            .where(Assessment.project_id == project_id)
+            .where(
+                Assessment.project_id == project_id,
+                Assessment.assessment_type_code == template.assessment_type_code,
+            )
             .order_by(Assessment.created_at.desc(), Assessment.id.desc())
             .limit(1)
         )).scalar_one_or_none()
         if existing:
             return existing
 
-        # 加载流程模板
-        template = await self.get_template(template_id)
-        if not template:
-            raise ValueError(f"Template {template_id} not found")
-        
         # 创建测评实例
         assessment = Assessment(
             project_id=project_id,
             template_id=template_id,
+            assessment_type_code=template.assessment_type_code,
             name=name or f"{template.name} - {datetime.now().strftime('%Y%m%d')}",
             assessment_level=template.compliance_level,
             total_phases=len(template.phases_config),
@@ -208,6 +278,8 @@ class FlowEngine:
         
         # 发出事件
         await self.emit_event(assessment.id, "assessment_created")
+        await self._sync_project_assessment(assessment)
+        await self.db.commit()
         
         logger.info(f"Created assessment {assessment.id} for project {project_id}")
         return assessment
@@ -219,11 +291,17 @@ class FlowEngine:
         )
         return result.scalar_one_or_none()
     
-    async def list_assessments(self, project_id: int = None) -> List[Assessment]:
+    async def list_assessments(
+        self,
+        project_id: int = None,
+        assessment_type_code: str | None = None,
+    ) -> List[Assessment]:
         """列出测评实例"""
         query = select(Assessment)
         if project_id:
             query = query.where(Assessment.project_id == project_id)
+        if assessment_type_code:
+            query = query.where(Assessment.assessment_type_code == assessment_type_code)
         result = await self.db.execute(query.order_by(Assessment.created_at.desc(), Assessment.id.desc()))
         return result.scalars().all()
 
@@ -355,13 +433,14 @@ class FlowEngine:
                 names = "、".join(item.name for item in prior_phases)
                 raise ValueError(f"请先完成前置阶段：{names}")
 
-            await reconcile_verification_phase(self.db, assessment.project_id)
+            await reconcile_verification_phase(self.db, assessment.project_id, assessment.id)
             await self.db.commit()
             await self.db.refresh(phase)
             if phase.status not in {"active", "completed"}:
                 raise ValueError("请先完成现场测评，再进入整改与复测")
             active_run = (await self.db.execute(select(VerificationRun.id).where(
                 VerificationRun.project_id == assessment.project_id,
+                VerificationRun.assessment_id == assessment.id,
                 VerificationRun.status.in_([VerificationRunStatus.QUEUED, VerificationRunStatus.RUNNING]),
             ).limit(1))).scalar_one_or_none()
             if active_run:
@@ -369,6 +448,7 @@ class FlowEngine:
 
             findings = list((await self.db.execute(select(Finding).where(
                 Finding.project_id == assessment.project_id,
+                Finding.assessment_id == assessment.id,
                 Finding.status != FindingStatus.FALSE_POSITIVE,
             ))).scalars().all())
             now = datetime.utcnow()
@@ -520,7 +600,7 @@ class FlowEngine:
                     repaired += 1
 
             from app.services.verification_service import reconcile_verification_phase
-            await reconcile_verification_phase(self.db, assessment.project_id)
+            await reconcile_verification_phase(self.db, assessment.project_id, assessment.id)
             prior_completed = True
             for phase in phases:
                 if not prior_completed and phase.status != "pending":
@@ -554,7 +634,10 @@ class FlowEngine:
         from app.models.project import Project
 
         latest_assessment_id = await self.db.scalar(
-            select(func.max(Assessment.id)).where(Assessment.project_id == assessment.project_id)
+            select(func.max(Assessment.id)).where(
+                Assessment.project_id == assessment.project_id,
+                Assessment.assessment_type_code == assessment.assessment_type_code,
+            )
         )
         if assessment.id != latest_assessment_id:
             return
@@ -569,14 +652,14 @@ class FlowEngine:
         
         # 获取或创建 AssessmentType
         result = await self.db.execute(
-            select(AssessmentType).where(AssessmentType.code == "dengbao")
+            select(AssessmentType).where(AssessmentType.code == assessment.assessment_type_code)
         )
         assessment_type = result.scalar_one_or_none()
         if not assessment_type:
             assessment_type = AssessmentType(
-                code="dengbao",
-                name="等级保护测评",
-                description="网络安全等级保护测评",
+                code=assessment.assessment_type_code,
+                name="等保" if assessment.assessment_type_code == "dengbao" else "密评",
+                description="网络安全等级保护测评" if assessment.assessment_type_code == "dengbao" else "商用密码应用安全性评估自查",
                 icon="safety-certificate",
             )
             self.db.add(assessment_type)
@@ -600,14 +683,16 @@ class FlowEngine:
         # 更新状态
         pa.status = assessment.status
         pa.progress = assessment.progress
-        pa.level = f"{project.compliance_level.value if project.compliance_level else ''}等保"
+        template = await self.get_template(assessment.template_id)
+        pa.level = "二级" if template and template.compliance_level == 2 else "三级"
         pa.started_at = assessment.started_at
         pa.completed_at = assessment.completed_at
         
         # 计算合规分数
         score = await self._calculate_compliance_score(assessment)
         pa.score = score
-        project.compliance_score = score
+        if assessment.assessment_type_code == "dengbao":
+            project.compliance_score = score
     
     async def _calculate_compliance_score(self, assessment) -> Optional[float]:
         return (await self._calculate_compliance_metrics(assessment))["score"]
@@ -627,6 +712,7 @@ class FlowEngine:
 
         findings = list((await self.db.execute(select(Finding).where(
             Finding.project_id == assessment.project_id,
+            Finding.assessment_id == assessment.id,
             Finding.status != FindingStatus.FALSE_POSITIVE,
         ))).scalars().all())
         document_findings = {
@@ -770,7 +856,11 @@ class FlowEngine:
         assessment = result.scalar_one_or_none()
         if not assessment:
             return tasks
-        official_keys = current_template_task_keys(assessment.assessment_level, phase.phase_id)
+        official_keys = current_template_task_keys(
+            assessment.assessment_level,
+            phase.phase_id,
+            assessment.assessment_type_code,
+        )
         return [task for task in tasks if (task.task_type, task.name) in official_keys] if official_keys else tasks
     
     async def get_task(self, task_id: int) -> Optional[TaskInstance]:
@@ -788,7 +878,7 @@ class FlowEngine:
         if phase.phase_id == "remediation_verification":
             assessment = await self.get_assessment(phase.assessment_id)
             from app.services.verification_service import reconcile_verification_phase
-            await reconcile_verification_phase(self.db, assessment.project_id)
+            await reconcile_verification_phase(self.db, assessment.project_id, assessment.id)
             await self.db.commit()
             return phase
 
@@ -815,7 +905,7 @@ class FlowEngine:
             assessment = await self.get_assessment(phase.assessment_id)
             if phase.phase_id == "field_assessment":
                 from app.services.verification_service import reconcile_verification_phase
-                await reconcile_verification_phase(self.db, assessment.project_id)
+                await reconcile_verification_phase(self.db, assessment.project_id, assessment.id)
         await self._update_assessment_progress(phase.assessment_id)
         return phase
     
@@ -937,7 +1027,7 @@ class FlowEngine:
             if phase.phase_id == "field_assessment":
                 assessment = await self.get_assessment(phase.assessment_id)
                 from app.services.verification_service import reconcile_verification_phase
-                await reconcile_verification_phase(self.db, assessment.project_id)
+                await reconcile_verification_phase(self.db, assessment.project_id, assessment.id)
         await self._update_assessment_progress(phase.assessment_id)
 
         await self.emit_event(phase.assessment_id, "task_completed", {"task_id": task_id})
@@ -1077,7 +1167,12 @@ class FlowEngine:
         phase = await self.get_phase(task.phase_id)
         assessment = await self.get_assessment(phase.assessment_id)
         from app.services.report_service import invalidate_report_artifacts
-        await invalidate_report_artifacts(self.db, assessment.project_id, f"测评任务已重置：{task.name}")
+        await invalidate_report_artifacts(
+            self.db,
+            assessment.project_id,
+            f"测评任务已重置：{task.name}",
+            assessment_id=assessment.id,
+        )
         if task.task_type == "doc_review":
             from app.models.document_knowledge import DocumentAnalysisRun, DocumentFile, DocumentRunFile
             from app.models.finding import Finding
@@ -1113,6 +1208,7 @@ class FlowEngine:
                 await file_storage.delete_file(document_path)
             finding_ids = list((await self.db.execute(select(Finding.id).where(
                 Finding.project_id == assessment.project_id,
+                Finding.assessment_id == assessment.id,
                 Finding.clause_id.like(f"DOC-TASK-{task.id}-%"),
             ))).scalars().all())
             await delete_verification_data(self.db, assessment.project_id, finding_ids)
@@ -1133,7 +1229,7 @@ class FlowEngine:
                 await self._reset_phase_state(item)
             if any(item.phase_id == "remediation_verification" for item in downstream):
                 from app.services.verification_service import reset_verification_data
-                await reset_verification_data(self.db, assessment.project_id)
+                await reset_verification_data(self.db, assessment.project_id, assessment.id)
 
         await self.db.commit()
 
@@ -1186,7 +1282,12 @@ class FlowEngine:
 
         assessment = await self.get_assessment(phase.assessment_id)
         from app.services.report_service import invalidate_report_artifacts
-        await invalidate_report_artifacts(self.db, assessment.project_id, f"测评阶段已重置：{phase.name}")
+        await invalidate_report_artifacts(
+            self.db,
+            assessment.project_id,
+            f"测评阶段已重置：{phase.name}",
+            assessment_id=assessment.id,
+        )
         tasks = await self.get_tasks(phase_id, official_only=True)
         affected_phases = [
             item for item in await self.get_phases(phase.assessment_id)
@@ -1197,7 +1298,7 @@ class FlowEngine:
 
         if any(item.phase_id == "remediation_verification" for item in affected_phases):
             from app.services.verification_service import reset_verification_data
-            await reset_verification_data(self.db, assessment.project_id)
+            await reset_verification_data(self.db, assessment.project_id, assessment.id)
 
         document_task_ids = [task.id for task in tasks if task.task_type == "doc_review"]
         if document_task_ids:
@@ -1222,6 +1323,7 @@ class FlowEngine:
                 await file_storage.delete_file(document_path)
             finding_ids = list((await self.db.execute(select(Finding.id).where(
                 Finding.project_id == assessment.project_id,
+                Finding.assessment_id == assessment.id,
                 or_(*[Finding.clause_id.like(f"DOC-TASK-{task_id}-%") for task_id in document_task_ids]),
             ))).scalars().all())
             await delete_verification_data(self.db, assessment.project_id, finding_ids)
@@ -1235,8 +1337,8 @@ class FlowEngine:
         logger.info(f"Phase {phase_id} reset to pending")
         return phase
 
-    async def _cancel_project_assessment_jobs(self, project_id: int) -> dict:
-        """Stop durable project jobs before their rows are removed by a full reset."""
+    async def _cancel_assessment_jobs(self, assessment_id: int) -> dict:
+        """Stop only jobs owned by one assessment before its full reset."""
         from app.models.document_knowledge import DocumentAnalysisRun
         from app.models.scan_task import ScanTask, ScanTaskStatus
         from app.models.verification import VerificationRun, VerificationRunStatus
@@ -1246,7 +1348,7 @@ class FlowEngine:
         scan_rows = (await self.db.execute(select(
             ScanTask.id, ScanTask.orchestrator_task_id
         ).where(
-            ScanTask.project_id == project_id,
+            ScanTask.assessment_id == assessment_id,
             ScanTask.status.in_([ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING]),
         ))).all()
         for row in scan_rows:
@@ -1268,7 +1370,7 @@ class FlowEngine:
             ))
 
         document_result = await self.db.execute(update(DocumentAnalysisRun).where(
-            DocumentAnalysisRun.project_id == project_id,
+            DocumentAnalysisRun.assessment_id == assessment_id,
             DocumentAnalysisRun.status.in_(["queued", "running"]),
         ).values(
             status="cancelled",
@@ -1280,7 +1382,7 @@ class FlowEngine:
             progress={"stage": "cancelled", "percent": 0, "message": "测评已完全重置"},
         ))
         verification_result = await self.db.execute(update(VerificationRun).where(
-            VerificationRun.project_id == project_id,
+            VerificationRun.assessment_id == assessment_id,
             VerificationRun.status.in_([VerificationRunStatus.QUEUED, VerificationRunStatus.RUNNING]),
         ).values(
             status=VerificationRunStatus.CANCELLED,
@@ -1293,7 +1395,7 @@ class FlowEngine:
         ))
         task_result = await self.db.execute(update(TaskInstance).where(
             TaskInstance.phase_id.in_(
-                select(PhaseInstance.id).join(Assessment).where(Assessment.project_id == project_id)
+                select(PhaseInstance.id).where(PhaseInstance.assessment_id == assessment_id)
             ),
             TaskInstance.status == "in_progress",
         ).values(
@@ -1313,88 +1415,56 @@ class FlowEngine:
             "assessment_tasks": task_result.rowcount or 0,
         }
 
-    async def _clear_project_assessment_outputs(self, project_id: int) -> dict:
-        """Delete project-scoped assessment outputs while preserving its assets and configuration."""
-        from app.models.assessment_type import ProjectAssessment
-        from app.models.change_snapshot import ChangeSnapshot
-        from app.models.context import ActionHistory, ConversationHistory, ResultCache
+    async def _clear_assessment_outputs(self, assessment_id: int) -> dict:
+        """Delete one assessment's outputs while preserving the project and sibling assessments."""
         from app.models.evidence import Evidence
         from app.models.finding import Finding
-        from app.models.monitoring import ScanHistory, ScheduledScan
-        from app.models.questionnaire import QuestionnaireRecord
+        from app.models.monitoring import ScanHistory
         from app.models.document_knowledge import DocumentAnalysisRun, DocumentFile
         from app.models.report import ReportArtifact
         from app.models.scan_task import ScanTask
-        from app.models.project import Project
         from app.services.data_lifecycle import delete_storage_files
         from app.services.knowledge_graph import knowledge_graph
         from app.services.verification_service import delete_verification_data
 
-        assessment_ids = list((await self.db.execute(select(Assessment.id).where(
-            Assessment.project_id == project_id
-        ))).scalars().all())
+        assessment = await self.get_assessment(assessment_id)
+        if not assessment:
+            raise ValueError(f"Assessment {assessment_id} not found")
+        project_id = assessment.project_id
         scan_task_ids = list((await self.db.execute(select(ScanTask.id).where(
-            ScanTask.project_id == project_id
+            ScanTask.assessment_id == assessment_id
         ))).scalars().all())
-        finding_ids = select(Finding.id).where(Finding.project_id == project_id)
-        questionnaire_ids = select(QuestionnaireRecord.id).where(QuestionnaireRecord.project_id == project_id)
-        evidence_scope = or_(
-            Evidence.project_id == project_id,
-            Evidence.finding_id.in_(finding_ids),
-            Evidence.questionnaire_record_id.in_(questionnaire_ids),
-        )
+        finding_ids = select(Finding.id).where(Finding.assessment_id == assessment_id)
+        evidence_scope = Evidence.finding_id.in_(finding_ids)
         evidence_rows = (await self.db.execute(select(
             Evidence.file_path, Evidence.file_size
         ).where(evidence_scope, Evidence.file_path.is_not(None)))).all()
         document_rows = (await self.db.execute(select(
             DocumentFile.storage_path, DocumentFile.size_bytes
-        ).where(DocumentFile.project_id == project_id))).all()
+        ).where(DocumentFile.assessment_id == assessment_id))).all()
         report_rows = (await self.db.execute(select(
             ReportArtifact.html_path, ReportArtifact.html_size
-        ).where(ReportArtifact.project_id == project_id))).all()
+        ).where(ReportArtifact.assessment_id == assessment_id))).all()
         counts = {
             "scan_tasks": len(scan_task_ids),
-            "findings": int((await self.db.execute(select(func.count(Finding.id)).where(Finding.project_id == project_id))).scalar_one()),
+            "findings": int((await self.db.execute(select(func.count(Finding.id)).where(Finding.assessment_id == assessment_id))).scalar_one()),
             "evidences": int((await self.db.execute(select(func.count(Evidence.id)).where(evidence_scope))).scalar_one()),
             "document_files": len(document_rows),
-            "document_runs": int((await self.db.execute(select(func.count(DocumentAnalysisRun.id)).where(DocumentAnalysisRun.project_id == project_id))).scalar_one()),
+            "document_runs": int((await self.db.execute(select(func.count(DocumentAnalysisRun.id)).where(DocumentAnalysisRun.assessment_id == assessment_id))).scalar_one()),
             "reports": len(report_rows),
-            "change_snapshots": int((await self.db.execute(select(func.count(ChangeSnapshot.id)).where(ChangeSnapshot.project_id == project_id))).scalar_one()),
         }
 
-        await delete_verification_data(self.db, project_id)
+        await delete_verification_data(self.db, project_id, assessment_id=assessment_id)
         await self.db.execute(delete(Evidence).where(evidence_scope))
-        await self.db.execute(delete(QuestionnaireRecord).where(QuestionnaireRecord.project_id == project_id))
-        await self.db.execute(delete(Finding).where(Finding.project_id == project_id))
-        await self.db.execute(delete(ProjectAssessment).where(ProjectAssessment.project_id == project_id))
-        await self.db.execute(delete(ReportArtifact).where(ReportArtifact.project_id == project_id))
-        await self.db.execute(delete(DocumentAnalysisRun).where(DocumentAnalysisRun.project_id == project_id))
-        await self.db.execute(delete(DocumentFile).where(DocumentFile.project_id == project_id))
-        if assessment_ids:
-            await self.db.execute(delete(FlowEvent).where(FlowEvent.assessment_id.in_(assessment_ids)))
+        await self.db.execute(delete(Finding).where(Finding.assessment_id == assessment_id))
+        await self.db.execute(delete(ReportArtifact).where(ReportArtifact.assessment_id == assessment_id))
+        await self.db.execute(delete(DocumentAnalysisRun).where(DocumentAnalysisRun.assessment_id == assessment_id))
+        await self.db.execute(delete(DocumentFile).where(DocumentFile.assessment_id == assessment_id))
+        await self.db.execute(delete(FlowEvent).where(FlowEvent.assessment_id == assessment_id))
         if scan_task_ids:
             await self.db.execute(delete(ScanHistory).where(ScanHistory.scan_task_id.in_(scan_task_ids)))
-        await self.db.execute(delete(ChangeSnapshot).where(ChangeSnapshot.project_id == project_id))
-        await self.db.execute(delete(ScanTask).where(ScanTask.project_id == project_id))
-        await self.db.execute(delete(ResultCache).where(ResultCache.project_id == project_id))
-        await self.db.execute(delete(ActionHistory).where(ActionHistory.project_id == project_id))
-        reset_marker = datetime.utcnow().isoformat()
-        conversations = (await self.db.execute(select(ConversationHistory).where(
-            ConversationHistory.project_id == project_id,
-            ConversationHistory.context_snapshot.is_not(None),
-        ))).scalars().all()
-        for conversation in conversations:
-            snapshot = dict(conversation.context_snapshot or {})
-            if snapshot.pop("scan_results", None) is not None:
-                snapshot["assessment_data_reset"] = reset_marker
-                snapshot["is_multi_asset"] = False
-                conversation.context_snapshot = snapshot
-        await self.db.execute(update(ScheduledScan).where(ScheduledScan.project_id == project_id).values(last_run_at=None))
-        await knowledge_graph.purge_project(self.db, project_id)
-        project = await self.db.get(Project, project_id)
-        if project:
-            project.compliance_score = None
-            project.report_version_counter = 0
+        await self.db.execute(delete(ScanTask).where(ScanTask.assessment_id == assessment_id))
+        await knowledge_graph.purge_assessment(self.db, assessment_id)
         await self.db.commit()
 
         file_rows = [*evidence_rows, *document_rows, *report_rows]
@@ -1404,6 +1474,51 @@ class FlowEngine:
             **file_cleanup,
             "released_file_bytes": sum(int(row[1] or 0) for row in file_rows),
         }
+
+    async def _rebuild_assessment_structure(self, assessment: Assessment) -> None:
+        """Replace phase/task instances with the current authoritative template."""
+        from app.services.assessment_templates import (
+            LEVEL_2_TEMPLATE,
+            LEVEL_3_TEMPLATE,
+            MIPING_LEVEL_2_TEMPLATE,
+            MIPING_LEVEL_3_TEMPLATE,
+        )
+
+        configs = {
+            ("dengbao", 2): LEVEL_2_TEMPLATE,
+            ("dengbao", 3): LEVEL_3_TEMPLATE,
+            ("miping", 2): MIPING_LEVEL_2_TEMPLATE,
+            ("miping", 3): MIPING_LEVEL_3_TEMPLATE,
+        }
+        key = (assessment.assessment_type_code, 2 if assessment.assessment_level == 2 else 3)
+        config = configs[key]
+        phase_ids = select(PhaseInstance.id).where(PhaseInstance.assessment_id == assessment.id)
+        await self.db.execute(delete(TaskInstance).where(TaskInstance.phase_id.in_(phase_ids)))
+        await self.db.execute(delete(PhaseInstance).where(PhaseInstance.assessment_id == assessment.id))
+
+        assessment.total_phases = len(config["phases_config"])
+        for phase_config in config["phases_config"]:
+            phase = PhaseInstance(
+                assessment_id=assessment.id,
+                phase_id=phase_config["id"],
+                name=phase_config["name"],
+                description=phase_config.get("description", ""),
+                order=phase_config["order"],
+                depends_on=phase_config.get("depends_on", []),
+                total_tasks=len(phase_config.get("default_tasks", [])),
+            )
+            self.db.add(phase)
+            await self.db.flush()
+            self.db.add_all([
+                TaskInstance(
+                    phase_id=phase.id,
+                    task_type=task_config["type"],
+                    name=task_config["name"],
+                    description=task_config.get("description", ""),
+                )
+                for task_config in phase_config.get("default_tasks", [])
+            ])
+        await self.db.flush()
 
     async def restart_assessment(self, assessment_id: int, mode: str = "reset") -> tuple[Assessment, dict]:
         """
@@ -1415,7 +1530,12 @@ class FlowEngine:
 
         if mode == "continue":
             from app.services.report_service import invalidate_report_artifacts
-            await invalidate_report_artifacts(self.db, assessment.project_id, "测评已重新打开")
+            await invalidate_report_artifacts(
+                self.db,
+                assessment.project_id,
+                "测评已重新打开",
+                assessment_id=assessment.id,
+            )
             assessment.status = "in_progress"
             assessment.completed_at = None
             if not assessment.started_at:
@@ -1425,7 +1545,7 @@ class FlowEngine:
             logger.info(f"Assessment {assessment_id} reopened without clearing evidence")
             return assessment, {}
 
-        cancelled_jobs = await self._cancel_project_assessment_jobs(assessment.project_id)
+        cancelled_jobs = await self._cancel_assessment_jobs(assessment.id)
 
         phases = await self.get_phases(assessment_id)
         for phase in phases:
@@ -1438,7 +1558,11 @@ class FlowEngine:
         assessment.completed_at = None
         assessment.extra_data = None
 
-        cleanup = await self._clear_project_assessment_outputs(assessment.project_id)
+        cleanup = await self._clear_assessment_outputs(assessment.id)
+        await self._rebuild_assessment_structure(assessment)
+
+        await self._sync_project_assessment(assessment)
+        await self.db.commit()
 
         await self.emit_event(assessment_id, "assessment_reset", {"assessment_id": assessment_id})
 

@@ -1,5 +1,7 @@
 import { Avatar, Button, Dropdown, Select, Tag, message } from 'antd'
 import {
+  AlertOutlined,
+  CloudServerOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   FileTextOutlined,
@@ -24,8 +26,10 @@ const NAV_ITEMS = [
   { key: 'projects', group: '项目执行', label: '项目工作台', icon: <ProjectOutlined />, path: '/projects', permission: 'project:read' },
   { key: 'assets', group: '项目执行', label: '资产矩阵', icon: <DatabaseOutlined />, path: '/projects?view=assets', permission: 'asset:read' },
   { key: 'assessment', group: '测评中心', label: '等保测评', icon: <SafetyCertificateOutlined />, path: '/projects', permission: 'assessment:read' },
-  { key: 'password-assessment', group: '测评中心', label: '密码测评', icon: <LockOutlined />, upcoming: true, permission: 'assessment:read' },
+  { key: 'password-assessment', group: '测评中心', label: '密码测评', icon: <LockOutlined />, path: '/projects?assessment=miping', permission: 'assessment:read' },
   { key: 'reports', group: '治理中心', label: '报告中心', icon: <FileTextOutlined />, path: '/reports', permission: 'report:read' },
+  { key: 'operations', group: '治理中心', label: '运行与告警', icon: <AlertOutlined />, path: '/operations', permission: 'tool:diagnose' },
+  { key: 'scan-nodes', group: '治理中心', label: '扫描节点', icon: <CloudServerOutlined />, path: '/settings/scan-nodes', permission: 'node:read' },
   { key: 'access', group: '治理中心', label: '角色权限', icon: <TeamOutlined />, path: '/settings/access', permission: 'role:read' },
   { key: 'data', group: '系统', label: '数据与生命周期', icon: <DatabaseOutlined />, path: '/settings/data-lifecycle', permission: 'system:config' },
   { key: 'models', group: '系统', label: '系统设置', icon: <SettingOutlined />, path: '/settings/models', permission: 'system:config' },

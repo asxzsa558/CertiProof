@@ -165,7 +165,15 @@ async def delete_verification_data(
     db: AsyncSession,
     project_id: int,
     finding_ids: Iterable[int] | None = None,
+    assessment_id: int | None = None,
 ) -> None:
+    if assessment_id is not None:
+        run_ids = select(VerificationRun.id).where(VerificationRun.assessment_id == assessment_id)
+        scoped_findings = select(Finding.id).where(Finding.assessment_id == assessment_id)
+        await db.execute(delete(FindingEvent).where(FindingEvent.finding_id.in_(scoped_findings)))
+        await db.execute(delete(VerificationItem).where(VerificationItem.run_id.in_(run_ids)))
+        await db.execute(delete(VerificationRun).where(VerificationRun.assessment_id == assessment_id))
+        return
     scoped_ids = list(dict.fromkeys(int(value) for value in finding_ids or []))
     if finding_ids is not None and not scoped_ids:
         return
@@ -188,22 +196,38 @@ async def delete_verification_data(
             await db.execute(delete(VerificationRun).where(VerificationRun.id == run_id))
 
 
-async def reset_verification_data(db: AsyncSession, project_id: int) -> None:
-    await delete_verification_data(db, project_id)
-    findings = (await db.execute(select(Finding).where(
+async def reset_verification_data(
+    db: AsyncSession,
+    project_id: int,
+    assessment_id: int | None = None,
+) -> None:
+    await delete_verification_data(db, project_id, assessment_id=assessment_id)
+    filters = [
         Finding.project_id == project_id,
         Finding.status.not_in([FindingStatus.FALSE_POSITIVE]),
-    ))).scalars().all()
+    ]
+    if assessment_id is not None:
+        filters.append(Finding.assessment_id == assessment_id)
+    findings = (await db.execute(select(Finding).where(*filters))).scalars().all()
     for finding in findings:
         finding.status = FindingStatus.OPEN
         finding.resolved_at = None
 
 
-async def latest_assessment_and_phase(db: AsyncSession, project_id: int) -> tuple[Assessment, PhaseInstance]:
-    assessment = (await db.execute(
-        select(Assessment).where(Assessment.project_id == project_id)
-        .order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1)
-    )).scalar_one_or_none()
+async def latest_assessment_and_phase(
+    db: AsyncSession,
+    project_id: int,
+    assessment_id: int | None = None,
+) -> tuple[Assessment, PhaseInstance]:
+    if assessment_id is not None:
+        assessment = await db.get(Assessment, assessment_id)
+        if not assessment or assessment.project_id != project_id:
+            raise ValueError("测评实例不属于当前项目")
+    else:
+        assessment = (await db.execute(
+            select(Assessment).where(Assessment.project_id == project_id)
+            .order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1)
+        )).scalar_one_or_none()
     if not assessment:
         raise ValueError("当前项目尚未创建等保测评")
     phase = (await db.execute(select(PhaseInstance).where(
@@ -233,6 +257,9 @@ async def create_verification_run(
         raise ValueError("复测问题不属于当前项目")
     if any((finding.source_type or "") != source_type for finding in findings):
         raise ValueError("一次复测只能处理同一种问题来源")
+    assessment_ids = {finding.assessment_id for finding in findings}
+    if None in assessment_ids or len(assessment_ids) != 1:
+        raise ValueError("一次复测只能处理同一测评中的问题")
     active = (await db.execute(select(VerificationItem.finding_id).join(VerificationRun).where(
         VerificationItem.finding_id.in_([finding.id for finding in findings]),
         VerificationRun.status.in_([VerificationRunStatus.QUEUED, VerificationRunStatus.RUNNING]),
@@ -240,9 +267,14 @@ async def create_verification_run(
     if active:
         raise ValueError(f"所选问题已有复测在执行：{sorted(set(active))}")
 
-    assessment, phase = await latest_assessment_and_phase(db, project_id)
+    assessment, phase = await latest_assessment_and_phase(db, project_id, assessment_ids.pop())
     from app.services.report_service import invalidate_report_artifacts
-    await invalidate_report_artifacts(db, project_id, "已发起新的整改复测")
+    await invalidate_report_artifacts(
+        db,
+        project_id,
+        "已发起新的整改复测",
+        assessment_id=assessment.id,
+    )
     run = VerificationRun(
         project_id=project_id,
         assessment_id=assessment.id,
@@ -278,7 +310,7 @@ async def create_verification_run(
         db.add(item)
         await db.flush()
         await add_finding_event(db, finding, "verification_queued", verification_item=item, actor_id=actor_id)
-    await reconcile_verification_phase(db, project_id)
+    await reconcile_verification_phase(db, project_id, assessment.id)
     return run
 
 
@@ -298,6 +330,7 @@ async def queue_document_task_verification(
         raise ValueError("原文档检查任务不属于当前项目")
     findings = list((await db.execute(select(Finding).where(
         Finding.project_id == project_id,
+        Finding.assessment_id == assessment.id,
         Finding.source_type == "document",
         Finding.scope_key == f"task:{task.id}",
         Finding.status == FindingStatus.OPEN,
@@ -395,18 +428,22 @@ async def finish_verification_run(db: AsyncSession, run: VerificationRun) -> Non
         run.lease_expires_at = None
         run.credential_envelope = None
     run.summary = {"total": len(items), "completed": sum(counts[item.value] for item in terminal), **counts}
-    await reconcile_verification_phase(db, run.project_id)
+    await reconcile_verification_phase(db, run.project_id, run.assessment_id)
 
 
 async def reopen_finding(db: AsyncSession, finding: Finding, actor_id: int) -> None:
     finding.status = FindingStatus.OPEN
     finding.resolved_at = None
     await add_finding_event(db, finding, "finding_reopened", actor_id=actor_id)
-    await reconcile_verification_phase(db, finding.project_id)
+    await reconcile_verification_phase(db, finding.project_id, finding.assessment_id)
 
 
-async def reconcile_verification_phase(db: AsyncSession, project_id: int) -> None:
-    assessment = (await db.execute(
+async def reconcile_verification_phase(
+    db: AsyncSession,
+    project_id: int,
+    assessment_id: int | None = None,
+) -> None:
+    assessment = await db.get(Assessment, assessment_id) if assessment_id is not None else (await db.execute(
         select(Assessment).where(Assessment.project_id == project_id)
         .order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1)
     )).scalar_one_or_none()
@@ -425,10 +462,11 @@ async def reconcile_verification_phase(db: AsyncSession, project_id: int) -> Non
 
     findings = (await db.execute(select(Finding).where(
         Finding.project_id == project_id,
+        Finding.assessment_id == assessment.id,
         Finding.status != FindingStatus.FALSE_POSITIVE,
     ))).scalars().all()
     reviewed_ids = set((await db.execute(select(VerificationItem.finding_id).where(
-        VerificationItem.project_id == project_id,
+        VerificationItem.finding_id.in_([finding.id for finding in findings]),
         VerificationItem.outcome.in_([
             VerificationOutcome.FIXED,
             VerificationOutcome.STILL_PRESENT,
@@ -439,6 +477,7 @@ async def reconcile_verification_phase(db: AsyncSession, project_id: int) -> Non
     reviewed = sum(finding.status == FindingStatus.FIXED or finding.id in reviewed_ids for finding in findings)
     active_runs = int((await db.execute(select(VerificationRun.id).where(
         VerificationRun.project_id == project_id,
+        VerificationRun.assessment_id == assessment.id,
         VerificationRun.status.in_([VerificationRunStatus.QUEUED, VerificationRunStatus.RUNNING]),
     ))).scalars().first() is not None)
     explicitly_finalized = bool((verification.outputs or {}).get("continued_to_report"))
@@ -510,7 +549,12 @@ async def reconcile_verification_phase(db: AsyncSession, project_id: int) -> Non
 
     if report and report_must_wait:
         from app.services.report_service import invalidate_report_artifacts
-        await invalidate_report_artifacts(db, project_id, "测评或复测状态已变化")
+        await invalidate_report_artifacts(
+            db,
+            project_id,
+            "测评或复测状态已变化",
+            assessment_id=assessment.id,
+        )
         report.status = "pending"
         report.progress = 0
         report.completed_tasks = 0

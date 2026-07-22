@@ -18,6 +18,7 @@ from app.api.evidences import router as evidences_router
 from app.api.dashboard import router as dashboard_router
 from app.api.organizations import router as organizations_router
 from app.api.dev import router as dev_router
+from app.api.scan_nodes import router as scan_nodes_router
 
 api_router = APIRouter()
 
@@ -41,5 +42,6 @@ api_router.include_router(evidences_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(organizations_router)
 api_router.include_router(dev_router)
+api_router.include_router(scan_nodes_router)
 
 __all__ = ["api_router"]

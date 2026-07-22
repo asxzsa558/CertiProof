@@ -511,6 +511,7 @@ def _tool_health(scans):
 @router.get("/organization-command")
 async def get_organization_command_dashboard(
     organization_id: Optional[int] = Query(None),
+    assessment_code: Optional[str] = Query(None, pattern="^(dengbao|miping)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -609,9 +610,15 @@ async def get_organization_command_dashboard(
             select(Assessment)
             .where(Assessment.project_id == project.id)
             .order_by(Assessment.created_at.desc(), Assessment.id.desc())
-            .limit(1)
         )
-        assessment = assessment_result.scalar_one_or_none()
+        project_assessments = list(assessment_result.scalars().all())
+        assessment = next(
+            (item for item in project_assessments if item.assessment_type_code == assessment_code),
+            None,
+        ) if assessment_code else next(
+            (item for item in project_assessments if item.assessment_type_code == "dengbao"),
+            project_assessments[0] if project_assessments else None,
+        )
         current_phase = None
         phases = []
         evidence_count = 0
@@ -628,13 +635,25 @@ async def get_organization_command_dashboard(
             task_total = sum(p.total_tasks or 0 for p in phases)
             task_done = sum(p.completed_tasks or 0 for p in phases)
 
-        project_findings_result = await db.execute(select(Finding).where(Finding.project_id == project.id))
+        finding_filters = [Finding.project_id == project.id]
+        if assessment_code and assessment:
+            finding_filters.append(Finding.assessment_id == assessment.id)
+        project_findings_result = await db.execute(select(Finding).where(*finding_filters))
         project_findings = project_findings_result.scalars().all()
         risk_stats = _actionable_risk_summary(project_findings)
         project_risk_stats[project.id] = risk_stats
         risk_count = risk_stats["risk_count"]
 
-        evidence_result = await db.execute(select(func.count(Evidence.id)).where(Evidence.project_id == project.id))
+        if assessment_code and assessment:
+            evidence_result = await db.execute(
+                select(func.count(Evidence.id))
+                .join(Finding, Finding.id == Evidence.finding_id)
+                .where(Finding.assessment_id == assessment.id)
+            )
+        else:
+            evidence_result = await db.execute(
+                select(func.count(Evidence.id)).where(Evidence.project_id == project.id)
+            )
         evidence_count = evidence_result.scalar() or 0
         task_completion_rate = round((task_done / task_total) * 100) if task_total else 0
 

@@ -48,11 +48,12 @@ const dedupeAssets = (assets = []) => {
   })
 }
 
-function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpenResults }) {
+function ChatWorkspace({ projectId, projectName, assessmentCode = 'dengbao', modelId, externalCommand, onOpenResults }) {
+  const activeToolCatalog = TOOL_CATALOG.filter(tool => !tool.assessment || tool.assessment === assessmentCode)
+  const activeSlashCommands = SLASH_COMMANDS.filter(command => !command.assessment || command.assessment === assessmentCode)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
-  const [activeRequests, setActiveRequests] = useState(0)
-  const loading = activeRequests > 0
+  const [, setActiveRequests] = useState(0)
   const [inputHistory, setInputHistory] = useState([])
   const [historyIndex, setHistoryIndex] = useState(null)
 
@@ -100,6 +101,22 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
     stickToBottomRef.current = true
     setInputHistory(prev => (prev[prev.length - 1] === value ? prev : [...prev.slice(-49), value]))
     setHistoryIndex(null)
+  }
+
+  const beginRequest = (userMessage) => {
+    const replyId = `reply-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    setMessages(prev => [
+      ...prev,
+      { ...userMessage, id: userMessage.id || `user-${replyId}` },
+      { id: replyId, role: 'assistant', content: '', isPending: true },
+    ])
+    return replyId
+  }
+
+  const resolveRequest = (replyId, messageData) => {
+    setMessages(prev => prev.map(item => item.id === replyId
+      ? { id: replyId, role: 'assistant', ...messageData, isPending: false }
+      : item))
   }
 
   const buildMultiAssetActionText = (capability, count, allSelected) => {
@@ -282,7 +299,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
     }
 
     // 检测扫描命令
-    const scanCommands = TOOL_CATALOG.map(tool => tool.command).sort((a, b) => b.length - a.length)
+    const scanCommands = activeToolCatalog.map(tool => tool.command).sort((a, b) => b.length - a.length)
     const matchedCommand = scanCommands.find(cmd => messageText === cmd || messageText.startsWith(cmd + ' '))
     if (matchedCommand) {
       const matchedTool = TOOL_BY_COMMAND[matchedCommand]
@@ -369,8 +386,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
     
     setLastRequest({ message: messageText, timestamp: now })
 
-    const userMessage = { role: 'user', content: displayText }
-    setMessages((prev) => [...prev, userMessage])
+    const replyId = beginRequest({ role: 'user', content: displayText })
     setInput('')
     setActiveRequests(prev => prev + 1)
 
@@ -378,6 +394,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
       const response = await api.post('/chat/', {
         message: messageText,
         project_id: projectId,
+        assessment_code: assessmentCode,
         model_id: currentModelId,
         thread_id: currentThreadId,
       })
@@ -399,7 +416,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
         currentStep: taskId ? '正在准备执行...' : undefined,
         stepProgress: taskId ? { step_index: 0, total_steps: 1, steps: [] } : undefined,
       }
-      setMessages((prev) => [...prev, assistantMessage])
+      resolveRequest(replyId, assistantMessage)
 
       // 如果有 task_id，先尝试 WebSocket，失败则降级为轮询
       if (taskId) {
@@ -413,7 +430,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
         content: `抱歉，处理请求时出错：${error.response?.data?.detail || error.message || '未知错误'}`,
         isError: true,
       }
-      setMessages((prev) => [...prev, errorMessage])
+      resolveRequest(replyId, errorMessage)
     } finally {
       setActiveRequests(prev => Math.max(0, prev - 1))
     }
@@ -506,16 +523,16 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
       uniqueAssets.length === dedupeAssets(assetSelectorAssets).length,
     )
     
+    const userMessage = {
+      role: 'user',
+      content: `${targetDesc}。${sshInfo}`,
+      isMultiAsset: true,
+      totalAssets: uniqueAssets.length,
+    }
+    const replyId = beginRequest(userMessage)
+    setInput('')
+    setActiveRequests(prev => prev + 1)
     try {
-      const userMessage = {
-        role: 'user',
-        content: `${targetDesc}。${sshInfo}`,
-        isMultiAsset: true,
-        totalAssets: uniqueAssets.length,
-      }
-      setMessages(prev => [...prev, userMessage])
-      setInput('')
-      setActiveRequests(prev => prev + 1)
       
       const scanResponse = await api.post('/chat/', {
         message: JSON.stringify({
@@ -524,6 +541,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
           assets: uniqueAssets,
         }),
         project_id: projectId,
+        assessment_code: assessmentCode,
         thread_id: currentThreadId,
       })
       
@@ -539,17 +557,17 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
         totalAssets: uniqueAssets.length,
         assetProgress: {},
       }
-      setMessages(prev => [...prev, assistantMessage])
+      resolveRequest(replyId, assistantMessage)
       
       if (taskId) {
         connectWebSocket(taskId)
       }
     } catch (error) {
-      setMessages(prev => [...prev, {
+      resolveRequest(replyId, {
         role: 'assistant',
         content: `扫描失败：${error.response?.data?.detail || error.message}`,
         isError: true,
-      }])
+      })
     } finally {
       setActiveRequests(prev => Math.max(0, prev - 1))
     }
@@ -571,16 +589,16 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
     const capability = COMMAND_TO_CAPABILITY[command]
     const targetDesc = buildMultiAssetActionText(capability, assets.length, assets.length === dedupeAssets(assetSelectorAssets).length)
     
-    try {
-      const userMessage = {
+    const userMessage = {
         role: 'user',
         content: targetDesc,
         isMultiAsset: true,
         totalAssets: assets.length,
-      }
-      setMessages(prev => [...prev, userMessage])
-      setInput('')
-      setActiveRequests(prev => prev + 1)
+    }
+    const replyId = beginRequest(userMessage)
+    setInput('')
+    setActiveRequests(prev => prev + 1)
+    try {
       
       const scanResponse = await api.post('/chat/', {
         message: JSON.stringify({
@@ -590,6 +608,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
           assets: assets.map(a => ({ id: a.id, value: a.value, type: a.asset_type })),
         }),
         project_id: projectId,
+        assessment_code: assessmentCode,
         thread_id: currentThreadId,
       })
       
@@ -605,7 +624,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
         totalAssets: assets.length,
         assetProgress: {},
       }
-      setMessages(prev => [...prev, assistantMessage])
+      resolveRequest(replyId, assistantMessage)
       
       if (taskId) {
         connectWebSocket(taskId)
@@ -613,11 +632,11 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
       
     } catch (error) {
       console.error('Multi-asset scan failed:', error)
-      setMessages(prev => [...prev, {
+      resolveRequest(replyId, {
         role: 'assistant',
         content: `多资产扫描失败：${error.response?.data?.detail || error.message || '未知错误'}`,
         isError: true,
-      }])
+      })
     } finally {
       setActiveRequests(prev => Math.max(0, prev - 1))
     }
@@ -689,16 +708,16 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
     const capability = COMMAND_TO_CAPABILITY[command]
     const targetDesc = buildMultiAssetActionText(capability, assets.length, assets.length === dedupeAssets(assetSelectorAssets).length)
     
-    try {
-      const userMessage = {
+    const userMessage = {
         role: 'user',
         content: `${targetDesc}。${sshCredentialInfo}`,
         isMultiAsset: true,
         totalAssets: assets.length,
-      }
-      setMessages(prev => [...prev, userMessage])
-      setInput('')
-      setActiveRequests(prev => prev + 1)
+    }
+    const replyId = beginRequest(userMessage)
+    setInput('')
+    setActiveRequests(prev => prev + 1)
+    try {
       
       const scanResponse = await api.post('/chat/', {
         message: JSON.stringify({
@@ -713,6 +732,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
           },
         }),
         project_id: projectId,
+        assessment_code: assessmentCode,
         thread_id: currentThreadId,
       })
       
@@ -728,17 +748,17 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
         totalAssets: assets.length,
         assetProgress: {},
       }
-      setMessages(prev => [...prev, assistantMessage])
+      resolveRequest(replyId, assistantMessage)
       
       if (taskId) {
         connectWebSocket(taskId)
       }
     } catch (error) {
-      setMessages(prev => [...prev, {
+      resolveRequest(replyId, {
         role: 'assistant',
         content: `扫描失败：${error.response?.data?.detail || error.message}`,
         isError: true,
-      }])
+      })
     } finally {
       setActiveRequests(prev => Math.max(0, prev - 1))
     }
@@ -949,8 +969,8 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
     })
   }
 
-  const filteredCommands = SLASH_COMMANDS.filter(cmd => 
-    cmd.command.includes(commandFilter.toLowerCase()) || 
+  const filteredCommands = activeSlashCommands.filter(cmd =>
+    cmd.command.includes(commandFilter.toLowerCase()) ||
     cmd.description.includes(commandFilter.toLowerCase())
   )
 
@@ -1051,7 +1071,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
   }
 
   const handleShowHelp = () => {
-    const toolText = TOOL_CATALOG.map(tool => `${tool.usage} - ${tool.description}`).join('\n')
+    const toolText = activeToolCatalog.map(tool => `${tool.usage} - ${tool.description}`).join('\n')
     const systemText = SYSTEM_COMMANDS.map(cmd => `${cmd.usage} - ${cmd.description}`).join('\n')
     const helpText = `可用命令：\n\n${toolText}\n\n系统命令：\n${systemText}`
     setMessages(prev => [...prev, {
@@ -1534,7 +1554,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
       {/* Messages */}
       <div className="workspace-messages" ref={messagesContainerRef} onScroll={updateStickToBottom} onWheel={handleMessageWheel}>
         {messages.map((msg, index) => (
-          <div key={index} className={`workspace-message ${msg.role}`}>
+          <div key={msg.id || index} className={`workspace-message ${msg.role}`}>
             <div className="message-avatar">
               {msg.role === 'user' ? (
                 <Avatar size={32} style={{ background: 'rgba(255,255,255,0.1)' }} icon={<UserOutlined />} />
@@ -1544,7 +1564,12 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
             </div>
             <div className="message-body">
               {/* 诊断结果 */}
-              {msg.isDiagnostic ? (
+              {msg.isPending ? (
+                <div className="message-bubble assistant loading">
+                  <Spin size="small" />
+                  <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.6)' }}>思考中...</span>
+                </div>
+              ) : msg.isDiagnostic ? (
                 <DiagnosticResultCard data={msg.diagnosticData} />
               ) : msg.isResult ? (
                 <ResultMessageRenderer msg={msg} compact={resultOrderByMessageIndex.get(index) < compactResultBefore} />
@@ -1583,20 +1608,6 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
             </div>
           </div>
         ))}
-        {loading && (
-          <div className="workspace-message assistant">
-            <div className="message-avatar">
-              <VeriSureLogo size={32} className="chat-avatar-logo" />
-            </div>
-            <div className="message-body">
-              <div className="message-bubble assistant loading">
-                <Spin size="small" />
-                <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.6)' }}>思考中...</span>
-              </div>
-            </div>
-          </div>
-        )}
-        
         {/* Compression Status Indicator */}
         {compressionStatus === 'started' && (
           <div className="workspace-message assistant">
@@ -1641,7 +1652,7 @@ function ChatWorkspace({ projectId, projectName, modelId, externalCommand, onOpe
               <Button type="text" size="small" onClick={() => setShowQuickActions(false)}>关闭</Button>
             </div>
             <div className="quick-action-grid">
-              {[...TOOL_CATALOG].sort((a, b) => Number(Boolean(b.primary)) - Number(Boolean(a.primary))).map(tool => (
+              {[...activeToolCatalog].sort((a, b) => Number(Boolean(b.primary)) - Number(Boolean(a.primary))).map(tool => (
                 <button
                   key={tool.command}
                   type="button"

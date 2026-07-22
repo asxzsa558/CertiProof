@@ -597,7 +597,7 @@ async def create_document_run(
     if not files:
         raise DocumentExtractionError("该任务尚未上传或归类文档。")
     from app.services.report_service import invalidate_report_artifacts
-    await invalidate_report_artifacts(db, project_id, "已重新分析文档材料")
+    await invalidate_report_artifacts(db, project_id, "已重新分析文档材料", assessment_id=assessment.id)
     previous_run_id = (await db.execute(
         select(DocumentAnalysisRun.id).where(
             DocumentAnalysisRun.task_id == task.id,
@@ -643,7 +643,7 @@ async def create_document_batch_run(
     if not phase or not assessment or assessment.project_id != project_id:
         raise DocumentExtractionError("批量文档不属于有效的测评流程。")
     from app.services.report_service import invalidate_report_artifacts
-    await invalidate_report_artifacts(db, project_id, "已上传并分析新的批量文档")
+    await invalidate_report_artifacts(db, project_id, "已上传并分析新的批量文档", assessment_id=assessment.id)
     run = DocumentAnalysisRun(
         project_id=project_id,
         assessment_id=assessment.id,
@@ -1122,7 +1122,11 @@ async def process_document_run(db: AsyncSession, run: DocumentAnalysisRun) -> No
         task.result = {"type": "doc_review", "status": "processing", "run_id": run.id, "analysis_mode": analysis_mode, "progress": run.progress}
     await _touch_run(db, run)
     expected_name = task.name.split("文档检查：", 1)[1].strip() if "文档检查：" in task.name else task.name
-    control_engine = await DocumentControlEngine.from_graph(db)
+    assessment = await db.get(Assessment, run.assessment_id)
+    control_engine = await DocumentControlEngine.from_graph(
+        db,
+        assessment.assessment_type_code if assessment else "dengbao",
+    )
     analysis = await control_engine.analyze_retrieved(db, run.id, expected_doc_name=expected_name)
     analysis["files"] = manifests
     analysis["analysis_mode"] = analysis_mode
@@ -1238,9 +1242,12 @@ async def process_document_batch_run(db: AsyncSession, run: DocumentAnalysisRun)
     await _assert_run_active(db, run)
     parameters = run.parameters or {}
     verification_batch = bool(parameters.get("verification_batch"))
-    task_phase_id = int(parameters.get("document_task_phase_id") or run.phase_id)
+    task_phase_ids = [
+        int(value) for value in parameters.get("document_task_phase_ids")
+        or [parameters.get("document_task_phase_id") or run.phase_id]
+    ]
     tasks = (await db.execute(
-        select(TaskInstance).where(TaskInstance.phase_id == task_phase_id, TaskInstance.task_type == "doc_review")
+        select(TaskInstance).where(TaskInstance.phase_id.in_(task_phase_ids), TaskInstance.task_type == "doc_review")
     )).scalars().all()
     task_by_name = {
         task.name.split("文档检查：", 1)[1].strip(): task
@@ -1255,7 +1262,11 @@ async def process_document_batch_run(db: AsyncSession, run: DocumentAnalysisRun)
     run.progress = {"stage": "native_extraction", "percent": 5, "message": "正在提取并识别文档"}
     await db.commit()
 
-    engine = await DocumentControlEngine.from_graph(db)
+    assessment = await db.get(Assessment, run.assessment_id)
+    engine = await DocumentControlEngine.from_graph(
+        db,
+        assessment.assessment_type_code if assessment else "dengbao",
+    )
     classified: list[dict] = []
     unclassified: list[dict] = []
     affected_task_ids: set[int] = set()
@@ -1431,7 +1442,9 @@ async def process_document_batch_run(db: AsyncSession, run: DocumentAnalysisRun)
 
     if unable_tasks:
         from app.services.flow_engine import get_flow_engine
-        await get_flow_engine(db).reconcile_phase_progress(task_phase_id)
+        flow = get_flow_engine(db)
+        for task_phase_id in task_phase_ids:
+            await flow.reconcile_phase_progress(task_phase_id)
 
     queued_count = len(run.result_summary["verification_runs"])
     skipped_count = len(run.result_summary["verification_skipped"])

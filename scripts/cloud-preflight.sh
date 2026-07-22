@@ -31,11 +31,13 @@ password="$(env_value POSTGRES_PASSWORD)"
 secret="$(env_value SECRET_KEY)"
 domain="$(env_value CERTIPROOF_DOMAIN)"
 policy="$(env_value LLM_RUNTIME_POLICY)"
+version="$(env_value CERTIPROOF_VERSION)"
 
 [[ ${#password} -ge 20 && "$password" != replace-with-* ]] || fail "POSTGRES_PASSWORD must be at least 20 characters."
 [[ "$password" =~ ^[A-Za-z0-9._~-]+$ ]] || fail "POSTGRES_PASSWORD must use URL-safe characters: letters, digits, dot, underscore, tilde or hyphen."
 [[ ${#secret} -ge 32 && "$secret" != replace-with-* ]] || fail "SECRET_KEY must be at least 32 non-placeholder characters."
 [[ -n "$domain" && "$domain" != *.example.com ]] || fail "Set the real CERTIPROOF_DOMAIN and matching DNS record."
+[[ -n "$version" && "$version" != "latest" && "$version" != replace-with-* ]] || fail "Set an immutable CERTIPROOF_VERSION from the release package."
 
 profiles=(--profile production)
 case "$policy" in

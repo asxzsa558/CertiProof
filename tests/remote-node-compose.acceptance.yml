@@ -1,0 +1,21 @@
+services:
+  node:
+    networks:
+      - scan-node-net
+      - control-plane
+
+  remote-only-target:
+    image: python:3.11-slim
+    command: ["python", "-m", "http.server", "8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080', timeout=3)"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - scan-node-net
+
+networks:
+  control-plane:
+    external: true
+    name: certiproof_certiproof-net

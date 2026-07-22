@@ -20,6 +20,7 @@ NETWORK_CAPABILITIES = {
     "scan_weak_passwords", "full_compliance_scan", "tech_assessment",
     "baseline_check", "password_policy_check", "ssh_config_check", "audit_config_check",
     "service_port_check", "file_permission_check", "mac_check", "ping_asset",
+    "crypto_transport_scan", "crypto_certificate_check", "crypto_onsite_assessment",
 }
 
 _PORT_RANGE = re.compile(r"^\d{1,5}(?:-\d{1,5})?(?:,\d{1,5}(?:-\d{1,5})?)*$")

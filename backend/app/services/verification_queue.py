@@ -144,6 +144,7 @@ async def _process_technical_group(
             project_id=run.project_id,
             user_id=run.requested_by,
             params=credentials.get(target) or {},
+            assessment_id=run.assessment_id,
         )
     except Exception as exc:
         for item in items:

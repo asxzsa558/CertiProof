@@ -18,7 +18,7 @@ from app.models.report import ReportArtifact
 from app.services.assessment_templates import LEVEL_3_TEMPLATE, TASK_TYPES
 from app.services.verification_service import controlled_remediation_plan, scrub_sensitive_parameters
 from app.services.file_storage import file_storage
-from app.services.flow_engine import workflow_progress
+from app.services.flow_engine import get_flow_engine, workflow_progress
 
 
 def _value(value):
@@ -234,7 +234,11 @@ def _document_evidence_html(finding: dict) -> str:
     return "".join(rows) + suffix
 
 
-async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
+async def generate_json_report(
+    db: AsyncSession,
+    project_id: int,
+    assessment_id: int | None = None,
+) -> dict:
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
     if not project:
@@ -242,11 +246,16 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
 
     result = await db.execute(
         select(Assessment)
-        .where(Assessment.project_id == project_id)
+        .where(
+            Assessment.project_id == project_id,
+            *( [Assessment.id == assessment_id] if assessment_id is not None else [] ),
+        )
         .order_by(Assessment.created_at.desc(), Assessment.id.desc())
         .limit(1)
     )
     assessment = result.scalar_one_or_none()
+    if not assessment:
+        raise ValueError("当前项目尚未创建可生成报告的测评")
 
     phases_data = []
     if assessment:
@@ -285,7 +294,10 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
             })
 
     result = await db.execute(
-        select(ScanTask).where(ScanTask.project_id == project_id).order_by(ScanTask.created_at.desc())
+        select(ScanTask).where(
+            ScanTask.project_id == project_id,
+            ScanTask.assessment_id == assessment.id,
+        ).order_by(ScanTask.created_at.desc())
     )
     scan_tasks = [
         task for task in result.scalars().all()
@@ -298,23 +310,30 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
     assets = result.scalars().all()
 
     result = await db.execute(
-        select(Finding).where(Finding.project_id == project_id).order_by(Finding.severity)
+        select(Finding).where(
+            Finding.project_id == project_id,
+            Finding.assessment_id == assessment.id,
+        ).order_by(Finding.severity)
     )
     findings = result.scalars().all()
 
     verification_runs = (await db.execute(
-        select(VerificationRun).where(VerificationRun.project_id == project_id).order_by(VerificationRun.created_at)
+        select(VerificationRun).where(
+            VerificationRun.project_id == project_id,
+            VerificationRun.assessment_id == assessment.id,
+        ).order_by(VerificationRun.created_at)
     )).scalars().all()
+    verification_run_ids = [run.id for run in verification_runs]
     verification_items = (await db.execute(
         select(VerificationItem)
-        .where(VerificationItem.project_id == project_id)
+        .where(VerificationItem.run_id.in_(verification_run_ids))
         .order_by(VerificationItem.created_at)
-    )).scalars().all()
+    )).scalars().all() if verification_run_ids else []
     finding_events = (await db.execute(
         select(FindingEvent)
-        .where(FindingEvent.project_id == project_id)
+        .where(FindingEvent.finding_id.in_([finding.id for finding in findings]))
         .order_by(FindingEvent.created_at)
-    )).scalars().all()
+    )).scalars().all() if findings else []
     result = await db.execute(
         select(ChangeSnapshot)
         .where(ChangeSnapshot.project_id == project_id, ChangeSnapshot.changes_detected.is_(True))
@@ -352,12 +371,10 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
             .where(DocumentBlock.id.in_(document_block_ids))
         )).all()
         document_blocks = {block.id: (block, document) for block, document in rows}
-    project_evidence_count = (await db.execute(
-        select(func.count()).select_from(Evidence).where(Evidence.project_id == project_id)
-    )).scalar() or 0
+    project_evidence_count = len(evidences)
     project_document_count = (await db.execute(
         select(func.count()).select_from(DocumentFile).where(
-            DocumentFile.project_id == project_id,
+            DocumentFile.assessment_id == assessment.id,
             DocumentFile.is_active.is_(True),
         )
     )).scalar() or 0
@@ -422,7 +439,8 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
             "created_at": _dt(finding.created_at),
         })
 
-    score = project.compliance_score
+    score_metrics = await get_flow_engine(db)._calculate_compliance_metrics(assessment)
+    score = score_metrics["score"]
     report = {
         "report_version": "3.0-html",
         "generated_at": datetime.utcnow().isoformat(),
@@ -437,7 +455,9 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
         },
         "assessment": {
             "id": assessment.id if assessment else None,
+            "type": assessment.assessment_type_code if assessment else None,
             "name": assessment.name if assessment else None,
+            "level": assessment.assessment_level if assessment else None,
             "status": assessment.status if assessment else None,
             "progress": assessment.progress if assessment else 0,
             "total_phases": assessment.total_phases if assessment else 0,
@@ -608,6 +628,10 @@ async def generate_json_report(db: AsyncSession, project_id: int) -> dict:
         conclusion = ("ready", "当前已无待处理问题；结论仅覆盖本报告列出的资产、文档与已执行检查。")
 
     report["technical_scans"] = technical_scans
+    report["score_metrics"] = score_metrics
+    if assessment.assessment_type_code == "miping":
+        from app.services.miping_matrix import build_miping_domain_matrix
+        report["miping_matrix"] = await build_miping_domain_matrix(db, assessment)
     report["finding_lifecycle"] = {"open": open_findings, "closed": closed_findings}
     report["report_conclusion"] = {
         "state": conclusion[0],
@@ -660,11 +684,16 @@ async def get_latest_report_artifact(
     return (await db.execute(query.order_by(ReportArtifact.version.desc()).limit(1))).scalar_one_or_none()
 
 
-async def list_report_artifacts(db: AsyncSession, project_id: int) -> list[ReportArtifact]:
+async def list_report_artifacts(
+    db: AsyncSession,
+    project_id: int,
+    assessment_id: int | None = None,
+) -> list[ReportArtifact]:
+    query = select(ReportArtifact).where(ReportArtifact.project_id == project_id)
+    if assessment_id is not None:
+        query = query.where(ReportArtifact.assessment_id == assessment_id)
     return list((await db.execute(
-        select(ReportArtifact)
-        .where(ReportArtifact.project_id == project_id)
-        .order_by(ReportArtifact.version.desc())
+        query.order_by(ReportArtifact.version.desc())
     )).scalars().all())
 
 
@@ -685,20 +714,25 @@ async def invalidate_report_artifacts(
     reason: str,
     *,
     reopen_phase: bool = True,
+    assessment_id: int | None = None,
 ) -> int:
     """Mark the current report stale while preserving its immutable snapshot."""
+    filters = [ReportArtifact.project_id == project_id, ReportArtifact.status == "current"]
+    if assessment_id is not None:
+        filters.append(ReportArtifact.assessment_id == assessment_id)
     result = await db.execute(
         update(ReportArtifact)
-        .where(ReportArtifact.project_id == project_id, ReportArtifact.status == "current")
+        .where(*filters)
         .values(status="stale", stale_reason=reason, invalidated_at=datetime.utcnow())
     )
     changed = result.rowcount or 0
     if not changed or not reopen_phase:
         return changed
 
-    assessment = (await db.execute(select(Assessment).where(
-        Assessment.project_id == project_id
-    ).order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1))).scalar_one_or_none()
+    assessment = await db.get(Assessment, assessment_id) if assessment_id is not None else (await db.execute(
+        select(Assessment).where(Assessment.project_id == project_id)
+        .order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1)
+    )).scalar_one_or_none()
     if assessment:
         phase = (await db.execute(select(PhaseInstance).where(
             PhaseInstance.assessment_id == assessment.id,
@@ -780,7 +814,7 @@ async def ensure_report_generation_ready(
         assessment_query.order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1)
     )).scalar_one_or_none()
     if not assessment:
-        raise ValueError("当前项目尚未创建可生成报告的等保测评")
+        raise ValueError("当前项目尚未创建可生成报告的测评")
 
     phases = list((await db.execute(select(PhaseInstance).where(
         PhaseInstance.assessment_id == assessment.id,
@@ -814,6 +848,7 @@ async def ensure_report_generation_ready(
 
     running_scan_parameters = (await db.execute(select(ScanTask.parameters).where(
         ScanTask.project_id == project_id,
+        ScanTask.assessment_id == assessment.id,
         ScanTask.status.in_([ScanTaskStatus.PENDING, ScanTaskStatus.RUNNING]),
     ))).scalars().all()
     active_scans = sum(
@@ -822,10 +857,12 @@ async def ensure_report_generation_ready(
     )
     active_documents = int((await db.execute(select(func.count(DocumentAnalysisRun.id)).where(
         DocumentAnalysisRun.project_id == project_id,
+        DocumentAnalysisRun.assessment_id == assessment.id,
         DocumentAnalysisRun.status.in_(["queued", "running"]),
     ))).scalar() or 0)
     active_verifications = int((await db.execute(select(func.count(VerificationRun.id)).where(
         VerificationRun.project_id == project_id,
+        VerificationRun.assessment_id == assessment.id,
         VerificationRun.status.in_([VerificationRunStatus.QUEUED, VerificationRunStatus.RUNNING]),
     ))).scalar() or 0)
     if active_scans or active_documents or active_verifications:
@@ -851,7 +888,7 @@ async def create_report_artifact(
     ))).scalar() or 0)
     version = max(existing_max, int(project.report_version_counter or 0)) + 1
     project.report_version_counter = version
-    report = await generate_json_report(db, project_id)
+    report = await generate_json_report(db, project_id, assessment_id)
     assessment = await db.get(Assessment, assessment_id)
     if assessment:
         from app.services.flow_engine import get_flow_engine
@@ -865,7 +902,13 @@ async def create_report_artifact(
         f"certiproof-report-v{version}.html",
         html.encode("utf-8"),
     )
-    await invalidate_report_artifacts(db, project_id, "已生成更新版本", reopen_phase=False)
+    await invalidate_report_artifacts(
+        db,
+        project_id,
+        "已生成更新版本",
+        reopen_phase=False,
+        assessment_id=assessment_id,
+    )
     artifact = ReportArtifact(
         project_id=project_id,
         assessment_id=assessment_id,
@@ -1007,6 +1050,10 @@ async def generate_html_report(db: AsyncSession, project_id: int, report: dict |
     summary = report["summary"]
     conclusion = report["report_conclusion"]
     lifecycle = report["finding_lifecycle"]
+    is_miping = assessment.get("type") == "miping"
+    report_title = "企业密码应用自查报告" if is_miping else "企业等保自查报告"
+    level_label = "密码应用级别" if is_miping else "等保等级"
+    level_value = f"第{assessment.get('level')}级" if assessment.get("level") else "未设置"
 
     priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     open_findings = sorted(lifecycle["open"], key=lambda item: priority_order.get(item.get("priority"), 9))
@@ -1049,6 +1096,24 @@ async def generate_html_report(db: AsyncSession, project_id: int, report: dict |
         f"<tr><td>{escape(_timestamp(c['created_at']))}</td><td>{_badge('资产' if c['type'] == 'asset' else '端口', 'info')}</td><td>{escape(c['subject'])}</td><td>{escape(_change_text(c))}</td><td>{_badge('需重新评估' if c['reassessment_required'] else '已知晓', 'warning' if c['reassessment_required'] else 'good')}</td></tr>"
         for c in report["change_history"]
     ) or '<tr><td colspan="5">暂无资产或端口变化</td></tr>'
+    def matrix_detail(domain):
+        return "；".join(f"{task['name']}：{task['detail']}" for task in domain.get("tasks", [])) or "尚未形成检查项"
+
+    matrix_rows = "\n".join(
+        f"<tr><td><strong>{escape(domain['name'])}</strong></td><td>{_badge(domain['status'])}</td>"
+        f"<td>{escape({'hybrid': '自动检测 + 材料证据', 'document': '制度材料检查', 'evidence': '现场证据检查'}.get(domain['method'], domain['method']))}</td>"
+        f"<td>{escape(matrix_detail(domain))}</td></tr>"
+        for domain in (report.get("miping_matrix") or {}).get("domains", [])
+    )
+    matrix_toc = '<a href="#miping-matrix">八层面结论</a>' if is_miping else ""
+    matrix_rows_html = matrix_rows or '<tr><td colspan="4">尚未形成八层面结论。</td></tr>'
+    matrix_section = (
+        '<section id="miping-matrix"><div class="section-head"><div><h2>密码应用八个层面结论</h2>'
+        '<p>自动检测只覆盖可远程验证的网络通信项；其他层面依据材料和现场证据判断，无法取证不会判为通过。</p></div>'
+        f'<span class="muted">通过 {(report.get("miping_matrix") or {}).get("counts", {}).get("pass", 0)} / 8</span></div>'
+        '<div class="table-wrap"><table><thead><tr><th>评估层面</th><th>结论</th><th>检查方式</th><th>依据与说明</th></tr></thead>'
+        f'<tbody>{matrix_rows_html}</tbody></table></div></section>'
+    ) if is_miping else ""
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -1074,12 +1139,13 @@ async def generate_html_report(db: AsyncSession, project_id: int, report: dict |
 </head>
 <body>
 <main class="shell">
-  <header class="hero"><p class="eyebrow">CERTIPROOF / 企业等保自查报告 / HTML / V{escape(str((report.get('artifact') or {}).get('version') or '-'))}</p><h1>{escape(project['name'])}</h1><div class="hero-line"><p class="meta">等保等级：{escape(str(project['compliance_level'] or '未定级'))} · 生成时间：{escape(_timestamp(report['generated_at']))}</p><p class="meta">流程进度：{round(assessment['progress'] or 0)}% · 已完成阶段：{assessment['completed_phases']}/{assessment['total_phases']}</p></div></header>
+  <header class="hero"><p class="eyebrow">CERTIPROOF / {report_title} / HTML / V{escape(str((report.get('artifact') or {}).get('version') or '-'))}</p><h1>{escape(project['name'])}</h1><div class="hero-line"><p class="meta">{level_label}：{escape(level_value)} · 生成时间：{escape(_timestamp(report['generated_at']))}</p><p class="meta">流程进度：{round(assessment['progress'] or 0)}% · 已完成阶段：{assessment['completed_phases']}/{assessment['total_phases']}</p></div></header>
   <section class="conclusion"><div>{_badge('attention' if conclusion['state'] == 'attention' else conclusion['state'], 'warning' if conclusion['state'] == 'attention' else ('good' if conclusion['state'] == 'ready' else 'neutral'))}</div><div><h2>自查结论</h2><p>{escape(conclusion['message'])}</p><small>{escape(conclusion['basis'])}</small></div></section>
   <section class="metrics" aria-label="报告摘要"><div class="metric"><strong>{summary['open_findings']}</strong><span>当前待整改问题</span></div><div class="metric"><strong>{summary['high_risk_open']}</strong><span>其中高风险问题</span></div><div class="metric"><strong>{summary['closed_findings']}/{summary['total_findings']}</strong><span>已闭环 / 累计发现</span></div><div class="metric"><strong>{summary['clean_scans']}/{summary['technical_scans']}</strong><span>本次未发现问题的技术检测</span></div></section>
-  <div class="layout"><nav class="toc"><span>报告目录</span><a href="#actions">待整改事项</a><a href="#retest">整改与复测</a><a href="#coverage">检测覆盖</a><a href="#documents">文档合规</a><a href="#findings">问题闭环</a><a href="#scope">范围与变化</a></nav><div class="content">
+  <div class="layout"><nav class="toc"><span>报告目录</span><a href="#actions">待整改事项</a><a href="#retest">整改与复测</a>{matrix_toc}<a href="#coverage">检测覆盖</a><a href="#documents">文档合规</a><a href="#findings">问题闭环</a><a href="#scope">范围与变化</a></nav><div class="content">
     <section id="actions"><div class="section-head"><div><h2>当前待整改事项</h2><p>只列出尚未通过真实复测的问题，按优先级排序。</p></div><span class="muted">{summary['open_findings']} 项</span></div><div class="action-list">{priority_rows}</div></section>
     <section id="retest"><div class="section-head"><div><h2>整改与复测记录</h2><p>逐问题展示改进文档或技术复测的初检依据、当前结论和无法完成原因。</p></div><span class="muted">共 {len(report['retest_comparisons'])} 项</span></div><div class="table-wrap"><table><thead><tr><th>类型</th><th>对象</th><th>整改前</th><th>当前结果</th><th>变化说明</th></tr></thead><tbody>{retest_rows}</tbody></table></div></section>
+    {matrix_section}
     <section id="coverage"><div class="section-head"><div><h2>检测覆盖与执行结果</h2><p>“执行状态”只表示工具是否运行；“检测结论”才表示本次发现。</p></div><span class="muted">无法完成 {summary['unable_scans']} 项 · 需关注 {summary['risk_scans']} 项</span></div><div class="table-wrap"><table><thead><tr><th>阶段</th><th>检测内容</th><th>资产</th><th>执行状态</th><th>检测结论</th><th>结果摘要</th><th>错误详情</th></tr></thead><tbody>{scan_rows}</tbody></table></div><div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>测评阶段</th><th>阶段状态</th><th>完成任务</th><th>进度</th></tr></thead><tbody>{phase_rows}</tbody></table></div></section>
     <section id="documents"><div class="section-head"><div><h2>文档合规核查</h2><p>结论来自已提取的正文、OCR 或视觉解析内容；“无法判断”不会计为符合。</p></div><span class="muted">待关注 {summary['document_attention']} 项</span></div><div class="table-wrap"><table><thead><tr><th>检查项</th><th>当前结论</th><th>覆盖率</th><th>证据文件</th><th>解析来源</th><th>仍缺少的内容</th></tr></thead><tbody>{document_gap_rows}</tbody></table></div></section>
     <section id="findings"><div class="section-head"><div><h2>问题闭环明细</h2><p>累计问题保留可追溯记录；只有真实复测通过的问题才计为已关闭。</p></div><span class="muted">已关闭 {summary['closed_findings']}</span></div><details><summary>展开全部 {summary['total_findings']} 个问题的状态、证据与整改建议</summary><div class="table-wrap"><table><thead><tr><th>ID</th><th>条款 / 编号</th><th>优先级</th><th>生命周期</th><th>整改状态</th><th>证据</th><th>问题描述</th><th>整改建议</th></tr></thead><tbody>{finding_rows}</tbody></table></div></details></section>

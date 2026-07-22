@@ -67,7 +67,7 @@ const executionHasRisk = (result = {}) => {
     || Number(result.summary?.non_compliant || 0) > 0
 }
 
-function ProjectCommandCenter({ project, assets, assetsLoading = false, assessmentCollapsed = false, modelId, onOpenResults, onWorkspaceSummary }) {
+function ProjectCommandCenter({ project, assets, assetsLoading = false, assessmentCollapsed = false, assessmentCode = 'dengbao', modelId, onOpenResults, onWorkspaceSummary }) {
   const [scanTasks, setScanTasks] = useState([])
   const [assessment, setAssessment] = useState(null)
   const [verification, setVerification] = useState(null)
@@ -93,19 +93,23 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, assessme
     setWorkspaceLoading(true)
     const fetchWorkspace = async () => {
       if (!project?.id) return
-      const [scansResult, assessmentResult, verificationResult, changesResult, reportsResult] = await Promise.allSettled([
-        api.get(`/results/projects/${project.id}/scans`),
-        api.get(`/assessments/projects/${project.id}`),
-        api.get(`/projects/${project.id}/verification/workspace`),
+      const assessmentResult = await api.get(`/assessments/projects/${project.id}`, {
+        params: { assessment_code: assessmentCode },
+      }).catch(() => ({ data: [] }))
+      if (!mounted) return
+      const assessments = assessmentResult.data
+      const latestAssessment = Array.isArray(assessments) ? assessments[0] || null : assessments
+      setAssessment(previous => keepIfUnchanged(previous, latestAssessment))
+      const assessmentParams = latestAssessment?.id ? { assessment_id: latestAssessment.id } : {}
+      const [scansResult, verificationResult, changesResult, reportsResult] = await Promise.allSettled([
+        api.get(`/results/projects/${project.id}/scans`, { params: assessmentParams }),
+        api.get(`/projects/${project.id}/verification/workspace`, { params: assessmentParams }),
         api.get(`/projects/${project.id}/monitoring/changes`, { params: { reassessment_only: true } }),
-        api.get(`/projects/${project.id}/reports`),
+        api.get(`/projects/${project.id}/reports`, { params: assessmentParams }),
       ])
       if (!mounted) return
       const nextScans = scansResult.status === 'fulfilled' ? scansResult.value.data || [] : []
       setScanTasks(previous => keepIfUnchanged(previous, nextScans))
-      const assessments = assessmentResult.status === 'fulfilled' ? assessmentResult.value.data : null
-      const latestAssessment = Array.isArray(assessments) ? assessments[0] || null : assessments
-      setAssessment(previous => keepIfUnchanged(previous, latestAssessment))
       setVerification(previous => keepIfUnchanged(previous, verificationResult.status === 'fulfilled' ? verificationResult.value.data : null))
       setDetectedChanges(previous => keepIfUnchanged(previous, changesResult.status === 'fulfilled' ? changesResult.value.data || [] : []))
       setReportHistory(previous => keepIfUnchanged(previous, reportsResult.status === 'fulfilled' ? reportsResult.value.data || [] : []))
@@ -132,7 +136,7 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, assessme
       window.clearInterval(timer)
       window.removeEventListener('certiproof:assessment-reset', reset)
     }
-  }, [project?.id])
+  }, [project?.id, assessmentCode])
 
   const issues = useMemo(() => flattenIssues(verification), [verification])
   const issueCounts = useMemo(() => ({
@@ -275,6 +279,7 @@ function ProjectCommandCenter({ project, assets, assetsLoading = false, assessme
               key={project?.id || 'default'}
               projectId={project?.id}
               projectName={project?.name}
+              assessmentCode={assessmentCode}
               modelId={modelId}
               onOpenResults={onOpenResults}
             />

@@ -141,6 +141,7 @@ async def _run_claimed_task(task_id: int) -> None:
                         project_id=assessment.project_id,
                         user_id=int(user_id),
                         params=credentials.get(target) or {},
+                        assessment_id=assessment.id,
                     )
 
         checkpoints = dict(execution.get("asset_results") or {})

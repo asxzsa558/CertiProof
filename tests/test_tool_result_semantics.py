@@ -615,6 +615,44 @@ def test_nuclei_reachable_target_can_complete_with_no_findings(monkeypatch):
     assert result["data"]["findings"] == []
 
 
+def test_crypto_transport_unreachable_is_unable_not_clean(monkeypatch):
+    path = Path(__file__).resolve().parents[1] / "mcp-servers" / "security-tools" / "server.py"
+    spec = importlib.util.spec_from_file_location("certiproof_crypto_unreachable", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    async def incomplete(_params):
+        return {"status": "success", "data": {"scan_completed": False, "tool_error": "TLS handshake timeout"}}
+
+    monkeypatch.setattr(module, "testssl_scan", incomplete)
+    result = asyncio.run(module.crypto_transport_scan({"target": "203.0.113.10"}))
+    assert result["status"] == "warning"
+    assert result["data"]["scan_completed"] is False
+    assert any("不能据此判断未发现风险" in item for item in result["data"]["limitations"])
+
+
+def test_crypto_transport_reports_protocol_evidence_and_risk(monkeypatch):
+    path = Path(__file__).resolve().parents[1] / "mcp-servers" / "security-tools" / "server.py"
+    spec = importlib.util.spec_from_file_location("certiproof_crypto_complete", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    async def complete(_params):
+        return {"status": "success", "data": {
+            "scan_completed": True,
+            "tls_version": "TLS1 TLS1_2",
+            "certificate": {"issuer": "Example CA"},
+            "crypto_algorithms": ["SM2"],
+            "vulnerabilities": [],
+        }}
+
+    monkeypatch.setattr(module, "testssl_scan", complete)
+    result = asyncio.run(module.crypto_transport_scan({"target": "example.test"}))
+    assert result["status"] == "success"
+    assert result["data"]["crypto_algorithms"] == ["SM2"]
+    assert any(item["id"] == "crypto:weak-protocol:TLS1" for item in result["data"]["findings"])
+
+
 def test_snmp_no_response_is_failed_and_hides_library_setup_noise(monkeypatch):
     path = Path(__file__).resolve().parents[1] / "mcp-servers" / "network-tools" / "server.py"
     spec = importlib.util.spec_from_file_location("certiproof_network_tools_server", path)

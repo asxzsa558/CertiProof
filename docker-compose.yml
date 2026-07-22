@@ -1,5 +1,11 @@
 version: "3.8"
 
+x-http-healthcheck: &http-healthcheck
+  interval: 20s
+  timeout: 10s
+  retries: 5
+  start_period: 20s
+
 x-worker-common: &worker-common
   image: ${CERTIPROOF_IMAGE_PREFIX:-certiproof}/backend:${CERTIPROOF_VERSION:-latest}
   build:
@@ -11,6 +17,7 @@ x-worker-common: &worker-common
     REDIS_URL: redis://redis:6379/0
     SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
     APP_ENV: ${APP_ENV:-production}
+    CERTIPROOF_VERSION: ${CERTIPROOF_VERSION:-source}
     DEBUG: ${DEBUG:-false}
     ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
     LOGIN_RATE_LIMIT_ATTEMPTS: ${LOGIN_RATE_LIMIT_ATTEMPTS:-5}
@@ -43,16 +50,22 @@ x-worker-common: &worker-common
     - uploads_data:/app/uploads
   depends_on:
     backend:
-      condition: service_started
+      condition: service_healthy
     migrate:
       condition: service_completed_successfully
     redis:
       condition: service_healthy
     mcp-gateway:
-      condition: service_started
+      condition: service_healthy
     embedding-server:
       condition: service_healthy
   restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "python", "-m", "app.worker_health"]
+    interval: 20s
+    timeout: 10s
+    retries: 5
+    start_period: 30s
   mem_limit: ${WORKER_MEMORY_LIMIT:-2g}
   cpus: ${WORKER_CPU_LIMIT:-2.0}
   pids_limit: ${WORKER_PIDS_LIMIT:-512}
@@ -118,7 +131,11 @@ services:
     ports:
       - "127.0.0.1:3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      <<: *http-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/health', timeout=3)"]
     restart: unless-stopped
     mem_limit: ${FRONTEND_MEMORY_LIMIT:-512m}
     cpus: ${FRONTEND_CPU_LIMIT:-1.0}
@@ -141,6 +158,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       APP_ENV: ${APP_ENV:-production}
+      CERTIPROOF_VERSION: ${CERTIPROOF_VERSION:-source}
       DEBUG: ${DEBUG:-false}
       ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
       LOGIN_RATE_LIMIT_ATTEMPTS: ${LOGIN_RATE_LIMIT_ATTEMPTS:-5}
@@ -175,10 +193,13 @@ services:
       redis:
         condition: service_healthy
       mcp-gateway:
-        condition: service_started
+        condition: service_healthy
       embedding-server:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      <<: *http-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
     mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
     cpus: ${BACKEND_CPU_LIMIT:-2.0}
     pids_limit: 512
@@ -203,7 +224,7 @@ services:
       - caddy_config:/config
     depends_on:
       frontend:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     mem_limit: ${EDGE_MEMORY_LIMIT:-512m}
     cpus: ${EDGE_CPU_LIMIT:-1.0}
@@ -302,15 +323,27 @@ services:
       dockerfile: Dockerfile
     container_name: certiproof-mcp-gateway
     depends_on:
-      - security-tools
-      - ocr-server
-      - ssh-checker
-      - fast-scanner
-      - web-tools
-      - network-tools
-      - db-tools
-      - windows-tools
+      security-tools:
+        condition: service_healthy
+      ocr-server:
+        condition: service_healthy
+      ssh-checker:
+        condition: service_healthy
+      fast-scanner:
+        condition: service_healthy
+      web-tools:
+        condition: service_healthy
+      network-tools:
+        condition: service_healthy
+      db-tools:
+        condition: service_healthy
+      windows-tools:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      <<: *http-healthcheck
+      timeout: 20s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/tools', timeout=5)"]
     mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
     cpus: ${TOOL_CPU_LIMIT:-1.0}
     pids_limit: 512
@@ -328,6 +361,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    healthcheck:
+      <<: *http-healthcheck
+      timeout: 20s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=15)"]
     mem_limit: ${SECURITY_TOOL_MEMORY_LIMIT:-2g}
     cpus: ${SECURITY_TOOL_CPU_LIMIT:-2.0}
     pids_limit: 1024
@@ -345,6 +382,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    healthcheck:
+      <<: *http-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8016/health', timeout=5)"]
     mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
     cpus: ${TOOL_CPU_LIMIT:-1.0}
     pids_limit: 512
@@ -362,6 +402,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    healthcheck:
+      <<: *http-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health', timeout=5)"]
     mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
     cpus: ${TOOL_CPU_LIMIT:-1.0}
     pids_limit: 512
@@ -379,6 +422,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    healthcheck:
+      <<: *http-healthcheck
+      timeout: 20s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8012/health', timeout=15)"]
     mem_limit: ${WEB_TOOL_MEMORY_LIMIT:-2g}
     cpus: ${WEB_TOOL_CPU_LIMIT:-2.0}
     pids_limit: 1024
@@ -396,6 +443,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    healthcheck:
+      <<: *http-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8013/health', timeout=5)"]
     mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
     cpus: ${TOOL_CPU_LIMIT:-1.0}
     pids_limit: 512
@@ -413,6 +463,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    healthcheck:
+      <<: *http-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8015/health', timeout=5)"]
     mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
     cpus: ${TOOL_CPU_LIMIT:-1.0}
     pids_limit: 512
@@ -430,6 +483,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    healthcheck:
+      <<: *http-healthcheck
+      timeout: 20s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8014/health', timeout=15)"]
     mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
     cpus: ${TOOL_CPU_LIMIT:-1.0}
     pids_limit: 512
@@ -514,6 +571,10 @@ services:
     volumes:
       - ocr_models:/root/.paddlex
     restart: unless-stopped
+    healthcheck:
+      <<: *http-healthcheck
+      start_period: 60s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/health', timeout=5)"]
     mem_limit: ${OCR_MEMORY_LIMIT:-8g}
     cpus: ${OCR_CPU_LIMIT:-4.0}
     pids_limit: 1024

@@ -8,6 +8,7 @@ from app.services.llm_service import llm_service
 
 
 LIBRARY_PATH = Path(__file__).resolve().parents[1] / "reference" / "compliance" / "document_controls.yaml"
+MIPING_LIBRARY_PATH = Path(__file__).resolve().parents[1] / "reference" / "compliance" / "miping_document_controls.yaml"
 
 
 def _engine():
@@ -15,11 +16,16 @@ def _engine():
 
 
 def test_document_classification_schema_matches_standard_library():
-    library = yaml.safe_load(LIBRARY_PATH.read_text(encoding="utf-8"))
+    libraries = [
+        yaml.safe_load(path.read_text(encoding="utf-8"))
+        for path in (LIBRARY_PATH, MIPING_LIBRARY_PATH)
+    ]
     primary_key = DocumentClassificationContract.model_json_schema()["properties"]["primary_key"]
     enum_values = next(item["enum"] for item in primary_key["anyOf"] if "enum" in item)
 
-    assert set(enum_values) == set(library["documents"])
+    assert set(enum_values) == {
+        key for library in libraries for key in library["documents"]
+    }
 
 
 def test_llm_can_classify_clear_content_when_filename_is_nonstandard(monkeypatch):

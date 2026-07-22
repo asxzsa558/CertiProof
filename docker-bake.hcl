@@ -112,3 +112,10 @@ group "default" {
     "windows-tools", "ocr-server", "embedding-server"
   ]
 }
+
+group "remote-node" {
+  targets = [
+    "backend", "mcp-gateway", "security-tools", "ssh-checker", "fast-scanner",
+    "web-tools", "network-tools", "db-tools", "windows-tools"
+  ]
+}

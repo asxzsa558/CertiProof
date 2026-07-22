@@ -43,7 +43,7 @@ def main() -> None:
             "system_name": "交互并发烟测",
             "description": "临时项目：验证独立交互队列和多资产归属。",
             "compliance_level": "三级",
-            "assessment_type_ids": [],
+            "assessment_configs": [{"code": "dengbao", "level": "三级"}],
         })
         assert status == 201
         project_id = project["id"]

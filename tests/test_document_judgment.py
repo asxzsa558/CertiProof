@@ -161,7 +161,7 @@ def test_unable_analysis_creates_retriable_blocker_without_claiming_noncomplianc
 
     class DB:
         async def get(self, _model, run_id):
-            return SimpleNamespace(id=run_id)
+            return SimpleNamespace(id=run_id, assessment_id=5)
 
         async def execute(self, *_args, **_kwargs):
             return Result()

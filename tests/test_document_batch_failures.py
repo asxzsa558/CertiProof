@@ -35,7 +35,7 @@ async def _database():
 def test_batch_extraction_failure_and_missing_material_become_visible_unable_results(monkeypatch):
     extraction_attempts = 0
 
-    async def engine_from_seed(_cls, _db):
+    async def engine_from_seed(_cls, _db, _assessment_type_code="dengbao"):
         return DocumentControlEngine({
             "documents": {
                 "incident_response_plan": {"name": "信息安全事件应急预案", "controls": []},

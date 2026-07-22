@@ -65,11 +65,19 @@ class ContextManager:
     MAX_ACTION_HISTORY = 200  # 最大操作历史记录数（增加到 200）
     MAX_CACHE_ENTRIES = 100  # 最大缓存条目数
     
-    def __init__(self, db: AsyncSession, user_id: int, project_id: int = None, thread_id: int = None):
+    def __init__(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        project_id: int = None,
+        thread_id: int = None,
+        assessment_code: str = "dengbao",
+    ):
         self.db = db
         self.user_id = user_id
         self.project_id = project_id
         self.thread_id = thread_id
+        self.assessment_code = assessment_code if assessment_code in {"dengbao", "miping"} else "dengbao"
 
     def _thread_condition(self, column):
         """A missing thread means the legacy/default thread, never every thread."""
@@ -149,7 +157,12 @@ class ContextManager:
         query = select(ConversationHistory).where(*self._history_conditions())
         if latest_summary:
             query = query.where(ConversationHistory.id > latest_summary.source_end_message_id)
-        result = await self.db.execute(query.order_by(ConversationHistory.created_at.desc()).limit(turns * 2))
+        result = await self.db.execute(
+            query.order_by(
+                ConversationHistory.created_at.desc(),
+                ConversationHistory.id.desc(),
+            ).limit(turns * 2)
+        )
         messages = [
             {"role": h.role, "content": h.content}
             for h in reversed(result.scalars().all())
@@ -173,7 +186,10 @@ class ContextManager:
             # 获取最新测评
             result = await self.db.execute(
                 select(Assessment)
-                .where(Assessment.project_id == self.project_id)
+                .where(
+                    Assessment.project_id == self.project_id,
+                    Assessment.assessment_type_code == self.assessment_code,
+                )
                 .order_by(Assessment.created_at.desc(), Assessment.id.desc())
                 .limit(1)
             )
@@ -219,6 +235,8 @@ class ContextManager:
                 "has_assessment": True,
                 "id": assessment.id,
                 "name": assessment.name,
+                "assessment_type_code": assessment.assessment_type_code,
+                "assessment_level": assessment.assessment_level,
                 "status": assessment.status,
                 "progress": assessment.progress,
                 "completed_phases": assessment.completed_phases,
@@ -233,7 +251,10 @@ class ContextManager:
         """获取最近的对话历史"""
         query = select(ConversationHistory).where(*self._history_conditions())
         
-        query = query.order_by(ConversationHistory.created_at.desc()).limit(limit)
+        query = query.order_by(
+            ConversationHistory.created_at.desc(),
+            ConversationHistory.id.desc(),
+        ).limit(limit)
         result = await self.db.execute(query)
         histories = result.scalars().all()
         
@@ -334,6 +355,7 @@ class ContextManager:
             return None
         
         from app.models.project import Project
+        from app.models.assessment_type import AssessmentType, ProjectAssessment
         
         result = await self.db.execute(
             select(Project).where(Project.id == self.project_id)
@@ -342,6 +364,13 @@ class ContextManager:
         
         if not project:
             return None
+
+        assessment_rows = (await self.db.execute(
+            select(ProjectAssessment, AssessmentType)
+            .join(AssessmentType, AssessmentType.id == ProjectAssessment.assessment_type_id)
+            .where(ProjectAssessment.project_id == self.project_id)
+            .order_by(AssessmentType.sort_order, AssessmentType.id)
+        )).all()
         
         return {
             "id": project.id,
@@ -349,6 +378,18 @@ class ContextManager:
             "description": project.description,
             "compliance_level": project.compliance_level.value if project.compliance_level else None,
             "compliance_score": project.compliance_score,
+            "active_assessment_code": self.assessment_code,
+            "assessment_types": [
+                {
+                    "code": assessment_type.code,
+                    "name": assessment_type.name,
+                    "level": project_assessment.level,
+                    "status": project_assessment.status,
+                    "progress": project_assessment.progress,
+                    "score": project_assessment.score,
+                }
+                for project_assessment, assessment_type in assessment_rows
+            ],
         }
     
     async def _get_project_assets(self) -> List[Dict]:
@@ -613,7 +654,10 @@ class ContextManager:
         if words:
             query = query.where(func.lower(ConversationHistory.content).contains(words[0].lower()))
         rows = (await self.db.execute(
-            query.order_by(ConversationHistory.created_at.desc()).limit(max(1, min(limit, 20)))
+            query.order_by(
+                ConversationHistory.created_at.desc(),
+                ConversationHistory.id.desc(),
+            ).limit(max(1, min(limit, 20)))
         )).all()
         return [{
             "archive_id": archive.id,
@@ -787,7 +831,10 @@ class ContextManager:
         Returns:
             归档 ID
         """
-        query = select(ConversationHistory).where(*self._history_conditions()).order_by(ConversationHistory.created_at.asc())
+        query = select(ConversationHistory).where(*self._history_conditions()).order_by(
+            ConversationHistory.created_at.asc(),
+            ConversationHistory.id.asc(),
+        )
         
         result = await self.db.execute(query)
         histories = result.scalars().all()
@@ -907,7 +954,7 @@ class ContextManager:
                 ConversationHistory.user_id == self.user_id,
                 ConversationHistory.project_id.is_(None) if self.project_id is None else ConversationHistory.project_id == self.project_id,
             )
-            .order_by(ConversationHistory.created_at.asc())
+            .order_by(ConversationHistory.created_at.asc(), ConversationHistory.id.asc())
         )).scalars().all())
         if not histories:
             archive.status = "failed"
@@ -1127,7 +1174,7 @@ class ContextManager:
                 for history in (await self.db.execute(
                     select(ConversationHistory)
                     .where(ConversationHistory.archive_id == a.id)
-                    .order_by(ConversationHistory.created_at.asc())
+                    .order_by(ConversationHistory.created_at.asc(), ConversationHistory.id.asc())
                 )).scalars().all()
             ],
             "archived_at": a.archived_at.isoformat() if a.archived_at else None,
@@ -1286,7 +1333,7 @@ class ContextManager:
                 ConversationHistory.user_id == self.user_id,
                 ConversationHistory.archive_id.is_(None),
             )
-            .order_by(ConversationHistory.created_at.asc())
+            .order_by(ConversationHistory.created_at.asc(), ConversationHistory.id.asc())
         )
         histories = history_result.scalars().all()
         

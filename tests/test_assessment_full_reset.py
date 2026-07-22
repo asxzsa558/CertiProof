@@ -149,6 +149,7 @@ def test_full_reset_deletes_assessment_outputs_only(tmp_path):
                 )
                 scan = ScanTask(
                     project_id=reset_project.id,
+                    assessment_id=assessment.id,
                     asset_id=asset.id,
                     task_type=ScanTaskType.TARGETED,
                     status=ScanTaskStatus.RUNNING,
@@ -165,6 +166,7 @@ def test_full_reset_deletes_assessment_outputs_only(tmp_path):
                 await db.flush()
                 finding = Finding(
                     project_id=reset_project.id,
+                    assessment_id=assessment.id,
                     scan_task_id=scan.id,
                     document_run_id=run_row.id,
                     clause_id="TEST-001",
@@ -257,12 +259,21 @@ def test_full_reset_deletes_assessment_outputs_only(tmp_path):
 
                 assert reset_assessment.status == "not_started"
                 assert reset_assessment.progress == 0
-                assert task.status == "todo"
-                assert task.result is None
+                rebuilt_phases = list((await db.execute(select(PhaseInstance).where(
+                    PhaseInstance.assessment_id == assessment.id
+                ).order_by(PhaseInstance.order))).scalars())
+                assert [item.phase_id for item in rebuilt_phases] == [
+                    "gap_analysis", "field_assessment", "remediation_verification", "report",
+                ]
+                assert all(item.status == "pending" for item in rebuilt_phases)
+                rebuilt_tasks = list((await db.execute(select(TaskInstance).where(
+                    TaskInstance.phase_id.in_([item.id for item in rebuilt_phases])
+                ))).scalars())
+                assert rebuilt_tasks and all(item.status == "todo" and item.result is None for item in rebuilt_tasks)
                 assert reset_project.compliance_score is None
                 assert asset.project_id == reset_project.id
                 assert membership.organization_id == organization.id
-                assert schedule.last_run_at is None
+                assert schedule.last_run_at is not None
                 assert cleanup["scan_tasks"] == 1
                 assert cleanup["reports"] == 1
                 assert cleanup["deleted_file_count"] == 3
@@ -282,9 +293,6 @@ def test_full_reset_deletes_assessment_outputs_only(tmp_path):
                     DocumentFile,
                     VerificationRun,
                     ReportArtifact,
-                    ChangeSnapshot,
-                    ResultCache,
-                    ActionHistory,
                 ):
                     assert int((await db.execute(select(func.count()).select_from(model).where(
                         model.project_id == reset_project.id
@@ -300,8 +308,16 @@ def test_full_reset_deletes_assessment_outputs_only(tmp_path):
                 conversation = (await db.execute(select(ConversationHistory).where(
                     ConversationHistory.project_id == reset_project.id
                 ))).scalar_one()
-                assert "scan_results" not in conversation.context_snapshot
-                assert conversation.context_snapshot["assessment_data_reset"]
+                assert conversation.context_snapshot["scan_results"] == {"ports": [22]}
+                assert int((await db.execute(select(func.count(ChangeSnapshot.id)).where(
+                    ChangeSnapshot.project_id == reset_project.id
+                ))).scalar_one()) == 1
+                assert int((await db.execute(select(func.count(ResultCache.id)).where(
+                    ResultCache.project_id == reset_project.id
+                ))).scalar_one()) == 1
+                assert int((await db.execute(select(func.count(ActionHistory.id)).where(
+                    ActionHistory.project_id == reset_project.id
+                ))).scalar_one()) == 1
                 assert int((await db.execute(select(func.count(AuditEvent.id)).where(
                     AuditEvent.project_id == reset_project.id
                 ))).scalar_one()) == 1

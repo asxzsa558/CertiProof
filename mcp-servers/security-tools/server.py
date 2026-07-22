@@ -465,6 +465,7 @@ async def testssl_scan(params: Dict[str, Any], process_callback: Optional[callab
         tls_version = None
         offered_protocols = []
         certificate = {}
+        crypto_algorithms = set()
         issues = []
         vulnerabilities = []
         scan_completed = process.returncode == 0
@@ -482,6 +483,9 @@ async def testssl_scan(params: Dict[str, Any], process_callback: Optional[callab
                         severity = item.get("severity", "")
                         item_id_lower = item_id.lower()
                         finding_lower = str(finding).lower()
+                        for marker in ("SM2", "SM3", "SM4", "TLCP"):
+                            if marker.lower() in f"{item_id_lower} {finding_lower}":
+                                crypto_algorithms.add(marker)
 
                         if item_id_lower in {"engine_problem"}:
                             continue
@@ -511,6 +515,8 @@ async def testssl_scan(params: Dict[str, Any], process_callback: Optional[callab
                                 certificate["issuer"] = finding
                             elif "expiration" in item_id_lower or "valid" in item_id_lower:
                                 certificate["validity"] = finding
+                            elif finding:
+                                certificate[item_id] = finding
                         
                         # 提取问题
                         elif severity in ["LOW", "WARN", "MEDIUM"]:
@@ -566,6 +572,7 @@ async def testssl_scan(params: Dict[str, Any], process_callback: Optional[callab
                 "scan_completed": scan_completed,
                 "tls_version": tls_version,
                 "certificate": certificate if certificate else None,
+                "crypto_algorithms": sorted(crypto_algorithms),
                 "issues": issues,
                 "vulnerabilities": vulnerabilities,
                 "tool_error": tool_error,
@@ -594,6 +601,7 @@ async def testssl_scan(params: Dict[str, Any], process_callback: Optional[callab
                 "scan_completed": False,
                 "tls_version": None,
                 "certificate": None,
+                "crypto_algorithms": [],
                 "issues": [],
                 "vulnerabilities": [],
                 "tool_error": f"SSL/TLS 扫描在 {timeout} 秒后超时，目标可能限速、被过滤或响应过慢",
@@ -612,6 +620,91 @@ async def testssl_scan(params: Dict[str, Any], process_callback: Optional[callab
         await _terminate_process(process)
         if os.path.exists(json_file):
             os.remove(json_file)
+
+
+async def crypto_transport_scan(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Collect protocol, certificate and algorithm evidence without inventing a Miping verdict."""
+    target = params.get("target")
+    if not target:
+        raise ValueError("Missing required parameter: target")
+    port = int(params.get("port", 443))
+    base = await testssl_scan({"target": target, "port": port, "timeout": params.get("timeout", 180)})
+    data = base.get("data") or {}
+    if not data.get("scan_completed"):
+        reason = data.get("tool_error") or "目标未完成 TLS/TLCP 握手，无法核验密码协议和证书"
+        return {
+            "tool": "crypto_transport_scan",
+            "version": "1.0",
+            "status": "warning",
+            "error": reason,
+            "data": {
+                "target": target,
+                "port": port,
+                "scan_completed": False,
+                "tool_error": reason,
+                "findings": [],
+                "checks": [],
+                "limitations": ["未建立可分析的密码协议连接，不能据此判断未发现风险"],
+            },
+            "metadata": base.get("metadata") or {},
+        }
+
+    protocols = data.get("tls_version") or "未识别"
+    algorithms = data.get("crypto_algorithms") or []
+    certificate = data.get("certificate") or {}
+    findings = []
+    for item in data.get("vulnerabilities") or []:
+        findings.append({
+            "id": f"crypto:{item.get('id') or 'protocol-risk'}",
+            "title": item.get("id") or "密码协议风险",
+            "description": item.get("finding") or str(item),
+            "severity": str(item.get("severity") or "high").lower(),
+        })
+    weak_protocols = [name for name in ("SSLv2", "SSLv3", "TLS1", "TLS1_1") if name in protocols]
+    for protocol in weak_protocols:
+        findings.append({
+            "id": f"crypto:weak-protocol:{protocol}",
+            "title": f"启用了过期协议 {protocol}",
+            "description": "过期协议不能作为可靠的通信密码保护证据。",
+            "severity": "high",
+        })
+
+    checks = [
+        {"id": "protocol-negotiation", "name": "密码协议握手", "status": "verified", "evidence": protocols},
+        {
+            "id": "certificate-chain",
+            "name": "数字证书与证书链",
+            "status": "verified" if certificate else "unable",
+            "evidence": certificate or "未提取到证书信息",
+        },
+        {
+            "id": "national-algorithm-marker",
+            "name": "国密算法/协议标识",
+            "status": "observed" if algorithms else "not_observed",
+            "evidence": algorithms or "本次公开服务握手未观察到 SM2/SM3/SM4/TLCP 标识",
+        },
+    ]
+    return {
+        "tool": "crypto_transport_scan",
+        "version": "1.0",
+        "status": "success",
+        "data": {
+            "target": target,
+            "port": port,
+            "reachable": True,
+            "scan_completed": True,
+            "protocols": protocols,
+            "certificate": certificate or None,
+            "crypto_algorithms": algorithms,
+            "checks": checks,
+            "findings": findings,
+            "limitations": [
+                "未观察到国密算法不等于不合规，需结合密码应用方案、适用性和现场配置判断",
+                "本工具不验证密码产品认证资质、密钥全生命周期或物理环境控制",
+            ],
+        },
+        "metadata": base.get("metadata") or {},
+    }
 
 
 # ============== Nuclei 工具 ==============
@@ -1000,7 +1093,7 @@ async def health():
     
     return {
         "status": "healthy" if all_available else "degraded",
-        "tools": ["nmap_scan", "testssl_scan", "nuclei_scan", "hydra_bruteforce"],
+        "tools": ["nmap_scan", "testssl_scan", "nuclei_scan", "hydra_bruteforce", "crypto_transport_scan", "crypto_certificate_check"],
         "tools_status": tools_status,
     }
 
@@ -1017,6 +1110,7 @@ async def execute(request: ExecuteRequest):
         "scan_ssl": "testssl_scan",
         "scan_vulnerabilities": "nuclei_scan",
         "scan_weak_passwords": "hydra_bruteforce",
+        "crypto_certificate_check": "crypto_transport_scan",
         "ping_asset": "ping_host",
     }
     tool_name = tool_aliases.get(tool_name, tool_name)
@@ -1031,6 +1125,8 @@ async def execute(request: ExecuteRequest):
         return await hydra_bruteforce(params)
     elif tool_name == "ping_host":
         return await ping_host(params)
+    elif tool_name == "crypto_transport_scan":
+        return await crypto_transport_scan(params)
     else:
         raise HTTPException(status_code=404, detail=f"Unknown tool: {tool_name}")
 

@@ -1559,10 +1559,26 @@
 }
 
 .workspace-body-layout .assessment-drawer-header {
-  min-height: 62px;
+  min-height: 78px;
   padding-left: 20px;
   border-bottom-color: rgba(90, 177, 211, 0.24);
   background: #081722;
+}
+
+.assessment-type-switch {
+  margin-top: 7px;
+  border: 1px solid rgba(90, 177, 211, 0.24);
+  background: rgba(3, 12, 20, 0.7);
+}
+
+.assessment-type-switch .ant-segmented-item {
+  min-width: 58px;
+  color: rgba(205, 226, 237, 0.68);
+}
+
+.assessment-type-switch .ant-segmented-item-selected {
+  color: #dff9ff;
+  background: rgba(35, 142, 177, 0.35);
 }
 
 .workspace-body-layout .assessment-drawer-kicker {
@@ -1571,7 +1587,7 @@
 
 .workspace-body-layout .assessment-drawer-scroll {
   display: flex;
-  height: calc(100% - 62px);
+  height: calc(100% - 78px);
   padding: 10px 10px 16px;
 }
 
@@ -1850,4 +1866,24 @@
     min-width: 82px;
     padding-inline: 10px;
   }
+}
+.assessment-config-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.assessment-config-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 130px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(90, 170, 255, 0.18);
+  background: rgba(8, 20, 38, 0.55);
+}
+
+.assessment-config-hint {
+  margin: 0;
+  color: rgba(199, 218, 238, 0.66);
+  font-size: 12px;
 }

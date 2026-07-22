@@ -36,6 +36,9 @@ CAPABILITY_DISPLAY_NAMES = {
     "tech_assessment": "现场技术测评",
     "ping_host": "Ping 检测",
     "ping_asset": "Ping 检测",
+    "crypto_transport_scan": "密码协议与套件核验",
+    "crypto_certificate_check": "数字证书核验",
+    "crypto_onsite_assessment": "密码应用网络通信辅助检测",
 }
 
 

@@ -509,6 +509,7 @@ class Orchestrator:
         on_agent_status: Optional[Callable] = None,
         on_agent_complete: Optional[Callable] = None,
         thread_id: int = None,
+        assessment_code: str = "dengbao",
     ) -> dict:
         """
         处理用户输入 - AI 驱动意图识别和能力编排
@@ -536,7 +537,7 @@ class Orchestrator:
             }
         
         # 1. 构建上下文
-        context_manager = ContextManager(db, user_id, project_id, thread_id)
+        context_manager = ContextManager(db, user_id, project_id, thread_id, assessment_code)
         context = await context_manager.build_context()
         if any(marker in user_input for marker in ("之前讨论", "以前讨论", "归档里", "历史对话", "上次说过", "此前说过")):
             context["archive_recall"] = await context_manager.recall_archived_messages(user_input)

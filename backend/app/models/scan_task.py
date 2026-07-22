@@ -31,6 +31,7 @@ class ScanTask(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    assessment_id = Column(Integer, ForeignKey("assessments.id", ondelete="CASCADE"), nullable=True, index=True)
     asset_id = Column(Integer, ForeignKey("assets.id"), nullable=True, index=True)
     
     # Task info

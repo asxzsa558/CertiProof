@@ -87,7 +87,10 @@ def test_project_status_loads_only_status_skill_and_current_facts():
 
     result = asyncio.run(engine.decide("这个项目能过等保吗", context_with_history(), db=None, user_id=None))
 
-    assert result["plan"] == [{"capability": "view_project_status", "parameters": {"view": "readiness"}}]
+    assert result["plan"] == [{
+        "capability": "view_project_status",
+        "parameters": {"view": "readiness", "assessment_code": "dengbao"},
+    }]
     assert result["routing"]["skills"] == ["project-status"]
     assert len(engine.calls) == 1
 
@@ -155,11 +158,11 @@ def test_pending_findings_have_only_one_router_intent():
 
 
 @pytest.mark.parametrize(("intent", "expected_capability", "expected_parameters"), [
-    ("query_project_status", "view_project_status", {"view": "status"}),
-    ("query_compliance_readiness", "view_project_status", {"view": "readiness"}),
-    ("query_major_gaps", "view_project_status", {"view": "gaps"}),
-    ("query_executive_summary", "view_project_status", {"view": "executive"}),
-    ("query_findings", "view_findings", {}),
+    ("query_project_status", "view_project_status", {"view": "status", "assessment_code": "dengbao"}),
+    ("query_compliance_readiness", "view_project_status", {"view": "readiness", "assessment_code": "dengbao"}),
+    ("query_major_gaps", "view_project_status", {"view": "gaps", "assessment_code": "dengbao"}),
+    ("query_executive_summary", "view_project_status", {"view": "executive", "assessment_code": "dengbao"}),
+    ("query_findings", "view_findings", {"assessment_code": "dengbao"}),
     ("query_open_ports", "view_open_ports", {}),
     ("query_vulnerabilities", "view_vulnerabilities", {}),
     ("query_scan_history", "view_scan_history", {}),

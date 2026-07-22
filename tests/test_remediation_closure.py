@@ -139,7 +139,7 @@ def test_reliable_verification_is_the_only_path_that_closes_a_finding():
         engine, session_factory = await _database()
         async with session_factory() as db:
             user, project, phases = await _project(db)
-            finding = _finding(project.id)
+            finding = _finding(project.id, assessment_id=phases["remediation_verification"].assessment_id)
             db.add(finding)
             await db.flush()
 
@@ -183,7 +183,11 @@ def test_single_task_rerun_preserves_verified_finding():
                 name="SSH/主机基线核查",
                 status="completed",
             )
-            finding = _finding(project.id, status=FindingStatus.FIXED)
+            finding = _finding(
+                project.id,
+                assessment_id=phases["field_assessment"].assessment_id,
+                status=FindingStatus.FIXED,
+            )
             db.add_all([task, finding])
             await db.commit()
 
@@ -212,7 +216,11 @@ def test_single_task_rerun_recalculates_project_score_after_completion():
                 name="SSH/主机基线核查",
                 status="completed",
             )
-            db.add_all([task, _finding(project.id, status=FindingStatus.OPEN)])
+            db.add_all([task, _finding(
+                project.id,
+                assessment_id=assessment.id,
+                status=FindingStatus.OPEN,
+            )])
             await db.commit()
 
             flow = FlowEngine(db)
@@ -377,7 +385,12 @@ def test_unable_verification_keeps_problem_open_but_allows_an_honest_report():
         engine, session_factory = await _database()
         async with session_factory() as db:
             user, project, phases = await _project(db)
-            finding = _finding(project.id, source_key="baseline_check", clause_id="TECH-BASELINE")
+            finding = _finding(
+                project.id,
+                assessment_id=phases["remediation_verification"].assessment_id,
+                source_key="baseline_check",
+                clause_id="TECH-BASELINE",
+            )
             db.add(finding)
             await db.flush()
             verification = await create_verification_run(
@@ -412,7 +425,7 @@ def test_unreviewed_problem_still_locks_report():
         engine, session_factory = await _database()
         async with session_factory() as db:
             _, project, phases = await _project(db)
-            db.add(_finding(project.id))
+            db.add(_finding(project.id, assessment_id=phases["remediation_verification"].assessment_id))
             await db.flush()
 
             await reconcile_verification_phase(db, project.id)
@@ -429,7 +442,7 @@ def test_user_can_continue_to_an_honest_report_with_unreviewed_problems():
         engine, session_factory = await _database()
         async with session_factory() as db:
             _, project, phases = await _project(db)
-            db.add(_finding(project.id))
+            db.add(_finding(project.id, assessment_id=phases["remediation_verification"].assessment_id))
             await db.flush()
 
             await FlowEngine(db).complete_phase(phases["remediation_verification"].id)
@@ -564,6 +577,7 @@ def test_failed_task_with_an_unable_finding_is_not_counted_twice():
             )
             finding = _finding(
                 project.id,
+                assessment_id=phases["field_assessment"].assessment_id,
                 fingerprint=make_finding_fingerprint("technical", "192.0.2.10", "baseline_check", "unable"),
                 source_key="baseline_check",
                 clause_id="TECH-BASELINE-UNABLE",
@@ -593,7 +607,11 @@ def test_reopening_finding_invalidates_generated_report_state():
                 status="completed",
                 result={"format": "html"},
             )
-            finding = _finding(project.id, status=FindingStatus.FIXED)
+            finding = _finding(
+                project.id,
+                assessment_id=phases["remediation_verification"].assessment_id,
+                status=FindingStatus.FIXED,
+            )
             db.add_all([report_task, finding])
             phases["remediation_verification"].status = "completed"
             phases["report"].status = "completed"
@@ -678,6 +696,7 @@ def test_batch_remediation_replaces_document_version_and_queues_the_whole_group(
             findings = [
                 _finding(
                     project.id,
+                    assessment_id=assessment.id,
                     fingerprint=make_finding_fingerprint("document", f"task:{task.id}", "CTRL", point),
                     source_type="document",
                     source_key="CTRL",
@@ -735,8 +754,8 @@ def test_reset_clears_verification_history_and_reopens_findings():
     async def run():
         engine, session_factory = await _database()
         async with session_factory() as db:
-            user, project, _ = await _project(db)
-            finding = _finding(project.id)
+            user, project, phases = await _project(db)
+            finding = _finding(project.id, assessment_id=phases["remediation_verification"].assessment_id)
             db.add(finding)
             await db.flush()
             verification = await create_verification_run(

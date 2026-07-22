@@ -944,7 +944,7 @@ class LLMService:
             last_error = None
             for attempt in range(1, 4):
                 try:
-                    kwargs = {"temperature": 0, "max_tokens": 64}
+                    kwargs = {"temperature": 0, "max_tokens": 512}
                     response_format = self._structured_response_format(
                         provider.provider_type,
                         schema,

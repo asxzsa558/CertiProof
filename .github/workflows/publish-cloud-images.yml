@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Image and package version
+        description: Immutable image and package version (blank uses sha-<commit>)
         required: false
-        default: latest
+        default: ""
   push:
     branches:
       - main
@@ -15,7 +15,9 @@ on:
 
 permissions:
   contents: read
-  packages: write
+
+env:
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/certiproof
 
 jobs:
   validate:
@@ -24,8 +26,8 @@ jobs:
       POSTGRES_PASSWORD: ci-only-password
       SECRET_KEY: ci-only-secret-key-with-at-least-32-characters
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
           cache: npm
@@ -33,7 +35,9 @@ jobs:
       - name: Validate Compose and deployment packages
         run: |
           docker compose --profile production --profile gpu config --quiet
+          docker compose -f deploy/scan-node/docker-compose.remote-node.yml --env-file deploy/scan-node/.env.example config --quiet
           CERTIPROOF_VERSION=ci ./scripts/package-cloud-deployment.sh all
+          CERTIPROOF_VERSION=ci ./scripts/package-remote-node.sh online
       - name: Build backend test image
         run: docker compose build backend
       - name: Run backend tests
@@ -53,38 +57,160 @@ jobs:
   publish:
     needs: validate
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.value }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Select version
+      - name: Select immutable version
         id: version
         shell: bash
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            echo "value=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME}"
+          elif [[ -n "${{ inputs.version }}" && "${{ inputs.version }}" != "latest" ]]; then
+            version="${{ inputs.version }}"
           else
-            echo "value=latest" >> "$GITHUB_OUTPUT"
+            version="sha-${GITHUB_SHA::12}"
           fi
+          [[ "$version" =~ ^[A-Za-z0-9._-]+$ && "$version" != "latest" ]]
+          echo "value=$version" >> "$GITHUB_OUTPUT"
       - name: Build and publish linux/amd64 images
         env:
-          CERTIPROOF_IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/certiproof
+          CERTIPROOF_IMAGE_PREFIX: ${{ env.IMAGE_PREFIX }}
           CERTIPROOF_VERSION: ${{ steps.version.outputs.value }}
           CERTIPROOF_PLATFORMS: linux/amd64
         run: docker buildx bake -f docker-bake.hcl --push
-      - name: Build CPU and GPU deployment packages
+      - name: Publish remote-node images for amd64 and arm64
         env:
+          CERTIPROOF_IMAGE_PREFIX: ${{ env.IMAGE_PREFIX }}
           CERTIPROOF_VERSION: ${{ steps.version.outputs.value }}
-        run: ./scripts/package-cloud-deployment.sh all
-      - uses: actions/upload-artifact@v4
+          CERTIPROOF_PLATFORMS: linux/amd64,linux/arm64
+        run: docker buildx bake -f docker-bake.hcl remote-node --push
+
+  security:
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - postgres
+          - backend
+          - frontend
+          - mcp-gateway
+          - security-tools
+          - ssh-checker
+          - fast-scanner
+          - web-tools
+          - network-tools
+          - db-tools
+          - windows-tools
+          - ocr-server
+          - embedding-server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
-          name: certiproof-cloud-${{ steps.version.outputs.value }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Scan ${{ matrix.image }}
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:${{ needs.publish.outputs.version }}
+          format: json
+          output: trivy-${{ matrix.image }}.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          timeout: 20m
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload vulnerability report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-${{ matrix.image }}-${{ needs.publish.outputs.version }}
+          path: trivy-${{ matrix.image }}.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Generate SBOM
+        if: always()
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:${{ needs.publish.outputs.version }}
+          artifact-name: sbom-${{ matrix.image }}-${{ needs.publish.outputs.version }}.spdx.json
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          upload-release-assets: false
+
+  sign:
+    needs: [publish, security]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      matrix:
+        image:
+          - postgres
+          - backend
+          - frontend
+          - mcp-gateway
+          - security-tools
+          - ssh-checker
+          - fast-scanner
+          - web-tools
+          - network-tools
+          - db-tools
+          - windows-tools
+          - ocr-server
+          - embedding-server
+    steps:
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign ${{ matrix.image }}
+        run: cosign sign --yes "${IMAGE_PREFIX}/${{ matrix.image }}:${{ needs.publish.outputs.version }}"
+
+  package:
+    needs: [publish, sign]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build CPU, GPU and remote-node deployment packages
+        env:
+          CERTIPROOF_VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          ./scripts/package-cloud-deployment.sh all
+          ./scripts/package-remote-node.sh online
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: certiproof-cloud-${{ needs.publish.outputs.version }}
           path: dist/cloud/*
           if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: certiproof-scan-node-${{ needs.publish.outputs.version }}
+          path: dist/scan-node/*
+          if-no-files-found: error
+          retention-days: 30

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Button, Form, Input, Modal, Popconfirm, Select, Tag, message } from 'antd'
+import { Button, Checkbox, Form, Input, Modal, Popconfirm, Select, Tag, message } from 'antd'
 import {
   ApiOutlined,
   ArrowLeftOutlined,
@@ -34,6 +34,17 @@ const assetIcon = {
   domain: <GlobalOutlined />,
   cloud_resource: <CloudServerOutlined />,
 }
+const assessmentDefaults = [
+  { code: 'dengbao', name: '等保', icon: <SafetyCertificateOutlined /> },
+  { code: 'miping', name: '密评', icon: <SafetyCertificateOutlined /> },
+]
+
+const assessmentConfigFromProject = (project) => Object.fromEntries(
+  (project?.assessment_types || []).map(item => [
+    item.assessment_type?.code,
+    item.level?.includes('二') ? '二级' : '三级',
+  ]).filter(([code]) => code)
+)
 
 function projectState(project) {
   const command = project.command
@@ -63,6 +74,7 @@ export default function ProjectsList() {
   const [assetForm] = Form.useForm()
   const currentOrgId = useAuthStore((state) => state.currentOrgId)
   const view = searchParams.get('view') === 'assets' ? 'assets' : 'projects'
+  const assessmentView = searchParams.get('assessment')
   const [projects, setProjects] = useState([])
   const [assets, setAssets] = useState([])
   const [assetSummary, setAssetSummary] = useState({ total: 0, verified: 0, at_risk: 0, services: 0 })
@@ -83,6 +95,9 @@ export default function ProjectsList() {
   const [assetPagination, setAssetPagination] = useState({ page: 1, page_size: 25, total: 0, pages: 0 })
   const [permissions, setPermissions] = useState([])
   const [selectedAssetId, setSelectedAssetId] = useState(null)
+  const [assessmentTypes, setAssessmentTypes] = useState([])
+  const [createAssessmentConfigs, setCreateAssessmentConfigs] = useState({ dengbao: '三级' })
+  const [editAssessmentConfigs, setEditAssessmentConfigs] = useState({})
 
   const can = (permission) => permissions.includes(permission)
 
@@ -93,7 +108,9 @@ export default function ProjectsList() {
     setLoading(true)
     const [projectsResult, commandResult] = await Promise.allSettled([
       api.get('/projects/', { params: { organization_id: currentOrgId } }),
-      api.get('/dashboard/organization-command', { params: { organization_id: currentOrgId } }),
+      api.get('/dashboard/organization-command', {
+        params: { organization_id: currentOrgId, assessment_code: assessmentView || 'dengbao' },
+      }),
     ])
     if (projectsResult.status === 'fulfilled') {
       setPermissions(commandResult.status === 'fulfilled' ? commandResult.value.data?.current_role?.permissions || [] : [])
@@ -141,7 +158,15 @@ export default function ProjectsList() {
     }
   }
 
-  useEffect(() => { fetchProjects() }, [currentOrgId])
+  useEffect(() => { fetchProjects() }, [currentOrgId, assessmentView])
+  useEffect(() => {
+    api.get('/dashboard/assessment-types')
+      .then(response => {
+        const types = (response.data?.assessment_types || []).filter(item => ['dengbao', 'miping'].includes(item.code))
+        setAssessmentTypes(types)
+      })
+      .catch(() => setAssessmentTypes([]))
+  }, [])
   useEffect(() => {
     if (view !== 'assets' || !currentOrgId) return undefined
     const timer = window.setTimeout(() => fetchAssets({ silent: true }), assetSearch ? 250 : 0)
@@ -167,6 +192,7 @@ export default function ProjectsList() {
     if (!can('project:update')) return message.warning('当前角色没有编辑项目的权限')
     setEditingProject(project)
     form.setFieldsValue({ name: project.name, description: project.description, system_name: project.system_name })
+    setEditAssessmentConfigs(assessmentConfigFromProject(project))
     setEditModalVisible(true)
   }
 
@@ -174,7 +200,10 @@ export default function ProjectsList() {
     if (!can('project:update')) return message.warning('当前角色没有编辑项目的权限')
     try {
       const values = await form.validateFields()
-      await api.put(`/projects/${editingProject.id}`, values)
+      await api.put(`/projects/${editingProject.id}`, {
+        ...values,
+        assessment_configs: Object.entries(editAssessmentConfigs).map(([code, level]) => ({ code, level })),
+      })
       message.success('项目已更新')
       setEditModalVisible(false)
       await fetchProjects({ silent: true })
@@ -221,12 +250,22 @@ export default function ProjectsList() {
     if (!can('project:create')) return message.warning('当前角色没有新建项目的权限')
     try {
       const values = await createForm.validateFields()
-      const response = await api.post('/projects/', { ...values, organization_id: currentOrgId })
-      message.success('项目与四阶段测评流程已创建')
+      const configs = Object.entries(createAssessmentConfigs).map(([code, level]) => ({ code, level }))
+      if (!configs.length) return message.warning('请至少启用一种测评')
+      const response = await api.post('/projects/', {
+        ...values,
+        organization_id: currentOrgId,
+        assessment_configs: configs,
+      })
+      const selectedTypes = (assessmentTypes.length ? assessmentTypes : assessmentDefaults)
+        .filter(item => createAssessmentConfigs[item.code])
+      message.success(`项目与 ${selectedTypes.map(item => item.name).join('、') || '等保'} 测评流程已创建`)
       setCreateModalVisible(false)
       createForm.resetFields()
+      setCreateAssessmentConfigs({ dengbao: '三级' })
       await fetchProjects({ silent: true })
-      navigate(`/projects/${response.data.id}`)
+      const initialCode = selectedTypes.find(item => item.code === 'dengbao')?.code || selectedTypes[0]?.code || 'dengbao'
+      navigate(`/projects/${response.data.id}?assessment=${initialCode}`)
     } catch (error) {
       message.error(errorMessage(error, '创建项目失败'))
     }
@@ -315,11 +354,12 @@ export default function ProjectsList() {
 
       {view === 'projects' ? (
         <ProjectsView
-          projects={projects}
+          projects={assessmentView ? projects.filter(project => project.assessment_types?.some(item => item.assessment_type?.code === assessmentView)) : projects}
           summary={projectSummary}
           loading={loading}
           loadError={projectLoadError}
           navigate={navigate}
+          assessmentCode={assessmentView}
           onRetry={() => fetchProjects()}
           onEdit={handleEdit}
           onDelete={handleDeleteProject}
@@ -360,7 +400,13 @@ export default function ProjectsList() {
         <Form form={createForm} layout="vertical">
           <Form.Item name="name" label="项目名称" rules={[{ required: true, message: '请输入项目名称' }]}><Input placeholder="例如：生产门户系统" /></Form.Item>
           <Form.Item name="system_name" label="系统名称"><Input placeholder="例如：企业客户服务平台" /></Form.Item>
-          <Form.Item name="compliance_level" label="等保等级" rules={[{ required: true, message: '请选择等保等级' }]}><Select options={[{ value: '二级', label: '等保二级' }, { value: '三级', label: '等保三级' }]} /></Form.Item>
+          <Form.Item label="测评类型与等级" required>
+            <AssessmentConfigEditor
+              types={assessmentTypes.length ? assessmentTypes : assessmentDefaults}
+              value={createAssessmentConfigs}
+              onChange={setCreateAssessmentConfigs}
+            />
+          </Form.Item>
           <Form.Item name="description" label="项目说明"><Input.TextArea rows={3} placeholder="可选" /></Form.Item>
         </Form>
       </Modal>
@@ -370,6 +416,14 @@ export default function ProjectsList() {
           <Form.Item name="name" label="项目名称" rules={[{ required: true, message: '请输入项目名称' }]}><Input /></Form.Item>
           <Form.Item name="system_name" label="系统名称"><Input /></Form.Item>
           <Form.Item name="description" label="项目说明"><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item label="测评类型与等级" required>
+            <AssessmentConfigEditor
+              types={assessmentTypes.length ? assessmentTypes : assessmentDefaults}
+              value={editAssessmentConfigs}
+              onChange={setEditAssessmentConfigs}
+              lockedCodes={Object.keys(assessmentConfigFromProject(editingProject))}
+            />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -385,7 +439,35 @@ export default function ProjectsList() {
   )
 }
 
-function ProjectsView({ projects, summary, loading, loadError, navigate, onRetry, onEdit, onDelete, onArchive, onRestore, onCreate, canCreate, canEdit, canDelete }) {
+function AssessmentConfigEditor({ types, value, onChange, lockedCodes = [] }) {
+  return <div className="assessment-config-editor">
+    {types.map((type) => {
+      const enabled = Boolean(value[type.code])
+      const locked = lockedCodes.includes(type.code)
+      return <div className="assessment-config-row" key={type.code}>
+        <Checkbox
+          checked={enabled}
+          disabled={locked}
+          onChange={(event) => onChange((current) => {
+            const next = { ...current }
+            if (event.target.checked) next[type.code] = '三级'
+            else delete next[type.code]
+            return next
+          })}
+        >{type.name}自查{locked ? '（已创建）' : ''}</Checkbox>
+        <Select
+          value={value[type.code] || '三级'}
+          disabled={!enabled || locked}
+          onChange={(level) => onChange((current) => ({ ...current, [type.code]: level }))}
+          options={[{ value: '二级', label: '第二级' }, { value: '三级', label: '第三级' }]}
+        />
+      </div>
+    })}
+    <p className="assessment-config-hint">两套测评共用项目资产，但进度、问题、复测、评分和报告相互独立。</p>
+  </div>
+}
+
+function ProjectsView({ projects, summary, loading, loadError, navigate, assessmentCode, onRetry, onEdit, onDelete, onArchive, onRestore, onCreate, canCreate, canEdit, canDelete }) {
   return <>
     {loadError ? <LoadError text={loadError} onRetry={onRetry} /> : null}
     <section className="projects-summary" aria-label="项目摘要">
@@ -401,13 +483,18 @@ function ProjectsView({ projects, summary, loading, loadError, navigate, onRetry
         const progress = project.command?.progress
         const taskDone = project.command?.task_done
         const taskTotal = project.command?.task_total
-        return <article key={project.id} className="project-card" onClick={() => navigate(`/projects/${project.id}`)}>
-          <div className="project-card-head"><span className="project-id">P-{String(project.id).padStart(3, '0')}</span><div><Tag color={project.compliance_level === '三级' ? 'blue' : 'cyan'}>{project.compliance_level || '未定级'}</Tag><span className={`project-state ${state.tone}`}>{state.label}</span></div></div>
+        const enabledTypes = (project.assessment_types || []).map(item => item.assessment_type).filter(Boolean)
+        const activeType = (project.assessment_types || []).find(item => item.assessment_type?.code === (assessmentCode || 'dengbao'))
+          || project.assessment_types?.[0]
+        const activeScore = activeType?.score
+        const projectUrl = `/projects/${project.id}${assessmentCode ? `?assessment=${assessmentCode}` : ''}`
+        return <article key={project.id} className="project-card" onClick={() => navigate(`/projects/${project.id}${assessmentCode ? `?assessment=${assessmentCode}` : ''}`)}>
+          <div className="project-card-head"><span className="project-id">P-{String(project.id).padStart(3, '0')}</span><div><Tag color={project.compliance_level === '三级' ? 'blue' : 'cyan'}>{project.compliance_level || '未定级'}</Tag>{enabledTypes.map(type => <Tag key={type.code} color={type.code === 'miping' ? 'green' : 'geekblue'}>{type.name}</Tag>)}<span className={`project-state ${state.tone}`}>{state.label}</span></div></div>
           <div className="project-card-title"><h2>{project.name}</h2><p>{project.system_name || '未填写系统名称'}</p></div>
           <div className="project-stage"><span>{project.command?.stage || '测评流程暂未初始化'}</span><strong>{formatProgress(progress)}</strong></div>
           <div className="project-progress"><i style={{ width: `${Math.max(0, Math.min(100, progress || 0))}%` }} /></div>
-          <dl className="project-metrics"><div><dt>测评任务</dt><dd>{Number.isFinite(taskDone) ? `${taskDone}/${taskTotal || 0}` : '-'}</dd></div><div><dt>待处置风险</dt><dd className={project.command?.risk_count ? 'danger' : ''}>{Number.isFinite(project.command?.risk_count) ? project.command.risk_count : '-'}</dd></div><div><dt>合规得分</dt><dd>{Number.isFinite(project.compliance_score) ? `${Math.round(project.compliance_score)} 分` : '-'}</dd></div></dl>
-          <div className="project-card-actions" onClick={(event) => event.stopPropagation()}><Button type="text" icon={<EditOutlined />} disabled={!canEdit || project.status === 'archived'} title={!canEdit ? '当前角色没有编辑项目的权限' : project.status === 'archived' ? '归档项目为只读状态' : undefined} onClick={(event) => onEdit(project, event)}>编辑</Button>{project.status === 'archived' ? <Button type="text" disabled={!canEdit} onClick={() => onRestore(project.id)}>恢复</Button> : <Popconfirm disabled={!canEdit} title="归档项目？" description="归档后项目仅可查看、导出报告或恢复。" onConfirm={() => onArchive(project.id)} okText="归档" cancelText="取消"><Button type="text" disabled={!canEdit}>归档</Button></Popconfirm>}<Popconfirm disabled={!canDelete} title="确认删除项目？" description="项目、检测结果与整改记录将一并删除。" onConfirm={() => onDelete(project.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}><Button type="text" danger icon={<DeleteOutlined />} disabled={!canDelete} title={!canDelete ? '当前角色没有删除项目的权限' : undefined}>删除</Button></Popconfirm><Button type="primary" onClick={() => navigate(`/projects/${project.id}`)}>进入项目</Button></div>
+          <dl className="project-metrics"><div><dt>测评任务</dt><dd>{Number.isFinite(taskDone) ? `${taskDone}/${taskTotal || 0}` : '-'}</dd></div><div><dt>待处置风险</dt><dd className={project.command?.risk_count ? 'danger' : ''}>{Number.isFinite(project.command?.risk_count) ? project.command.risk_count : '-'}</dd></div><div><dt>{activeType?.assessment_type?.name || '测评'}得分</dt><dd>{Number.isFinite(activeScore) ? `${Math.round(activeScore)} 分` : '-'}</dd></div></dl>
+          <div className="project-card-actions" onClick={(event) => event.stopPropagation()}><Button type="text" icon={<EditOutlined />} disabled={!canEdit || project.status === 'archived'} title={!canEdit ? '当前角色没有编辑项目的权限' : project.status === 'archived' ? '归档项目为只读状态' : undefined} onClick={(event) => onEdit(project, event)}>编辑</Button>{project.status === 'archived' ? <Button type="text" disabled={!canEdit} onClick={() => onRestore(project.id)}>恢复</Button> : <Popconfirm disabled={!canEdit} title="归档项目？" description="归档后项目仅可查看、导出报告或恢复。" onConfirm={() => onArchive(project.id)} okText="归档" cancelText="取消"><Button type="text" disabled={!canEdit}>归档</Button></Popconfirm>}<Popconfirm disabled={!canDelete} title="确认删除项目？" description="项目、检测结果与整改记录将一并删除。" onConfirm={() => onDelete(project.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}><Button type="text" danger icon={<DeleteOutlined />} disabled={!canDelete} title={!canDelete ? '当前角色没有删除项目的权限' : undefined}>删除</Button></Popconfirm><Button type="primary" onClick={() => navigate(projectUrl)}>进入项目</Button></div>
         </article>
       })}
       {!loading && !projects.length ? <EmptyState icon={<ProjectOutlined />} title="还没有项目" action={canCreate ? '新建项目' : undefined} onAction={onCreate} /> : null}

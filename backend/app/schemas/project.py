@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime
 from app.models.project import ComplianceLevel, ProjectStatus
 from app.schemas.assessment_type import ProjectAssessmentResponse, AssessmentTypeResponse
@@ -11,10 +11,19 @@ class ProjectBase(BaseModel):
     compliance_level: Optional[ComplianceLevel] = None
 
 
+class ProjectAssessmentConfig(BaseModel):
+    code: Literal["dengbao", "miping"]
+    level: ComplianceLevel
+
+
+class ProjectAssessmentEnable(BaseModel):
+    level: ComplianceLevel
+
+
 class ProjectCreate(ProjectBase):
     organization_id: int
     system_name: Optional[str] = Field(None, max_length=500)
-    assessment_type_ids: List[int] = Field(default_factory=list)
+    assessment_configs: List[ProjectAssessmentConfig] = Field(default_factory=list)
 
 
 class ProjectUpdate(BaseModel):
@@ -22,6 +31,7 @@ class ProjectUpdate(BaseModel):
     description: Optional[str] = None
     system_name: Optional[str] = Field(None, max_length=500)
     status: Optional[ProjectStatus] = None
+    assessment_configs: Optional[List[ProjectAssessmentConfig]] = None
 
 
 class ProjectOwnerBrief(BaseModel):
@@ -40,7 +50,7 @@ class ProjectResponse(ProjectBase):
     system_name: Optional[str]
     status: ProjectStatus
     compliance_score: Optional[float] = None
-    assessment_types: List[ProjectAssessmentResponse] = []
+    assessment_types: List[ProjectAssessmentResponse] = Field(default_factory=list, validation_alias="assessments")
     created_at: datetime
     updated_at: datetime
     
@@ -55,7 +65,7 @@ class ProjectListResponse(BaseModel):
     status: ProjectStatus
     compliance_score: Optional[float] = None
     organization_id: Optional[int] = None
-    assessment_types: List[ProjectAssessmentResponse] = []
+    assessment_types: List[ProjectAssessmentResponse] = Field(default_factory=list, validation_alias="assessments")
     created_at: datetime
     
     model_config = ConfigDict(from_attributes=True)

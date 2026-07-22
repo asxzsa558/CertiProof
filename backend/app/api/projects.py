@@ -16,7 +16,7 @@ from app.models.evidence import Evidence, EvidenceType
 from app.models.questionnaire import QuestionnaireRecord
 from app.models.assessment import Assessment, FlowTemplate, PhaseInstance, TaskInstance, FlowEvent
 from app.models.document_knowledge import DocumentAnalysisRun, DocumentFile
-from app.models.assessment_type import ProjectAssessment
+from app.models.assessment_type import ProjectAssessment, AssessmentType
 from app.models.monitoring import ScheduledScan, ScanHistory
 from app.models.change_snapshot import ChangeSnapshot
 from app.models.report import ReportArtifact
@@ -25,7 +25,14 @@ from app.models.context import (
     ConversationHistory, ActionHistory, ResultCache,
     ProjectMemory, ConversationArchive, ConversationThread,
 )
-from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse, ProjectListResponse
+from app.schemas.project import (
+    ProjectAssessmentConfig,
+    ProjectAssessmentEnable,
+    ProjectCreate,
+    ProjectListResponse,
+    ProjectResponse,
+    ProjectUpdate,
+)
 from app.services.report_service import (
     get_report_artifact_version,
     get_latest_report_artifact,
@@ -45,6 +52,66 @@ from app.services.data_lifecycle import (
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
 
+def _level_number(level: ComplianceLevel) -> int:
+    return 2 if level == ComplianceLevel.LEVEL_2 else 3
+
+
+def _assessment_name(project: Project, code: str, level: ComplianceLevel) -> str:
+    label = f"等保{level.value}自查" if code == "dengbao" else f"第{level.value[0]}级密码应用自查"
+    return f"{project.name} - {label}"
+
+
+async def _reload_project(db: AsyncSession, project_id: int) -> Project:
+    return (await db.execute(
+        select(Project)
+        .where(Project.id == project_id)
+        .options(selectinload(Project.assessments).selectinload(ProjectAssessment.assessment_type))
+        .execution_options(populate_existing=True)
+    )).scalar_one()
+
+
+async def _ensure_assessment_config(
+    db: AsyncSession,
+    project: Project,
+    config: ProjectAssessmentConfig,
+    owner_id: int,
+    templates: list[FlowTemplate] | None = None,
+) -> Assessment:
+    existing = (await db.execute(
+        select(Assessment)
+        .where(
+            Assessment.project_id == project.id,
+            Assessment.assessment_type_code == config.code,
+        )
+        .order_by(Assessment.created_at.desc(), Assessment.id.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    requested_level = _level_number(config.level)
+    if existing:
+        if existing.assessment_level != requested_level:
+            label = "等保" if config.code == "dengbao" else "密评"
+            raise HTTPException(
+                status_code=409,
+                detail=f"现有{label}测评为{existing.assessment_level}级。等级变更会使已生成任务和结果失效，请完全重置该测评后再修改。",
+            )
+        return existing
+
+    engine = get_flow_engine(db)
+    templates = templates or await engine.upsert_default_templates()
+    template = next((item for item in templates if (
+        item.compliance_level == requested_level
+        and item.assessment_type_code == config.code
+    )), None)
+    if not template:
+        raise HTTPException(status_code=500, detail=f"未找到 {config.code} {requested_level} 级测评模板")
+    return await engine.create_assessment(
+        project_id=project.id,
+        template_id=template.id,
+        name=_assessment_name(project, config.code, config.level),
+        owner_id=owner_id,
+    )
+
+
 async def check_org_member(db: AsyncSession, org_id: int, user_id: int, permission: str = "project:read") -> None:
     """检查用户是否属于该组织"""
     await require_org_permission_for_user_id(db, org_id, user_id, permission)
@@ -58,7 +125,11 @@ async def get_project_for_user(
     allow_archived: bool = False,
 ) -> Project:
     """获取项目并验证用户有权限访问（通过组织成员关系）"""
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    result = await db.execute(
+        select(Project)
+        .where(Project.id == project_id)
+        .options(selectinload(Project.assessments).selectinload(ProjectAssessment.assessment_type))
+    )
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -80,6 +151,34 @@ async def get_project_for_user(
     return project
 
 
+@router.post("/{project_id}/assessment-types/{assessment_code}", response_model=ProjectResponse)
+async def enable_project_assessment_type(
+    project_id: int,
+    assessment_code: str,
+    payload: ProjectAssessmentEnable,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Enable an additional assessment flow inside an existing project."""
+    project = await get_project_for_user(db, project_id, current_user.id, "assessment:manage")
+    if assessment_code not in {"dengbao", "miping"}:
+        raise HTTPException(status_code=400, detail="当前仅支持等保和密评自查")
+    assessment_type = (await db.execute(select(AssessmentType).where(
+        AssessmentType.code == assessment_code,
+        AssessmentType.is_active == True,
+    ))).scalar_one_or_none()
+    if not assessment_type:
+        raise HTTPException(status_code=404, detail="测评类型未启用")
+
+    await _ensure_assessment_config(
+        db,
+        project,
+        ProjectAssessmentConfig(code=assessment_code, level=payload.level),
+        current_user.id,
+    )
+    return await _reload_project(db, project.id)
+
+
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(
     project_data: ProjectCreate,
@@ -89,6 +188,11 @@ async def create_project(
     # Verify user is member of organization
     await check_org_member(db, project_data.organization_id, current_user.id, "project:create")
 
+    configs = project_data.assessment_configs or [ProjectAssessmentConfig(
+        code="dengbao",
+        level=project_data.compliance_level or ComplianceLevel.LEVEL_3,
+    )]
+    primary_level = next((item.level for item in configs if item.code == "dengbao"), configs[0].level)
     project = Project(
         user_id=current_user.id,
         organization_id=project_data.organization_id,
@@ -96,33 +200,19 @@ async def create_project(
         name=project_data.name,
         system_name=project_data.system_name,
         description=project_data.description,
-        compliance_level=project_data.compliance_level,
+        compliance_level=primary_level,
     )
     db.add(project)
     await db.flush()
 
-    # New projects use the single four-stage enterprise self-assessment flow.
+    # A project is the shared asset scope; selected assessment types keep independent flows.
     engine = get_flow_engine(db)
     templates = await engine.upsert_default_templates()
-    target_level = 2 if project.compliance_level == ComplianceLevel.LEVEL_2 else 3
-    template = next((item for item in templates if item.compliance_level == target_level), None)
-    if not template:
-        raise HTTPException(status_code=500, detail="未找到对应等级的四阶段测评模板")
-    level_name = project.compliance_level.value if project.compliance_level else ComplianceLevel.LEVEL_3.value
-    await engine.create_assessment(
-        project_id=project.id,
-        template_id=template.id,
-        name=f"{project.name} - 等保{level_name}测评",
-        owner_id=current_user.id,
-    )
-
-    result = await db.execute(
-        select(Project)
-        .where(Project.id == project.id)
-        .options(selectinload(Project.assessments).selectinload(ProjectAssessment.assessment_type))
-    )
-    project = result.scalar_one()
-    return project
+    if len({item.code for item in configs}) != len(configs):
+        raise HTTPException(status_code=400, detail="同一种测评类型不能重复配置")
+    for config in configs:
+        await _ensure_assessment_config(db, project, config, current_user.id, templates)
+    return await _reload_project(db, project.id)
 
 
 @router.post("/demo", status_code=status.HTTP_201_CREATED)
@@ -149,7 +239,7 @@ async def create_demo_project(
 
     engine = get_flow_engine(db)
     templates = await engine.upsert_default_templates()
-    template = next((item for item in templates if item.compliance_level == 3), None)
+    template = next((item for item in templates if item.compliance_level == 3 and item.assessment_type_code == "dengbao"), None)
     if not template:
         raise HTTPException(status_code=500, detail="未找到三级测评模板")
 
@@ -264,6 +354,7 @@ async def list_projects(
         result = await db.execute(
             select(Project)
             .where(Project.organization_id == organization_id)
+            .options(selectinload(Project.assessments).selectinload(ProjectAssessment.assessment_type))
             .order_by(Project.created_at.desc())
         )
     else:
@@ -278,6 +369,7 @@ async def list_projects(
         result = await db.execute(
             select(Project)
             .where(Project.organization_id.in_(org_ids))
+            .options(selectinload(Project.assessments).selectinload(ProjectAssessment.assessment_type))
             .order_by(Project.created_at.desc())
         )
     return result.scalars().all()
@@ -286,11 +378,12 @@ async def list_projects(
 @router.get("/{project_id}/reports")
 async def list_report_history(
     project_id: int,
+    assessment_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     await get_project_for_user(db, project_id, current_user.id, "report:export")
-    return [report_artifact_payload(item) for item in await list_report_artifacts(db, project_id)]
+    return [report_artifact_payload(item) for item in await list_report_artifacts(db, project_id, assessment_id)]
 
 
 @router.get("/{project_id}/reports/{version}")
@@ -398,9 +491,22 @@ async def update_project(
     if project_data.status is not None and project_data.status != project.status:
         raise HTTPException(status_code=400, detail="请使用项目归档或恢复操作变更项目状态")
 
+    if project_data.assessment_configs is not None:
+        configs = project_data.assessment_configs
+        if not configs:
+            raise HTTPException(status_code=400, detail="项目至少需要保留一种测评类型")
+        if len({item.code for item in configs}) != len(configs):
+            raise HTTPException(status_code=400, detail="同一种测评类型不能重复配置")
+        templates = await get_flow_engine(db).upsert_default_templates()
+        for config in configs:
+            await _ensure_assessment_config(db, project, config, current_user.id, templates)
+        project.compliance_level = next(
+            (item.level for item in configs if item.code == "dengbao"),
+            project.compliance_level or configs[0].level,
+        )
+
     await db.commit()
-    await db.refresh(project)
-    return project
+    return await _reload_project(db, project.id)
 
 
 @router.post("/{project_id}/archive", response_model=ProjectResponse)
@@ -595,8 +701,9 @@ async def download_json_report(
 @router.get("/{project_id}/report/status")
 async def get_report_status(
     project_id: int,
+    assessment_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     await get_project_for_user(db, project_id, current_user.id, "report:export")
-    return report_artifact_payload(await get_latest_report_artifact(db, project_id))
+    return report_artifact_payload(await get_latest_report_artifact(db, project_id, assessment_id=assessment_id))

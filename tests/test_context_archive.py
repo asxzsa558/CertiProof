@@ -57,6 +57,28 @@ def test_archive_keeps_raw_messages_and_thread_scope_isolated():
     asyncio.run(run())
 
 
+def test_conversation_history_uses_id_to_order_same_timestamp_pairs():
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+
+        created_at = datetime.now(timezone.utc)
+        async with session_factory() as db:
+            db.add_all([
+                ConversationHistory(user_id=1, project_id=1, role="user", content="问题", created_at=created_at),
+                ConversationHistory(user_id=1, project_id=1, role="assistant", content="回答", created_at=created_at),
+            ])
+            await db.commit()
+            history = await ContextManager(db, user_id=1, project_id=1)._get_conversation_history()
+            assert [item["content"] for item in history] == ["问题", "回答"]
+
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_archived_project_blocks_mutations_but_keeps_read_access(monkeypatch):
     class Result:
         def scalar_one_or_none(self):

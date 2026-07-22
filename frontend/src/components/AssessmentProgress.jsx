@@ -45,6 +45,7 @@ const TASK_TYPE_ICONS = {
   basic_baseline_check: <SettingOutlined />,
   basic_weak_password_scan: <KeyOutlined />,
   basic_ssl_tls_scan: <LockOutlined />,
+  crypto_network_communication_assessment: <LockOutlined />,
   config_check: <SettingOutlined />,
   vuln_scan: <BugOutlined />,
   pentest: <FileTextOutlined />,  // 已废弃：渗透测试改为文档审查
@@ -78,6 +79,7 @@ const EXECUTABLE_TASK_TYPES = [
   'basic_baseline_check',
   'basic_weak_password_scan',
   'basic_ssl_tls_scan',
+  'crypto_network_communication_assessment',
   'config_check',
   'vuln_scan',
   'ssl_check',
@@ -187,13 +189,22 @@ const COMPLETION_STATE_CONFIG = {
   needs_remediation: { title: '本轮测评已完成', label: '仍有待整改问题', color: 'error', tone: 'warning' },
 }
 
+const MIPING_DOMAIN_STATUS = {
+  pass: { label: '通过', color: 'success' },
+  partial: { label: '部分符合', color: 'warning' },
+  fail: { label: '不符合', color: 'error' },
+  unable: { label: '无法判定', color: 'error' },
+  pending: { label: '待提交', color: 'default' },
+  running: { label: '检查中', color: 'processing' },
+}
+
 const VERIFICATION_RUN_STATUS = {
   completed: '已完成', partial: '部分完成', failed: '失败', cancelled: '已停止',
   queued: '排队中', running: '执行中', paused: '已暂停',
 }
 const keepIfUnchanged = (previous, next) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next
 
-function AssessmentProgress({ projectId, projectName, variant = 'default', openIssues }) {
+function AssessmentProgress({ projectId, projectName, variant = 'default', openIssues, assessmentCode = 'dengbao' }) {
   const [assessment, setAssessment] = useState(null)
   const [phases, setPhases] = useState([])
   const [loading, setLoading] = useState(false)
@@ -201,6 +212,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
   const [selectedPhase, setSelectedPhase] = useState(null)
   const [tasks, setTasks] = useState([])
   const [tasksLoading, setTasksLoading] = useState(false)
+  const [mipingMatrix, setMipingMatrix] = useState(null)
 
   // 轮询相关
   const pollingRef = useRef(null)
@@ -239,6 +251,11 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
   const [expandedPhases, setExpandedPhases] = useState({})
 
   useEffect(() => {
+    initialStatusRef.current = null
+    setAssessment(null)
+    setPhases([])
+    setMipingMatrix(null)
+    setShowCompletionView(false)
     if (projectId) {
       fetchAssessment()
     }
@@ -250,7 +267,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
         clearInterval(batchPollingRef.current)
       }
     }
-  }, [projectId])
+  }, [projectId, assessmentCode])
 
   // 记录首次加载时的测评状态
   useEffect(() => {
@@ -292,7 +309,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
     Modal.confirm({
       title: reset ? '确认完全重置测评' : '继续整改或补充材料',
       content: reset
-        ? '此操作不可恢复。系统将停止当前任务，并永久删除本项目的测评进度、文档与解析数据、技术检测结果、问题证据、整改复测记录、变更快照和历史报告。项目、资产、成员权限、标准库及审计日志不会删除。'
+        ? `此操作不可恢复。系统只会删除当前${assessmentCode === 'miping' ? '密评' : '等保'}测评的进度、文档解析、技术检测、问题、复测和历史报告；项目资产及同项目的其他测评不会删除。`
         : '测评将恢复为可编辑状态，可上传改进后的文档或重新执行技术检测；已有结果、证据和处置记录都会保留。',
       okText: reset ? '完全重置' : '恢复可编辑',
       cancelText: '取消',
@@ -447,17 +464,26 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
     const silent = options.silent === true
     if (!silent) setLoading(true)
     try {
-      const response = await api.get(`/assessments/projects/${projectId}`)
+      const response = await api.get(`/assessments/projects/${projectId}`, {
+        params: { assessment_code: assessmentCode },
+      })
       if (response.data && response.data.length > 0) {
         const latestAssessment = response.data[0]
         setAssessment(previous => keepIfUnchanged(previous, latestAssessment))
         
-        const phasesResponse = await api.get(`/assessments/${latestAssessment.id}/phases`)
+        const [phasesResponse, matrixResponse] = await Promise.all([
+          api.get(`/assessments/${latestAssessment.id}/phases`),
+          assessmentCode === 'miping'
+            ? api.get(`/assessments/${latestAssessment.id}/miping-matrix`)
+            : Promise.resolve({ data: null }),
+        ])
         setPhases(previous => keepIfUnchanged(previous, phasesResponse.data))
+        setMipingMatrix(previous => keepIfUnchanged(previous, matrixResponse.data))
         return { assessment: latestAssessment, phases: phasesResponse.data }
       } else {
         setAssessment(null)
         setPhases([])
+        setMipingMatrix(null)
         return null
       }
     } catch (error) {
@@ -468,7 +494,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [projectId])
+  }, [projectId, assessmentCode])
 
   const shouldRefreshAssessment = assessment?.status === 'in_progress'
     || phases.some(phase => phase.status === 'active')
@@ -522,7 +548,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
     try {
       const [response, latestBatchResponse] = await Promise.all([
         api.get(`/assessments/phases/${phase.id}/tasks`),
-        ['gap_analysis', 'remediation_verification'].includes(phase.phase_id)
+        ['gap_analysis', 'field_assessment', 'remediation_verification'].includes(phase.phase_id)
           ? api.get(`/assessments/phases/${phase.id}/documents/batch/latest`)
           : Promise.resolve({ data: null }),
       ])
@@ -553,19 +579,33 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
       if (!current) {
         const projectResponse = await api.get(`/projects/${projectId}`)
         const project = projectResponse.data
-        const targetLevel = project.compliance_level === '二级' ? 2 : 3
-        const templatesResponse = await api.get('/assessments/templates')
+        const projectAssessment = (project.assessment_types || []).find(
+          item => item.assessment_type?.code === assessmentCode
+        )
+        const assessmentLevel = projectAssessment?.level || project.compliance_level || '三级'
+        const targetLevel = assessmentLevel.includes('二') ? 2 : 3
+        const templatesResponse = await api.get('/assessments/templates', {
+          params: { assessment_code: assessmentCode },
+        })
         const template = templatesResponse.data.find(item => item.compliance_level === targetLevel)
         if (!template) throw new Error('未找到匹配的测评模板')
 
         const created = await api.post(`/assessments/projects/${projectId}`, {
           template_id: template.id,
-          name: `${projectName || project.name} - 等保${project.compliance_level}测评`,
+          name: assessmentCode === 'miping'
+            ? `${projectName || project.name} - 第${targetLevel}级密码应用自查`
+            : `${projectName || project.name} - 等保${targetLevel}级自查`,
         })
-        const phasesResponse = await api.get(`/assessments/${created.data.id}/phases`)
+        const [phasesResponse, matrixResponse] = await Promise.all([
+          api.get(`/assessments/${created.data.id}/phases`),
+          assessmentCode === 'miping'
+            ? api.get(`/assessments/${created.data.id}/miping-matrix`)
+            : Promise.resolve({ data: null }),
+        ])
         current = { assessment: created.data, phases: phasesResponse.data }
         setAssessment(current.assessment)
         setPhases(current.phases)
+        setMipingMatrix(matrixResponse.data)
         message.success('测评流程已创建')
       }
 
@@ -670,7 +710,9 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
   const handleOpenTechnicalBatch = async () => {
     setExecuteTask({
       task_type: GAP_TECH_BATCH_TYPE,
-      name: selectedPhase?.phase_id === 'field_assessment' ? '自动现场技术检测' : '自动基础技术检测',
+      name: selectedPhase?.phase_id === 'field_assessment'
+        ? assessmentCode === 'miping' ? '密码应用现场辅助评估' : '自动现场技术检测'
+        : '自动基础技术检测',
     })
     setExecuteMode('all')
     setExecuteParams({ target: '', username: 'root', password: '', key_file: '' })
@@ -744,7 +786,9 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
       if (executeResponse.data?.status === 'partial') {
         message.warning(executeResponse.data.message || '任务部分完成，存在无法检测项')
       } else {
-        message.success(executeResponse.data?.message || (isGapBatch ? '基础技术检测已提交' : '任务执行完成'))
+        message.success(executeResponse.data?.message || (isGapBatch
+          ? selectedPhase?.phase_id === 'field_assessment' ? '现场检测已提交' : '基础技术检测已提交'
+          : '任务执行完成'))
       }
       setExecuteModalVisible(false)
       
@@ -1225,7 +1269,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
           <div className="assessment-title"><RocketOutlined className="assessment-icon" /><span>测评进度</span></div>
         </div>
         <Button type="primary" block icon={<PlayCircleFilled />} onClick={handleOpenAssessment} className="start-assessment-btn">
-          创建等保测评
+          创建{assessmentCode === 'miping' ? '密评自查' : '等保测评'}
         </Button>
       </div>
     )
@@ -1247,8 +1291,12 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
   const batchDocumentRunning = ['queued', 'pending', 'running'].includes(batchDocumentRun?.status)
   const completionState = COMPLETION_STATE_CONFIG[completionSummary?.completion_state] || COMPLETION_STATE_CONFIG.needs_remediation
   const cockpitTracks = {
-    gap_analysis: ['文档合规检查', '基础技术检测', '差距结果汇总'],
-    field_assessment: ['全资产技术检测', '专项安全检测', '现场结果归集'],
+    gap_analysis: assessmentCode === 'miping'
+      ? ['密码应用材料检查', '应用边界与产品清单', '差距结果汇总']
+      : ['文档合规检查', '基础技术检测', '差距结果汇总'],
+    field_assessment: assessmentCode === 'miping'
+      ? ['网络通信密码核验', '证书与算法套件', '现场证据归集']
+      : ['全资产技术检测', '专项安全检测', '现场结果归集'],
     remediation_verification: ['文档整改复测', '技术问题复测', '问题处置确认'],
     report: ['报告数据固化', 'HTML 报告生成'],
     report_generation: ['报告数据固化', 'HTML 报告生成'],
@@ -1773,7 +1821,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
           </div>
         }
         placement="right"
-        width={isGapAnalysis || isVerificationPhase ? 'min(920px, 96vw)' : 'min(720px, 94vw)'}
+        width={isGapAnalysis || isVerificationPhase || (isFieldAssessment && assessmentCode === 'miping') ? 'min(920px, 96vw)' : 'min(720px, 94vw)'}
         onClose={() => {
           setDrawerVisible(false)
           stopPolling()
@@ -1879,7 +1927,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
                   </Button>
                 </section>
 
-                <section className="gap-track technical-track">
+                {assessmentCode !== 'miping' && <section className="gap-track technical-track">
                   <div className="gap-track-header">
                     <span className="gap-track-icon"><ThunderboltOutlined /></span>
                     <div>
@@ -1907,8 +1955,49 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
                   >
                     自动检测全部资产
                   </Button>
-                </section>
+                </section>}
               </div>
+            )}
+
+            {isFieldAssessment && assessmentCode === 'miping' && (
+              <section className="miping-domain-section">
+                <div className="miping-domain-heading">
+                  <div><span>八层面结果矩阵</span><p>自动工具与材料证据合并展示；缺少任一必需来源时不会判定为通过。</p></div>
+                  <small>{mipingMatrix?.counts?.pass || 0} / 8 通过</small>
+                </div>
+                <div className="miping-domain-grid">
+                  {(mipingMatrix?.domains || []).map(domain => {
+                    const state = MIPING_DOMAIN_STATUS[domain.status] || MIPING_DOMAIN_STATUS.pending
+                    return <article key={domain.id} className={`miping-domain-card ${domain.status}`}>
+                      <div><strong>{domain.name}</strong><Tag color={state.color}>{state.label}</Tag></div>
+                      <small>{domain.method === 'hybrid' ? '自动工具 + 现场证据' : domain.method === 'document' ? '制度与运行材料' : '现场证据'}</small>
+                      <details>
+                        <summary>查看检查来源 ({domain.tasks.length})</summary>
+                        {domain.tasks.length ? domain.tasks.map(item => <p key={item.id}><b>{item.name.replace('文档检查：', '')}</b><span>{item.detail}</span></p>) : <p><span>尚未建立检查任务</span></p>}
+                      </details>
+                    </article>
+                  })}
+                </div>
+              </section>
+            )}
+
+            {isFieldAssessment && assessmentCode === 'miping' && (
+              <section className="gap-track document-track field-evidence-track">
+                <div className="gap-track-header">
+                  <span className="gap-track-icon"><FileProtectOutlined /></span>
+                  <div><strong>现场证据材料</strong><p>批量提交物理环境、网络通信、设备计算、应用数据的配置、截图、日志、抓包或检查记录。</p></div>
+                </div>
+                <div className="gap-track-stats">
+                  <span><b>{documentCompleted}</b> / {documentTasks.length} 已完成</span>
+                  <span><b>{documentTasks.filter(task => task.status === 'in_progress').length}</b> 分析中</span>
+                  <span><b>{batchDocumentRun?.result?.unclassified?.length || 0}</b> 未归类</span>
+                </div>
+                {batchDocumentRun && <div className={`batch-document-status ${batchDocumentRun.status}`}>
+                  {batchDocumentRunning ? <><DocumentPipelineProgress progress={batchDocumentRun.progress} batch /><Button danger size="small" icon={<StopOutlined />} onClick={handleStopBatchDocumentRun}>停止现场证据检查</Button></>
+                    : <span>{batchDocumentRun.progress?.message || '现场证据材料已处理'}</span>}
+                </div>}
+                <Button type="primary" icon={<InboxOutlined />} onClick={handleOpenBatchUpload} disabled={batchDocumentRunning || documentTasks.some(task => task.status === 'in_progress')}>批量上传现场证据</Button>
+              </section>
             )}
 
             {isFieldAssessment && (
@@ -1916,8 +2005,10 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
                 <div className="gap-track-header">
                   <span className="gap-track-icon"><RadarChartOutlined /></span>
                   <div>
-                    <strong>自动现场技术检测</strong>
-                    <p>一次选择资产和凭证，后台并发执行适用的 Web、数据库、网络设备、Windows/AD 和主机深度检测。</p>
+                    <strong>{assessmentCode === 'miping' ? '网络通信自动辅助检测' : '自动现场技术检测'}</strong>
+                    <p>{assessmentCode === 'miping'
+                      ? '自动核验授权资产的密码服务端口、协议、证书、密码套件和国密算法标识；结果回写网络和通信层，不替代其他层面的现场证据。'
+                      : '一次选择资产和凭证，后台并发执行适用的 Web、数据库、网络设备、Windows/AD 和主机深度检测。'}</p>
                   </div>
                 </div>
                 <div className="gap-track-stats">
@@ -1928,7 +2019,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
                 </div>
                 {technicalActive > 0 && <div className="technical-batch-status"><Spin size="small" /><span>{technicalRunning} 项执行中，{technicalQueued} 项排队中；结果和失败原因会逐项回写</span></div>}
                 <Button type="primary" icon={<ThunderboltOutlined />} onClick={handleOpenTechnicalBatch} disabled={!technicalTasks.length || technicalActive > 0}>
-                  自动执行全部现场检测
+                  {assessmentCode === 'miping' ? '执行全部资产网络通信核验' : '自动执行全部现场检测'}
                 </Button>
               </section>
             )}
@@ -1985,6 +2076,7 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
                 </section>
                 <VerificationWorkspace
                   projectId={projectId}
+                  assessmentId={assessment.id}
                   onChanged={fetchAssessment}
                   refreshKey={`${batchDocumentRun?.id || ''}:${batchDocumentRun?.status || ''}`}
                   onContinue={selectedPhase.status === 'active' ? () => handleCompletePhase(selectedPhase.id) : null}
@@ -2376,14 +2468,20 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
         onCancel={() => !executing && setExecuteModalVisible(false)}
         onOk={handleSubmitExecute}
         confirmLoading={executing}
-        okText={executeTask?.task_type === GAP_TECH_BATCH_TYPE ? '提交五项检测' : '开始执行'}
+        okText={executeTask?.task_type === GAP_TECH_BATCH_TYPE
+          ? selectedPhase?.phase_id === 'field_assessment'
+            ? assessmentCode === 'miping' ? '提交现场辅助评估' : '提交现场检测'
+            : '提交五项检测'
+          : '开始执行'}
         cancelText="取消"
         width={600}
         destroyOnClose
       >
         <div style={{ marginBottom: 16, color: 'rgba(255,255,255,0.7)' }}>
           {executeTask?.task_type === GAP_TECH_BATCH_TYPE
-            ? '选择本次测评资产并配置 SSH 凭证。无凭证时端口、漏洞、弱口令和 SSL/TLS 仍会执行，基线检查会明确标记为无法检测。'
+            ? assessmentCode === 'miping' && selectedPhase?.phase_id === 'field_assessment'
+              ? '选择本次评估资产。系统仅执行可自动验证的 TLS、证书与密码套件辅助检测，其他密码应用控制域不会被虚假判定为通过。'
+              : '选择本次测评资产并配置 SSH 凭证。无凭证时端口、漏洞、弱口令和 SSL/TLS 仍会执行，基线检查会明确标记为无法检测。'
             : '选择检查模式，系统将根据任务类型自动调用相应的安全工具。'}
         </div>
         
@@ -2465,7 +2563,8 @@ function AssessmentProgress({ projectId, projectName, variant = 'default', openI
             </Form.Item>
           )}
 
-          {SSH_CREDENTIAL_TASK_TYPES.includes(executeTask?.task_type) && (
+          {SSH_CREDENTIAL_TASK_TYPES.includes(executeTask?.task_type)
+            && !(assessmentCode === 'miping' && selectedPhase?.phase_id === 'field_assessment') && (
             <>
               {executeMode === 'all' && (
                 <Form.Item label="凭据模式">

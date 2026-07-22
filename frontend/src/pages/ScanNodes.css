@@ -1,0 +1,88 @@
+.node-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.node-kpis > div {
+  min-height: 88px;
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid rgba(70, 214, 255, .14);
+  background: rgba(11, 20, 31, .78);
+}
+
+.node-kpis > div > .anticon { color: #48d8ff; font-size: 24px; }
+.node-kpis span { display: flex; flex-direction: column; }
+.node-kpis strong { color: #f4fbff; font-size: 24px; line-height: 1; }
+.node-kpis em { margin-top: 8px; color: #8195a7; font-style: normal; font-size: 12px; }
+
+.node-toolbar {
+  margin: 22px 0 12px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.node-toolbar h2, .node-route-test h2 { margin: 0; color: #edfaff; font-size: 17px; }
+.node-toolbar p, .node-route-test p { margin: 5px 0 0; color: #71879a; font-size: 12px; }
+
+.node-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  min-height: 180px;
+}
+
+.node-card {
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid rgba(70, 214, 255, .13);
+  border-left: 2px solid #364e61;
+  background: rgba(9, 17, 27, .88);
+}
+.node-card.online { border-left-color: #31d6a0; }
+.node-card.unenrolled { border-left-color: #e7bc5d; }
+.node-card header { display: grid; grid-template-columns: 38px 1fr auto; gap: 11px; align-items: center; }
+.node-card-icon { width: 38px; height: 38px; display: grid; place-items: center; background: rgba(43, 200, 242, .1); color: #4cddff; font-size: 18px; }
+.node-card h3 { margin: 0; color: #f1faff; font-size: 15px; }
+.node-card header p { margin: 4px 0 0; color: #71879a; font-size: 11px; }
+.node-card-stats { margin: 15px 0 12px; display: grid; grid-template-columns: repeat(3, 1fr); border-block: 1px solid rgba(114, 154, 180, .11); }
+.node-card-stats span { padding: 11px 4px; display: flex; flex-direction: column; text-align: center; }
+.node-card-stats strong { color: #e9f8ff; font-size: 17px; }
+.node-card-stats em { color: #6f879a; font-style: normal; font-size: 10px; }
+.node-route-tags { min-height: 30px; display: flex; flex-wrap: wrap; gap: 4px; overflow: hidden; }
+.node-route-tags em { color: #64798a; font-style: normal; font-size: 11px; }
+.node-card dl { margin: 12px 0; display: grid; gap: 7px; }
+.node-card dl div { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 8px; font-size: 11px; }
+.node-card dt { color: #64798a; }
+.node-card dd { margin: 0; color: #aebfca; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-card footer { display: flex; align-items: center; justify-content: flex-end; border-top: 1px solid rgba(114, 154, 180, .1); padding-top: 8px; }
+.node-empty { grid-column: 1 / -1; padding: 50px 0; border: 1px dashed rgba(70, 214, 255, .14); }
+
+.node-route-test { margin-top: 18px; padding: 18px; }
+.node-route-test header { margin-bottom: 14px; }
+.node-route-test .ant-form { display: grid; grid-template-columns: minmax(180px, 1.3fr) minmax(160px, 1fr) minmax(180px, 1fr) auto; gap: 8px; }
+.node-route-test .ant-form-item { margin: 0; min-width: 0; }
+.node-route-test .ant-select { width: 100%; }
+.node-route-result { margin-top: 12px; padding: 10px 12px; display: flex; gap: 12px; border-left: 2px solid #42d6ff; background: rgba(44, 195, 236, .07); color: #9eb4c2; }
+.node-route-result strong { color: #dff8ff; }
+.node-route-result.remote_offline { border-left-color: #ff6f76; }
+.node-form-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.node-command { padding: 14px; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid rgba(61, 212, 255, .16); background: #09111a; color: #8deaff; font-size: 12px; }
+.node-job-list { max-height: 480px; overflow-y: auto; display: grid; gap: 8px; }
+.node-job-list > div { display: grid; grid-template-columns: 80px 130px minmax(0, 1fr); gap: 8px; align-items: center; padding: 10px; background: rgba(10, 20, 31, .72); }
+.node-job-list span, .node-job-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-job-list small { grid-column: 2 / -1; color: #70879a; }
+
+@media (max-width: 980px) {
+  .node-kpis, .node-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .node-route-test .ant-form { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 680px) {
+  .node-kpis, .node-grid, .node-route-test .ant-form { grid-template-columns: 1fr; }
+  .node-form-row { grid-template-columns: 1fr; }
+}

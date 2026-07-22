@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,8 +55,15 @@ async def _require_project(db: AsyncSession, project_id: int, current_user: User
     return await get_project_for_user(db, project_id, current_user.id, permission)
 
 
-async def _findings(db: AsyncSession, project_id: int, finding_ids: list[int] | None = None) -> list[Finding]:
+async def _findings(
+    db: AsyncSession,
+    project_id: int,
+    finding_ids: list[int] | None = None,
+    assessment_id: int | None = None,
+) -> list[Finding]:
     query = select(Finding).where(Finding.project_id == project_id)
+    if assessment_id is not None:
+        query = query.where(Finding.assessment_id == assessment_id)
     if finding_ids is not None:
         query = query.where(Finding.id.in_(finding_ids))
     return list((await db.execute(query.order_by(Finding.created_at.desc()))).scalars().all())
@@ -122,14 +129,18 @@ def _run_payload(run: VerificationRun, items: list[VerificationItem]) -> dict:
 @router.get("/workspace")
 async def verification_workspace(
     project_id: int,
+    assessment_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     await _require_project(db, project_id, current_user, "assessment:read")
-    findings = await _findings(db, project_id)
-    assessment = (await db.execute(select(Assessment).where(
-        Assessment.project_id == project_id,
-    ).order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1))).scalar_one_or_none()
+    assessment = await db.get(Assessment, assessment_id) if assessment_id is not None else (await db.execute(
+        select(Assessment).where(Assessment.project_id == project_id)
+        .order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1)
+    )).scalar_one_or_none()
+    if assessment and assessment.project_id != project_id:
+        raise HTTPException(status_code=404, detail="测评实例不属于当前项目")
+    findings = await _findings(db, project_id, assessment_id=assessment.id if assessment else None)
     blocker_rows = (await db.execute(
         select(TaskInstance, PhaseInstance)
         .join(PhaseInstance, PhaseInstance.id == TaskInstance.phase_id)
@@ -200,8 +211,9 @@ async def verification_workspace(
             group["findings"].append(payload)
 
     runs = (await db.execute(select(VerificationRun).where(
-        VerificationRun.project_id == project_id
-    ).order_by(VerificationRun.created_at.desc()).limit(30))).scalars().all()
+        VerificationRun.project_id == project_id,
+        VerificationRun.assessment_id == assessment.id,
+    ).order_by(VerificationRun.created_at.desc()).limit(30))).scalars().all() if assessment else []
     run_ids = [run.id for run in runs]
     run_items = (await db.execute(select(VerificationItem).where(
         VerificationItem.run_id.in_(run_ids)

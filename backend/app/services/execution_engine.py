@@ -799,6 +799,19 @@ class ExecutionEngine:
             if target in ["localhost", "127.0.0.1", "本机", "本地"]:
                 parameters["target"] = "host.docker.internal"
 
+        if capability_name in NETWORK_CAPABILITIES and project_id and db:
+            from app.services.scan_node_service import dispatch_remote_execution
+
+            remote_result = await dispatch_remote_execution(
+                db,
+                capability=capability_name,
+                parameters=parameters,
+                user_id=user_id,
+                project_id=project_id,
+            )
+            if remote_result is not None:
+                return remote_result
+
         # 扫描类能力
         if capability_name == "scan_ports":
             return await self._scan_ports(parameters, user_id, project_id, db)
@@ -868,6 +881,15 @@ class ExecutionEngine:
 
         elif capability_name == "scan_ssl":
             return await self._scan_ssl(parameters, user_id, project_id, db)
+
+        elif capability_name == "crypto_transport_scan":
+            return await self._crypto_transport_scan(parameters, user_id, project_id, db)
+
+        elif capability_name == "crypto_certificate_check":
+            return await self._crypto_certificate_check(parameters, user_id, project_id, db)
+
+        elif capability_name == "crypto_onsite_assessment":
+            return await self._crypto_onsite_assessment(parameters, user_id, project_id, db)
 
         elif capability_name == "scan_vulnerabilities":
             return await self._scan_vulnerabilities(parameters, user_id, project_id, db)
@@ -1377,6 +1399,40 @@ class ExecutionEngine:
 
         return self._gateway_payload(result)
 
+    async def _crypto_transport_scan(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        from app.mcp.gateway_client import MCPGatewayClient
+
+        result = await MCPGatewayClient().call_with_progress("crypto_transport_scan", {
+            "target": parameters["target"],
+            "port": parameters.get("port", 443),
+            **({"timeout": parameters["timeout"]} if "timeout" in parameters else {}),
+        })
+        return self._gateway_payload(result, allow_tool_failed=True)
+
+    async def _crypto_certificate_check(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        result = await self._crypto_transport_scan(parameters, user_id, project_id, db)
+        return {
+            **result,
+            "check_focus": "certificate",
+            "protocols": result.get("protocols"),
+            "checks": [item for item in result.get("checks", []) if item.get("id") in {"certificate-chain", "national-algorithm-marker"}],
+        }
+
+    async def _crypto_onsite_assessment(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
+        target = parameters["target"]
+        port = parameters.get("port", 443)
+        sub_results = await asyncio.gather(*[
+            self._run_subtool("scan_ports", {"target": target, "port_range": str(port)}, user_id, project_id, db, "密码服务端口核验"),
+            self._run_subtool("crypto_transport_scan", {"target": target, "port": port}, user_id, project_id, db, "密码协议与证书核验"),
+        ])
+        return {
+            "target": target,
+            "assessment_domain": "network_communication",
+            "sub_results": sub_results,
+            "summary": self._summarize_subtools(sub_results),
+            "limitations": ["自动工具只覆盖网络和通信层的可远程核验项，其他七个层面必须结合材料或现场证据。"],
+        }
+
     async def _scan_vulnerabilities(self, parameters: Dict, user_id: int, project_id: int, db: AsyncSession) -> Dict:
         """漏洞扫描"""
         from app.mcp.gateway_client import MCPGatewayClient
@@ -1594,8 +1650,19 @@ class ExecutionEngine:
         if not await self._project_for_user_id(db, project_id, user_id, "assessment:read"):
             return {"findings": [], "total": 0, "message": "项目不存在或无权查看问题"}
 
+        assessment_code = parameters.get("assessment_code")
+        assessment_id = None
+        if assessment_code in {"dengbao", "miping"}:
+            from app.models.assessment import Assessment
+            assessment_id = await db.scalar(select(Assessment.id).where(
+                Assessment.project_id == project_id,
+                Assessment.assessment_type_code == assessment_code,
+            ).order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1))
         query = select(Finding).where(Finding.project_id == project_id)
         count_query = select(func.count(Finding.id)).where(Finding.project_id == project_id)
+        if assessment_code in {"dengbao", "miping"}:
+            query = query.where(Finding.assessment_id == assessment_id)
+            count_query = count_query.where(Finding.assessment_id == assessment_id)
 
         if "status" in parameters:
             query = query.where(Finding.status == parameters["status"])
@@ -1682,9 +1749,13 @@ class ExecutionEngine:
         if not project:
             return {"found": False, "message": "项目不存在或无权访问"}
 
+        assessment_code = parameters.get("assessment_code", "dengbao")
         assessment = (await db.execute(
             select(Assessment)
-            .where(Assessment.project_id == project.id)
+            .where(
+                Assessment.project_id == project.id,
+                Assessment.assessment_type_code == assessment_code,
+            )
             .order_by(Assessment.created_at.desc(), Assessment.id.desc())
             .limit(1)
         )).scalar_one_or_none()
@@ -1709,6 +1780,7 @@ class ExecutionEngine:
             select(Finding.status, Finding.judgment, func.count(Finding.id))
             .where(
                 Finding.project_id == project.id,
+                Finding.assessment_id == (assessment.id if assessment else None),
                 Finding.status != FindingStatus.FALSE_POSITIVE,
             )
             .group_by(Finding.status, Finding.judgment)
@@ -1727,6 +1799,7 @@ class ExecutionEngine:
         open_findings = list((await db.execute(
             select(Finding).where(
                 Finding.project_id == project.id,
+                Finding.assessment_id == (assessment.id if assessment else None),
                 Finding.status == FindingStatus.OPEN,
             ).limit(200)
         )).scalars().all())
@@ -1776,7 +1849,10 @@ class ExecutionEngine:
             current_phase = phases[-1]
         report = (await db.execute(
             select(ReportArtifact)
-            .where(ReportArtifact.project_id == project.id)
+            .where(
+                ReportArtifact.project_id == project.id,
+                ReportArtifact.assessment_id == (assessment.id if assessment else None),
+            )
             .order_by(ReportArtifact.version.desc())
             .limit(1)
         )).scalar_one_or_none()
@@ -1794,6 +1870,7 @@ class ExecutionEngine:
             "compliance_level": project.compliance_level.value if project.compliance_level else None,
             "asset_count": asset_count,
             "assessment_id": assessment.id if assessment else None,
+            "assessment_code": assessment_code,
             "assessment_status": assessment.status if assessment else "not_started",
             "workflow_progress": round(float(assessment.progress or 0), 1) if assessment else 0.0,
             "compliance_score": score,
@@ -1826,12 +1903,17 @@ class ExecutionEngine:
 
         if not project_id or not await self._project_for_user_id(db, project_id, user_id, "assessment:manage"):
             return {"success": False, "message": "项目不存在或无权管理测评", "action": parameters.get("action")}
+        assessment_code = parameters.get("assessment_code", "dengbao")
+        label = "密评" if assessment_code == "miping" else "等保"
         assessment = (await db.execute(
-            select(Assessment).where(Assessment.project_id == project_id)
+            select(Assessment).where(
+                Assessment.project_id == project_id,
+                Assessment.assessment_type_code == assessment_code,
+            )
             .order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1)
         )).scalar_one_or_none()
         if not assessment:
-            return {"success": False, "message": "当前项目尚未创建等保测评", "action": parameters.get("action")}
+            return {"success": False, "message": f"当前项目尚未创建{label}测评", "action": parameters.get("action")}
 
         action = parameters.get("action")
         flow = get_flow_engine(db)
@@ -1870,6 +1952,7 @@ class ExecutionEngine:
             rows = (await db.execute(
                 select(Finding.source_type, func.count(Finding.id)).where(
                     Finding.project_id == project_id,
+                    Finding.assessment_id == assessment.id,
                     Finding.status == FindingStatus.OPEN,
                 ).group_by(Finding.source_type)
             )).all()
@@ -2425,11 +2508,13 @@ class ExecutionEngine:
         try:
             if not await self._project_for_user_id(db, pid, user_id, "report:export"):
                 return {"message": "项目不存在或无权生成报告"}
+            assessment_code = parameters.get("assessment_code", "dengbao")
             assessment = (await db.execute(select(Assessment).where(
-                Assessment.project_id == pid
+                Assessment.project_id == pid,
+                Assessment.assessment_type_code == assessment_code,
             ).order_by(Assessment.created_at.desc(), Assessment.id.desc()).limit(1))).scalar_one_or_none()
             if not assessment:
-                return {"message": "当前项目尚未创建等保测评"}
+                return {"message": f"当前项目尚未创建{'密评' if assessment_code == 'miping' else '等保'}测评"}
             phase = (await db.execute(select(PhaseInstance).where(
                 PhaseInstance.assessment_id == assessment.id,
                 PhaseInstance.phase_id == "report",

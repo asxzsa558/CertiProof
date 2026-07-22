@@ -36,7 +36,7 @@ router = APIRouter(prefix="/organizations", tags=["Organizations"])
 DEFAULT_ROLE_TEMPLATES = [
     ("管理员", "组织全局配置、角色授权和所有项目操作", [p for values in PERMISSION_GROUPS.values() for p in values]),
     ("测评负责人", "推进等保测评、证据和整改闭环", ["project:read", "asset:read", "scan:read", "assessment:read", "assessment:manage", "evidence:manage", "report:read", "report:export"]),
-    ("安全工程师", "执行检测、查看工具状态和处理风险", ["project:read", "asset:read", "asset:update", "scan:execute", "scan:read", "scan:cancel", "assessment:read", "tool:diagnose"]),
+    ("安全工程师", "执行检测、查看工具状态和处理风险", ["project:read", "asset:read", "asset:update", "scan:execute", "scan:read", "scan:cancel", "node:read", "assessment:read", "tool:diagnose"]),
     ("审计查看者", "查看项目、证据、风险和报告", ["project:read", "asset:read", "scan:read", "assessment:read", "report:read"]),
     ("客户只读", "受限查看项目状态和报告", ["project:read", "assessment:read", "report:read"]),
 ]

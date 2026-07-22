@@ -31,6 +31,14 @@ env_value() {
 
 policy="$(env_value LLM_RUNTIME_POLICY auto)"
 deploy_mode="${deploy_mode:-$(env_value CERTIPROOF_DEPLOY_MODE build)}"
+app_env="$(env_value APP_ENV development)"
+version="$(env_value CERTIPROOF_VERSION latest)"
+if [[ "$deploy_mode" == "images" && "$app_env" =~ ^(prod|production)$ ]]; then
+  [[ "$version" != "latest" && "$version" != replace-with-* ]] || {
+    echo "Production image deployments require an immutable CERTIPROOF_VERSION." >&2
+    exit 1
+  }
+fi
 gpu=false
 if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
   gpu=true

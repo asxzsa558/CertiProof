@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     # Application
     APP_NAME: str = "CertiProof"
     APP_VERSION: str = "0.1.0"
+    CERTIPROOF_VERSION: str = "source"
     APP_ENV: str = "development"
     DEBUG: bool = True
     API_V1_PREFIX: str = "/api/v1"
@@ -65,6 +66,11 @@ class Settings(BaseSettings):
     TASK_HEARTBEAT_SECONDS: int = 10
     TASK_MAX_RECOVERY_ATTEMPTS: int = 3
     MONITORING_WORKER_BATCH_SIZE: int = 5
+    REMOTE_NODE_HEARTBEAT_SECONDS: int = 10
+    REMOTE_NODE_OFFLINE_SECONDS: int = 45
+    REMOTE_JOB_LEASE_SECONDS: int = 45
+    REMOTE_JOB_TIMEOUT_SECONDS: int = 3600
+    REMOTE_JOB_POLL_SECONDS: float = 1.0
 
     # 文件上传
     UPLOAD_DIR: str = "./uploads"  # 容器内解析为 /app/uploads，本机也可直接运行
@@ -93,6 +99,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Invalid configuration: unsupported WORKER_ROLE")
         if self.INTERACTIVE_SCAN_MAX_CONCURRENT < 1:
             raise RuntimeError("Invalid configuration: INTERACTIVE_SCAN_MAX_CONCURRENT must be positive")
+        if min(self.REMOTE_NODE_HEARTBEAT_SECONDS, self.REMOTE_NODE_OFFLINE_SECONDS, self.REMOTE_JOB_LEASE_SECONDS, self.REMOTE_JOB_TIMEOUT_SECONDS) < 1:
+            raise RuntimeError("Invalid configuration: remote node timing values must be positive")
         if self.LOGIN_RATE_LIMIT_ATTEMPTS < 1 or self.LOGIN_RATE_LIMIT_WINDOW_SECONDS < 1:
             raise RuntimeError("Invalid configuration: login rate limits must be positive")
         if self.LLM_RUNTIME_POLICY not in {"auto", "cloud", "local", "vllm", "llama_cpp", "ollama"}:

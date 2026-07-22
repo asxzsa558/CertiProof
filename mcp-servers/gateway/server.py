@@ -40,6 +40,8 @@ TOOL_ROUTES = {
     "scan_weak_passwords": "http://security-tools:8010",  # 别名
     "ping_host": "http://security-tools:8010",
     "ping_asset": "http://security-tools:8010",
+    "crypto_transport_scan": "http://security-tools:8010",
+    "crypto_certificate_check": "http://security-tools:8010",
     
     # SSH 白盒配置核查
     "linux_baseline": "http://ssh-checker:8016",
@@ -97,6 +99,7 @@ TOOL_ALIASES = {
     "hydra_bruteforce": "hydra_bruteforce",
     "password_test": "hydra_bruteforce",
     "scan_weak_passwords": "hydra_bruteforce",
+    "crypto_certificate_check": "crypto_transport_scan",
     "nikto": "nikto_scan",
     "gobuster": "gobuster_scan",
     "dirbust": "gobuster_scan",

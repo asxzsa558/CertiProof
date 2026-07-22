@@ -6,7 +6,7 @@ Chat API - 对话接口
 
 import asyncio
 import uuid
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
 from pydantic import BaseModel
@@ -46,6 +46,7 @@ class ChatMessage(BaseModel):
     asset: Optional[str] = None
     model_id: Optional[int] = None
     thread_id: Optional[int] = None
+    assessment_code: Literal["dengbao", "miping"] = "dengbao"
 
 
 class ChatResponse(BaseModel):
@@ -210,6 +211,7 @@ async def chat(
             asset=asset,
             db=db,
             thread_id=msg.thread_id,
+            assessment_code=msg.assessment_code,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -371,7 +373,10 @@ async def get_chat_history(
         if not await ContextManager(db, current_user.id, project_id=project_id).get_thread(thread_id):
             raise HTTPException(status_code=404, detail="线程不存在")
     
-    query = query.order_by(ConversationHistory.created_at.desc()).limit(limit)
+    query = query.order_by(
+        ConversationHistory.created_at.desc(),
+        ConversationHistory.id.desc(),
+    ).limit(limit)
     
     result = await db.execute(query)
     histories = result.scalars().all()

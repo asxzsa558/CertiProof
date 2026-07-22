@@ -4,6 +4,9 @@ export const TOOL_CATALOG = [
   { command: '/masscan', capability: 'masscan_scan', name: '高速端口扫描', description: '高速端口扫描', usage: '/masscan [目标]', iconKey: 'cloud-server', color: '#059669', more: true, requiresTarget: true },
   { command: '/fping', capability: 'fping_scan', name: '批量存活检测', description: '批量存活检测', usage: '/fping [网段]', iconKey: 'wifi', color: '#14b8a6', more: true, requiresTarget: true },
   { command: '/ssl', capability: 'scan_ssl', name: 'SSL/TLS 检测', description: 'SSL/TLS 检测', usage: '/ssl [目标]', iconKey: 'lock', color: '#0ea5e9', more: true, requiresTarget: true },
+  { command: '/crypto', capability: 'crypto_onsite_assessment', name: '密码应用网络通信辅助检测', description: '组合：密码服务端口 + 协议套件 + 数字证书', usage: '/crypto [目标]', iconKey: 'safety-certificate', color: '#c5a55a', primary: true, requiresTarget: true, assessment: 'miping' },
+  { command: '/crypto-protocol', capability: 'crypto_transport_scan', name: '密码协议与套件核验', description: '核验协议版本、密码套件及国密算法标识', usage: '/crypto-protocol [目标]', iconKey: 'lock', color: '#22d3ee', requiresTarget: true, assessment: 'miping' },
+  { command: '/crypto-cert', capability: 'crypto_certificate_check', name: '数字证书核验', description: '核验证书主体、签发者、有效期、算法和证书链', usage: '/crypto-cert [目标]', iconKey: 'safety-certificate', color: '#60a5fa', requiresTarget: true, assessment: 'miping' },
   { command: '/vuln', capability: 'scan_vulnerabilities', name: '漏洞扫描', description: '漏洞扫描', usage: '/vuln [目标]', iconKey: 'bug', color: '#ef4444', primary: true, requiresTarget: true },
   { command: '/baseline', capability: 'baseline_check', name: '安全基线核查', description: '安全基线核查（自动识别操作系统）', usage: '/baseline [目标]', iconKey: 'safety-certificate', color: '#3b82f6', primary: true, requiresTarget: true, requiresSsh: true },
   { command: '/web', capability: 'nikto_scan', name: 'Web 安全扫描', description: 'Nikto Web 安全扫描', usage: '/web [URL]', iconKey: 'monitor', color: '#8b5cf6', primary: true, requiresTarget: true },
@@ -52,6 +55,9 @@ export const CAPABILITY_NAMES = TOOL_CATALOG.reduce((acc, tool) => {
   testssl_scan: 'SSL/TLS 检测',
   nuclei_scan: '漏洞扫描',
   hydra_bruteforce: '弱口令检测',
+  crypto_transport_scan: '密码协议与套件核验',
+  crypto_certificate_check: '数字证书核验',
+  crypto_onsite_assessment: '密码应用网络通信辅助检测',
 })
 
 const ASSESSMENT_TASK_NAMES = {
@@ -71,6 +77,7 @@ const ASSESSMENT_TASK_NAMES = {
   windows_check: 'Windows/AD/SMB 检测',
   full_compliance_scan: '全量合规扫描',
   full_asset_assessment: '全资产组合扫描',
+  crypto_network_communication_assessment: '密码协议与证书核验',
 }
 
 export function scanTaskCapabilities(task = {}) {
@@ -108,7 +115,7 @@ export function scanTaskTarget(task = {}) {
 }
 
 export function scanTaskSource(task = {}) {
-  if (task.parameters?.source === 'assessment_task') return '等保测评'
+  if (task.parameters?.source === 'assessment_task') return task.parameters?.assessment_code === 'miping' ? '密评自查' : '等保测评'
   if (task.triggered_by === 'scheduled') return '定时任务'
   if (task.triggered_by === 'event') return '系统触发'
   return '手动 / AI'

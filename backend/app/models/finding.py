@@ -39,6 +39,7 @@ class Finding(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    assessment_id = Column(Integer, ForeignKey("assessments.id", ondelete="CASCADE"), nullable=True, index=True)
     scan_task_id = Column(Integer, ForeignKey("scan_tasks.id"), nullable=True, index=True)
     document_run_id = Column(Integer, ForeignKey("document_analysis_runs.id", ondelete="SET NULL"), nullable=True, index=True)
     fingerprint = Column(String(64), nullable=True, index=True)

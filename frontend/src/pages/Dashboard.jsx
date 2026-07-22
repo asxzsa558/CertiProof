@@ -36,8 +36,10 @@ const NAV_ITEMS = [
   { key: 'projects', group: '项目执行', label: '项目工作台', icon: <ProjectOutlined />, path: '/projects', permission: 'project:read' },
   { key: 'assets', group: '项目执行', label: '资产矩阵', icon: <DatabaseOutlined />, path: '/projects?view=assets', permission: 'asset:read' },
   { key: 'assessment', group: '测评中心', label: '等保测评', icon: <SafetyCertificateOutlined />, path: '/projects', permission: 'assessment:read' },
-  { key: 'password-assessment', group: '测评中心', label: '密码测评', icon: <LockOutlined />, upcoming: true, permission: 'assessment:read' },
+  { key: 'password-assessment', group: '测评中心', label: '密码测评', icon: <LockOutlined />, path: '/projects?assessment=miping', permission: 'assessment:read' },
   { key: 'reports', group: '治理中心', label: '报告中心', icon: <FileTextOutlined />, path: '/reports', permission: 'report:read' },
+  { key: 'operations', group: '治理中心', label: '运行与告警', icon: <AlertOutlined />, path: '/operations', permission: 'tool:diagnose' },
+  { key: 'scan-nodes', group: '治理中心', label: '扫描节点', icon: <CloudServerOutlined />, path: '/settings/scan-nodes', permission: 'node:read' },
   { key: 'access', group: '治理中心', label: '角色权限', icon: <TeamOutlined />, path: '/settings/access', permission: 'role:read' },
   { key: 'data', group: '系统', label: '数据与生命周期', icon: <DatabaseOutlined />, path: '/settings/data-lifecycle', permission: 'system:config' },
   { key: 'settings', group: '系统', label: '系统设置', icon: <SettingOutlined />, path: '/settings/models', permission: 'system:config' },
@@ -95,6 +97,11 @@ function emptyDashboard() {
   }
 }
 
+const emptyOperations = {
+  overall_status: 'unknown', services: {}, workers: {}, alerts: [],
+  scan_tasks: { by_status: {}, stale_leases: 0 },
+}
+
 function errorMessage(error, fallback) {
   const detail = error?.response?.data?.detail
   return typeof detail === 'string' ? detail : error?.message || fallback
@@ -113,6 +120,8 @@ function Dashboard() {
   const [selectedToolIndex, setSelectedToolIndex] = useState(0)
   const [riskFilter, setRiskFilter] = useState('all')
   const [riskActionId, setRiskActionId] = useState(null)
+  const [operations, setOperations] = useState(emptyOperations)
+  const [operationsState, setOperationsState] = useState('loading')
 
   const currentOrg = useMemo(
     () => organizations.find((org) => org.id === currentOrgId) || organizations[0],
@@ -122,7 +131,7 @@ function Dashboard() {
   const currentPermissions = dashboard.current_role?.permissions || []
   const permissionScope = dashboard.current_role?.permission_scope || (currentOrg?.role === 'admin' ? '全局权限' : '受限权限')
   const canManageAssessments = currentPermissions.includes('assessment:manage') || currentOrg?.role === 'admin'
-  const canReadRoles = currentPermissions.includes('role:read') || currentOrg?.role === 'admin'
+  const canViewOperations = currentPermissions.includes('tool:diagnose') || currentOrg?.role === 'admin'
   const visibleNavItems = NAV_ITEMS.filter((item) => (
     !item.permission || currentOrg?.role === 'admin' || currentPermissions.includes(item.permission)
   ))
@@ -135,8 +144,21 @@ function Dashboard() {
         params: { organization_id: currentOrg.id },
       })
       setDashboard({ ...emptyDashboard(), ...response.data })
+      const responsePermissions = response.data?.current_role?.permissions || []
+      if (currentOrg?.role === 'admin' || responsePermissions.includes('tool:diagnose')) {
+        api.get('/diagnostics/operations', {
+          params: { organization_id: currentOrg.id, hours: 24 },
+        }).then((operationsResponse) => {
+          setOperations({ ...emptyOperations, ...operationsResponse.data })
+          setOperationsState('ready')
+        }).catch(() => setOperationsState('error'))
+      } else {
+        setOperations(emptyOperations)
+        setOperationsState('ready')
+      }
       setLoadError('')
     } catch (error) {
+      setOperationsState('error')
       const detail = errorMessage(error, '组织态势数据暂时不可用')
       setLoadError(detail)
       if (!silent) message.error(detail)
@@ -146,6 +168,8 @@ function Dashboard() {
   }
 
   useEffect(() => {
+    setOperations(emptyOperations)
+    setOperationsState('loading')
     fetchDashboard()
     const refreshTimer = window.setInterval(() => fetchDashboard({ silent: true }), 45000)
     return () => window.clearInterval(refreshTimer)
@@ -163,8 +187,6 @@ function Dashboard() {
 
   const summary = dashboard.summary || emptyDashboard().summary
   const topology = dashboard.exposure_topology || emptyDashboard().exposure_topology
-  const roles = dashboard.rbac?.roles || []
-  const members = dashboard.rbac?.members || []
   const selectedTool = dashboard.tool_health[selectedToolIndex] || dashboard.tool_health[0]
   const riskFilters = [
     { key: 'all', label: '全部', count: dashboard.risk_queue.length },
@@ -177,6 +199,13 @@ function Dashboard() {
     : riskFilter === 'closed'
       ? dashboard.risk_queue.filter((risk) => closedRiskStatuses.has(risk.status))
       : dashboard.risk_queue.filter((risk) => risk.status === riskFilter)
+  const operationComponents = [
+    ...Object.values(operations.services || {}),
+    ...Object.values(operations.workers || {}),
+  ]
+  const operationHealthy = operationComponents.filter((item) => item.status === 'healthy').length
+  const operationIssues = operationComponents.length - operationHealthy
+  const operationRunning = (operations.scan_tasks?.by_status?.running || 0) + (operations.scan_tasks?.by_status?.pending || 0)
   const userMenu = {
     items: [
       { key: 'profile', icon: <UserOutlined />, label: user?.username || '账户' },
@@ -344,33 +373,28 @@ function Dashboard() {
               </div>
             </Panel>
 
-          {canReadRoles ? <Panel className="ops-rbac-panel" title="角色与权限治理" meta="组织级">
-              <div className="rbac-head">
-                <div>
-                  <strong>{roles.length} 个角色模板</strong>
-                  <span>{members.length} 名成员已纳入组织权限管理</span>
+          <Panel className="ops-alert-summary-panel" title="运行与告警" meta={canViewOperations ? (operationsState === 'loading' ? '正在同步' : '组织级实时状态') : '权限受限'}>
+              {canViewOperations ? (
+                <div className="ops-alert-summary">
+                  <div className="ops-alert-metrics">
+                    <span><strong>{operationsState === 'ready' ? `${operationHealthy}/${operationComponents.length}` : '--'}</strong><em>健康组件</em></span>
+                    <span className={operationIssues ? 'hot' : ''}><strong>{operationsState === 'ready' ? operationIssues : '--'}</strong><em>异常或降级</em></span>
+                    <span><strong>{operationsState === 'ready' ? operationRunning : '--'}</strong><em>执行中</em></span>
+                  </div>
+                  <div className="ops-alert-list scroll-region">
+                    {operationsState === 'loading' ? <div className="ops-alert-clear">正在读取运行状态...</div>
+                      : operationsState === 'error' ? <div className="empty-panel">运行状态暂时不可用，请进入运行中心重试。</div>
+                      : operations.alerts?.length ? operations.alerts.slice(0, 3).map((alert) => (
+                      <div key={alert.id}>
+                        <AlertOutlined />
+                        <span><strong>{alert.title}</strong><small>{alert.detail}</small></span>
+                      </div>
+                    )) : <div className="ops-alert-clear"><CheckCircleFilled /> 当前无运行告警</div>}
+                  </div>
+                  <Button size="small" type="text" onClick={() => navigate('/operations')}>打开运行中心</Button>
                 </div>
-                <Button size="small" type="primary" onClick={() => navigate('/settings/access')}>
-                  进入访问控制
-                </Button>
-              </div>
-              <div className="role-list">
-                {roles.slice(0, 4).map((role) => (
-                  <div key={role.id}>
-                    <span>{role.name}</span>
-                    <em>{role.permissions?.length ?? role.permission_count ?? 0} 权限</em>
-                  </div>
-                ))}
-              </div>
-              <div className="member-role-list">
-                {members.slice(0, 3).map((member) => (
-                  <div key={member.id}>
-                    <span>{member.name || member.email}</span>
-                    <em>{roles.find((role) => role.id === member.custom_role_id)?.name || member.role}</em>
-                  </div>
-                ))}
-              </div>
-            </Panel> : null}
+              ) : <div className="empty-panel">需要“工具诊断”权限才能查看组织运行状态。</div>}
+            </Panel>
 
             </div>
           </section>

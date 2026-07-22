@@ -133,7 +133,7 @@ def main() -> None:
             "system_name": "API 烟测系统",
             "description": "临时项目：验证等保测评 API 不报错。",
             "compliance_level": "三级",
-            "assessment_type_ids": [],
+            "assessment_configs": [{"code": "dengbao", "level": "三级"}],
         })
         assert status == 201
         project_id = project["id"]

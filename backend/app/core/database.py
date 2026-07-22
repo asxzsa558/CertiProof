@@ -472,7 +472,9 @@ async def seed_runtime_data() -> None:
         from app.services.knowledge_graph import knowledge_graph
 
         await get_flow_engine(session).upsert_default_templates()
-        await knowledge_graph.seed_standard_bundle(session)
+        from app.services.knowledge_graph import STANDARD_BUNDLES
+        for library_name, bundle_path in STANDARD_BUNDLES.values():
+            await knowledge_graph.seed_standard_bundle(session, bundle_path, library_name)
         await session.commit()
 
 

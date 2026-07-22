@@ -22,6 +22,7 @@ class FlowTemplate(Base):
     name = Column(String(200), nullable=False)  # "等保三级自查流程"
     description = Column(Text)
     compliance_level = Column(Integer)  # 2=二级, 3=三级
+    assessment_type_code = Column(String(50), nullable=False, default="dengbao", index=True)
     version = Column(String(20), default="1.0")
     
     # 流程配置（JSON 存储阶段定义）
@@ -46,6 +47,7 @@ class Assessment(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     template_id = Column(Integer, ForeignKey("flow_templates.id"), nullable=False)
+    assessment_type_code = Column(String(50), nullable=False, default="dengbao", index=True)
     
     # 基本信息
     name = Column(String(200))  # "2026年度等保三级测评"

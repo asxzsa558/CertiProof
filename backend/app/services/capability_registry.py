@@ -450,6 +450,48 @@ class CapabilityRegistry:
             },
             category="scan"
         ))
+
+        self.register(Capability(
+            name="crypto_transport_scan",
+            description="密评网络和通信安全辅助工具：核验密码协议握手、协议版本、密码套件和 SM2/SM3/SM4/TLCP 标识；不能替代现场密评结论。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "当前项目中的目标 IP 或域名"},
+                    "port": {"type": "integer", "description": "密码服务端口，默认 443"},
+                },
+                "required": ["target"],
+            },
+            category="scan",
+        ))
+
+        self.register(Capability(
+            name="crypto_certificate_check",
+            description="密评数字证书辅助核验：提取证书主体、签发者、有效期、算法和证书链证据。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "当前项目中的目标 IP 或域名"},
+                    "port": {"type": "integer", "description": "证书服务端口，默认 443"},
+                },
+                "required": ["target"],
+            },
+            category="scan",
+        ))
+
+        self.register(Capability(
+            name="crypto_onsite_assessment",
+            description="密评网络通信组合辅助检测：服务端口、密码协议/套件和数字证书核验。只覆盖可远程自动验证的部分。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "当前项目中的目标 IP 或域名"},
+                    "port": {"type": "integer", "description": "主要密码服务端口，默认 443"},
+                },
+                "required": ["target"],
+            },
+            category="scan",
+        ))
         
         self.register(Capability(
             name="scan_vulnerabilities",
@@ -683,6 +725,7 @@ class CapabilityRegistry:
                 "type": "object",
                 "properties": {
                     "status": {"type": "string", "description": "状态过滤，如 'open'、'resolved'"},
+                    "assessment_code": {"type": "string", "description": "当前测评类型：dengbao 或 miping"},
                 },
                 "required": []
             },
@@ -699,6 +742,7 @@ class CapabilityRegistry:
                         "type": "string",
                         "description": "输出视角：status、readiness、gaps 或 executive",
                     },
+                    "assessment_code": {"type": "string", "description": "当前测评类型：dengbao 或 miping"},
                 },
                 "required": []
             },
@@ -713,6 +757,7 @@ class CapabilityRegistry:
                 "properties": {
                     "action": {"type": "string", "description": "start、retest 或 reset"},
                     "confirm": {"type": "boolean", "description": "完全重置时是否已明确确认清空"},
+                    "assessment_code": {"type": "string", "description": "当前测评类型：dengbao 或 miping"},
                 },
                 "required": ["action"],
             },
@@ -871,11 +916,12 @@ class CapabilityRegistry:
         
         self.register(Capability(
             name="generate_html_report",
-            description="生成 HTML 格式的等保自查报告。",
+            description="生成当前等保或密评自查的 HTML 报告。",
             parameters={
                 "type": "object",
                 "properties": {
                     "project_id": {"type": "integer", "description": "项目ID"},
+                    "assessment_code": {"type": "string", "description": "当前测评类型：dengbao 或 miping"},
                 },
                 "required": ["project_id"]
             },

@@ -3,7 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 variant="${1:-all}"
-version="${CERTIPROOF_VERSION:-latest}"
+version="${CERTIPROOF_VERSION:-dev-$(git -C "$root" rev-parse --short HEAD)}"
 out="$root/dist/cloud"
 [[ "$version" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Invalid image version: $version" >&2; exit 2; }
 
@@ -28,7 +28,7 @@ for item in "${variants[@]}"; do
   cp "$root/deploy/cloud/.env.${item}.example" "$dir/.env.example"
   sed -i.bak "s/^CERTIPROOF_VERSION=.*/CERTIPROOF_VERSION=${version}/" "$dir/.env.example"
   rm "$dir/.env.example.bak"
-  cp "$root/scripts/start-production.sh" "$root/scripts/cloud-preflight.sh" "$root/scripts/backup-production.sh" "$dir/scripts/"
+  cp "$root/scripts/start-production.sh" "$root/scripts/cloud-preflight.sh" "$root/scripts/verify-deployment.sh" "$root/scripts/rollback-production.sh" "$root/scripts/backup-production.sh" "$dir/scripts/"
   chmod +x "$dir/scripts/"*.sh
   tar -C "$work" -czf "$out/$name.tar.gz" "$name"
 done

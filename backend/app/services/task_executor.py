@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.assessment import Assessment
 from app.models.finding import Finding, FindingStatus, Judgment, JudgmentEngine, Severity
 from app.models.scan_task import ScanTask, ScanTaskStatus, ScanTaskType, TriggeredBy
 from app.services.display_names import CAPABILITY_DISPLAY_NAMES
@@ -51,6 +52,11 @@ TASK_CAPABILITY_MAP = {
         "capabilities": ["scan_ssl"],
         "default_params": {"port": 443},
         "description": "SSL/TLS 检测",
+    },
+    "crypto_network_communication_assessment": {
+        "capabilities": ["crypto_onsite_assessment"],
+        "default_params": {"port": 443},
+        "description": "密码协议、证书和算法标识辅助检测（不替代正式商用密码应用安全性评估）",
     },
     "config_check": {
         "capabilities": ["baseline_check"],
@@ -252,6 +258,18 @@ class TaskExecutor:
                 "severity": "critical",
                 "risk_key": "database:unauthorized_or_empty_password",
             })
+        for sub in data.get("sub_results") or []:
+            if not isinstance(sub, dict):
+                continue
+            items.extend(TaskExecutor._risk_items(
+                sub.get("capability") or capability,
+                {
+                    "status": sub.get("status"),
+                    "error": sub.get("error"),
+                    "result": sub.get("data") or {},
+                },
+                sub.get("target") or target,
+            ))
         return items
 
     async def _sync_findings(self, scan_task: ScanTask, results: list[dict], target: str) -> int:
@@ -271,6 +289,7 @@ class TaskExecutor:
             if not any(item.get("judgment") == "not_tested" for item in current):
                 recovered = (await self.db.execute(select(Finding).where(
                     Finding.project_id == scan_task.project_id,
+                    Finding.assessment_id == scan_task.assessment_id,
                     Finding.fingerprint == unable_fingerprint,
                     Finding.status == FindingStatus.OPEN,
                     Finding.judgment == Judgment.NOT_TESTED,
@@ -288,6 +307,7 @@ class TaskExecutor:
                 finding = (await self.db.execute(
                     select(Finding).where(
                         Finding.project_id == scan_task.project_id,
+                        Finding.assessment_id == scan_task.assessment_id,
                         Finding.fingerprint == fingerprint,
                     )
                 )).scalar_one_or_none()
@@ -303,6 +323,7 @@ class TaskExecutor:
                     continue
                 finding = Finding(
                     project_id=scan_task.project_id,
+                    assessment_id=scan_task.assessment_id,
                     scan_task_id=scan_task.id,
                     fingerprint=fingerprint,
                     source_type="technical",
@@ -329,6 +350,7 @@ class TaskExecutor:
         project_id: int,
         user_id: int,
         params: Dict[str, Any] = None,
+        assessment_id: int | None = None,
     ) -> Dict[str, Any]:
         """
         执行流程任务
@@ -368,20 +390,33 @@ class TaskExecutor:
         logger.info(f"Executing task {task_type} -> {capabilities} for target {target}")
 
         persisted_params = scrub_sensitive_parameters(scan_params)
+        assessment = await self.db.get(Assessment, assessment_id) if assessment_id else None
         scan_task = ScanTask(
             project_id=project_id,
+            assessment_id=assessment_id,
             asset_id=asset.id,
             task_type=ScanTaskType.TARGETED,
             status=ScanTaskStatus.RUNNING,
             control_state="running",
             triggered_by=TriggeredBy.MANUAL,
-            parameters={"source": "assessment_task", "task_type": task_type, "target": target, **persisted_params},
+            parameters={
+                "source": "assessment_task",
+                "assessment_code": assessment.assessment_type_code if assessment else None,
+                "task_type": task_type,
+                "target": target,
+                **persisted_params,
+            },
             started_at=datetime.utcnow(),
         )
         self.db.add(scan_task)
         await self.db.flush()
         from app.services.report_service import invalidate_report_artifacts
-        await invalidate_report_artifacts(self.db, project_id, "已重新执行测评技术检测")
+        await invalidate_report_artifacts(
+            self.db,
+            project_id,
+            "已重新执行测评技术检测",
+            assessment_id=assessment_id,
+        )
         
         from app.services.execution_engine import ExecutionEngine
         engine = ExecutionEngine()

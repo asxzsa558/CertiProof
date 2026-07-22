@@ -90,6 +90,7 @@ SKILLS: Tuple[PromptSkill, ...] = (
             "scan_web_discovery": "目录发现、目录爆破或 Web 模糊测试",
             "scan_reachability": "Ping、批量存活或网段探测",
             "scan_comprehensive": "组合安全扫描或全面技术检测",
+            "scan_crypto": "密评密码协议、密码套件、数字证书或网络通信辅助检测",
         },
         intent_capabilities={
             "scan_ports": ("scan_ports", "masscan_scan"),
@@ -107,6 +108,7 @@ SKILLS: Tuple[PromptSkill, ...] = (
             "scan_web_discovery": ("web_discovery_scan", "gobuster_scan", "ffuf_scan"),
             "scan_reachability": ("ping_asset", "fping_scan"),
             "scan_comprehensive": ("full_compliance_scan", "tech_assessment"),
+            "scan_crypto": ("crypto_onsite_assessment", "crypto_transport_scan", "crypto_certificate_check"),
         },
         instructions=SECURITY_COMMON,
         context_fields=("project", "assets", "thread"),

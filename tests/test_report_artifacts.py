@@ -222,6 +222,7 @@ def test_report_gate_and_snapshot_ignore_independent_scans():
             )
             assessment_scan = ScanTask(
                 project_id=project.id,
+                assessment_id=assessment.id,
                 task_type=ScanTaskType.TARGETED,
                 status=ScanTaskStatus.COMPLETED,
                 triggered_by=TriggeredBy.MANUAL,

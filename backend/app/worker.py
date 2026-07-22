@@ -8,10 +8,13 @@ import asyncio
 import logging
 import sys
 import time
+from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from app.models.config import SystemConfig
 from app.orchestrator import orchestrator
+from sqlalchemy import select
 
 
 logging.basicConfig(
@@ -21,6 +24,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 _last_pressure_log = 0.0
+
+
+async def _write_heartbeat(role: str, *, processed: int = 0, error: str | None = None) -> None:
+    key = f"worker.heartbeat.{role}"
+    async with AsyncSessionLocal() as db:
+        heartbeat = (await db.execute(
+            select(SystemConfig).where(SystemConfig.key == key)
+        )).scalar_one_or_none()
+        value = {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "state": "error" if error else "ready",
+            "processed": processed,
+            "error": error,
+        }
+        if heartbeat:
+            heartbeat.value = value
+        else:
+            db.add(SystemConfig(
+                key=key,
+                value=value,
+                description=f"{role} worker heartbeat",
+                category="operations",
+            ))
+        await db.commit()
 
 
 async def _run_role_once(role: str) -> int:
@@ -73,10 +100,15 @@ async def run_worker() -> None:
     while True:
         try:
             processed = await _run_role_once(role)
+            await _write_heartbeat(role, processed=processed)
             if processed:
                 logger.info("%s worker accepted/processed %d item(s)", role, processed)
-        except Exception:
+        except Exception as exc:
             logger.exception("%s worker poll failed", role)
+            try:
+                await _write_heartbeat(role, error=f"{type(exc).__name__}: {exc}")
+            except Exception:
+                logger.exception("%s worker heartbeat failed", role)
         await asyncio.sleep(max(1, settings.TASK_WORKER_POLL_SECONDS))
 
 

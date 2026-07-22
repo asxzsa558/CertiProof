@@ -33,6 +33,7 @@ from app.models.organization import Organization, OrganizationMember, Organizati
 from app.models.project import Project
 from app.models.questionnaire import QuestionnaireRecord
 from app.models.report import ReportArtifact
+from app.models.scan_node import RemoteExecution, ScanNode
 from app.models.scan_task import ScanTask, ScanTaskStatus
 from app.services.file_storage import file_storage
 from app.services.knowledge_graph import knowledge_graph
@@ -245,8 +246,14 @@ async def delete_project_records(db: AsyncSession, project: Project) -> dict[str
         DocumentAnalysisRun.project_id == project_id,
         DocumentAnalysisRun.status.in_(["queued", "running"]),
     ))).scalar_one())
-    if active_scans or active_documents:
-        raise ValueError(f"项目仍有运行任务：检测 {active_scans} 个，文档分析 {active_documents} 个")
+    active_remote = int((await db.execute(select(func.count(RemoteExecution.id)).where(
+        RemoteExecution.project_id == project_id,
+        RemoteExecution.status.in_(["queued", "running"]),
+    ))).scalar_one())
+    if active_scans or active_documents or active_remote:
+        raise ValueError(
+            f"项目仍有运行任务：检测 {active_scans} 个，文档分析 {active_documents} 个，远端执行 {active_remote} 个"
+        )
 
     documents = (await db.execute(select(DocumentFile.storage_path, DocumentFile.size_bytes).where(
         DocumentFile.project_id == project_id
@@ -289,6 +296,7 @@ async def delete_project_records(db: AsyncSession, project: Project) -> dict[str
         await db.execute(delete(ScanHistory).where(ScanHistory.scheduled_scan_id.in_(scheduled_ids)))
     await db.execute(delete(ScheduledScan).where(ScheduledScan.project_id == project_id))
     await db.execute(delete(ChangeSnapshot).where(ChangeSnapshot.project_id == project_id))
+    await db.execute(delete(RemoteExecution).where(RemoteExecution.project_id == project_id))
     await db.execute(delete(ScanTask).where(ScanTask.project_id == project_id))
     await db.execute(delete(Asset).where(Asset.project_id == project_id))
     await db.execute(delete(ProjectMemory).where(ProjectMemory.project_id == project_id))
@@ -302,6 +310,14 @@ async def delete_project_records(db: AsyncSession, project: Project) -> dict[str
     await db.execute(delete(ConversationArchive).where(ConversationArchive.project_id == project_id))
     await db.execute(delete(ConversationThread).where(ConversationThread.project_id == project_id))
     await db.execute(update(AuditEvent).where(AuditEvent.project_id == project_id).values(project_id=None))
+    nodes = list((await db.execute(select(ScanNode).where(
+        ScanNode.organization_id == project.organization_id
+    ))).scalars().all())
+    for node in nodes:
+        project_ids = [value for value in (node.project_ids or []) if value != project_id]
+        if project_ids != (node.project_ids or []):
+            node.project_ids = project_ids
+            node.config_version += 1
     await db.delete(project)
     return {
         "project_id": project_id,
@@ -322,6 +338,12 @@ async def delete_organization_records(db: AsyncSession, organization: Organizati
     ))).scalars().all())
     cleanups = [await delete_project_records(db, project) for project in projects]
 
+    await db.execute(delete(RemoteExecution).where(
+        RemoteExecution.organization_id == organization_id
+    ))
+    await db.execute(delete(ScanNode).where(
+        ScanNode.organization_id == organization_id
+    ))
     await db.execute(update(AuditEvent).where(
         AuditEvent.organization_id == organization_id
     ).values(organization_id=None))

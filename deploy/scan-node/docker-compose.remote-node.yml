@@ -1,0 +1,156 @@
+name: certiproof-scan-node
+
+x-tool-common: &tool-common
+  restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: ${LOG_MAX_SIZE:-20m}
+      max-file: ${LOG_MAX_FILES:-5}
+  networks: [scan-node-net]
+
+services:
+  node:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-ghcr.io/asxzsa558/certiproof}/backend:${CERTIPROOF_VERSION:?Set CERTIPROOF_VERSION}
+    command: ["python", "-m", "app.remote_node_worker"]
+    environment:
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:?Set CONTROL_PLANE_URL}
+      ENROLL_TOKEN: ${ENROLL_TOKEN:-}
+      NODE_STATE_FILE: /var/lib/certiproof-node/identity.json
+      ALLOW_INSECURE_CONTROL_PLANE: ${ALLOW_INSECURE_CONTROL_PLANE:-false}
+      MCP_GATEWAY_URL: http://mcp-gateway:9000
+      SECRET_KEY: ${NODE_LOCAL_SECRET:?Set NODE_LOCAL_SECRET}
+      CERTIPROOF_VERSION: ${CERTIPROOF_VERSION}
+      APP_ENV: production
+      DEBUG: "false"
+    volumes:
+      - node_identity:/var/lib/certiproof-node
+      - ./keys:/app/uploads:ro
+    depends_on:
+      mcp-gateway:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: ${NODE_WORKER_MEMORY_LIMIT:-1g}
+    cpus: ${NODE_WORKER_CPU_LIMIT:-1.0}
+    pids_limit: 256
+    logging: *logging
+    networks: [scan-node-net]
+
+  mcp-gateway:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-ghcr.io/asxzsa558/certiproof}/mcp-gateway:${CERTIPROOF_VERSION}
+    depends_on:
+      security-tools: { condition: service_healthy }
+      ssh-checker: { condition: service_healthy }
+      fast-scanner: { condition: service_healthy }
+      web-tools: { condition: service_healthy }
+      network-tools: { condition: service_healthy }
+      db-tools: { condition: service_healthy }
+      windows-tools: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/tools', timeout=5)"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    <<: *tool-common
+
+  security-tools:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-ghcr.io/asxzsa558/certiproof}/security-tools:${CERTIPROOF_VERSION}
+    healthcheck: &health-8010
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=15)"]
+      interval: 20s
+      timeout: 20s
+      retries: 5
+      start_period: 20s
+    mem_limit: ${SECURITY_TOOL_MEMORY_LIMIT:-2g}
+    cpus: ${SECURITY_TOOL_CPU_LIMIT:-2.0}
+    pids_limit: 1024
+    <<: *tool-common
+
+  ssh-checker:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-ghcr.io/asxzsa558/certiproof}/ssh-checker:${CERTIPROOF_VERSION}
+    healthcheck: &health-8016
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8016/health', timeout=5)"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    <<: *tool-common
+
+  fast-scanner:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-ghcr.io/asxzsa558/certiproof}/fast-scanner:${CERTIPROOF_VERSION}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health', timeout=5)"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    <<: *tool-common
+
+  web-tools:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-ghcr.io/asxzsa558/certiproof}/web-tools:${CERTIPROOF_VERSION}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8012/health', timeout=15)"]
+      interval: 20s
+      timeout: 20s
+      retries: 5
+      start_period: 20s
+    mem_limit: ${WEB_TOOL_MEMORY_LIMIT:-2g}
+    cpus: ${WEB_TOOL_CPU_LIMIT:-2.0}
+    pids_limit: 1024
+    <<: *tool-common
+
+  network-tools:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-ghcr.io/asxzsa558/certiproof}/network-tools:${CERTIPROOF_VERSION}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8013/health', timeout=5)"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    <<: *tool-common
+
+  db-tools:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-ghcr.io/asxzsa558/certiproof}/db-tools:${CERTIPROOF_VERSION}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8015/health', timeout=5)"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    <<: *tool-common
+
+  windows-tools:
+    image: ${CERTIPROOF_IMAGE_PREFIX:-ghcr.io/asxzsa558/certiproof}/windows-tools:${CERTIPROOF_VERSION}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8014/health', timeout=15)"]
+      interval: 20s
+      timeout: 20s
+      retries: 5
+      start_period: 20s
+    mem_limit: ${TOOL_MEMORY_LIMIT:-1g}
+    cpus: ${TOOL_CPU_LIMIT:-1.0}
+    pids_limit: 512
+    <<: *tool-common
+
+volumes:
+  node_identity:
+
+networks:
+  scan-node-net:
+    driver: bridge

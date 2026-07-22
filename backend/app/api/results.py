@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, delete, or_, select
@@ -84,6 +84,7 @@ async def _finish_file_cleanup(file_paths: list[str]) -> int:
 @router.get("/projects/{project_id}/scans", response_model=List[ScanTaskResponse])
 async def list_scan_tasks(
     project_id: int,
+    assessment_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -93,9 +94,12 @@ async def list_scan_tasks(
     await get_project_for_user(db, project_id, current_user.id, "scan:read")
     
     # 获取扫描任务列表
+    filters = [ScanTask.project_id == project_id]
+    if assessment_id is not None:
+        filters.append(ScanTask.assessment_id == assessment_id)
     result = await db.execute(
         select(ScanTask)
-        .where(ScanTask.project_id == project_id)
+        .where(*filters)
         .order_by(ScanTask.created_at.desc())
     )
     scan_tasks = result.scalars().all()

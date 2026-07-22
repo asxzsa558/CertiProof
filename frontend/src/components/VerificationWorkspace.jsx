@@ -121,7 +121,7 @@ function FindingRow({ finding }) {
   )
 }
 
-function VerificationWorkspace({ projectId, onChanged, onContinue, refreshKey, initialFilter = null }) {
+function VerificationWorkspace({ projectId, assessmentId, onChanged, onContinue, refreshKey, initialFilter = null }) {
   const [workspace, setWorkspace] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(null)
@@ -143,7 +143,9 @@ function VerificationWorkspace({ projectId, onChanged, onContinue, refreshKey, i
     if (!projectId) return
     if (!silent) setLoading(true)
     try {
-      const response = await api.get(`/projects/${projectId}/verification/workspace`)
+      const response = await api.get(`/projects/${projectId}/verification/workspace`, {
+        params: assessmentId ? { assessment_id: assessmentId } : undefined,
+      })
       setWorkspace(response.data)
       onChanged?.({ silent: true })
     } catch (error) {
@@ -151,7 +153,7 @@ function VerificationWorkspace({ projectId, onChanged, onContinue, refreshKey, i
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [projectId, onChanged])
+  }, [projectId, assessmentId, onChanged])
 
   useEffect(() => {
     fetchWorkspace()

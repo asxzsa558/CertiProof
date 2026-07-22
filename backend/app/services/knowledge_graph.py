@@ -14,6 +14,12 @@ from app.models.document_knowledge import KnowledgeGraphRevision
 
 LIBRARY_NAME = "document_controls"
 CONTROL_BUNDLE = Path(__file__).resolve().parents[3] / "reference" / "compliance" / "document_controls.yaml"
+MIPING_LIBRARY_NAME = "miping_document_controls"
+MIPING_CONTROL_BUNDLE = Path(__file__).resolve().parents[3] / "reference" / "compliance" / "miping_document_controls.yaml"
+STANDARD_BUNDLES = {
+    "dengbao": (LIBRARY_NAME, CONTROL_BUNDLE),
+    "miping": (MIPING_LIBRARY_NAME, MIPING_CONTROL_BUNDLE),
+}
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 
 
@@ -78,35 +84,42 @@ class KnowledgeGraphService:
         rows = (await connection.exec_driver_sql(sql)).mappings().all()
         return [{key: _agtype(value) for key, value in row.items()} for row in rows]
 
-    async def seed_standard_bundle(self, db: AsyncSession, bundle_path: Path = CONTROL_BUNDLE) -> dict[str, Any]:
+    async def seed_standard_bundle(
+        self,
+        db: AsyncSession,
+        bundle_path: Path = CONTROL_BUNDLE,
+        library_name: str = LIBRARY_NAME,
+    ) -> dict[str, Any]:
         raw = bundle_path.read_bytes()
-        digest = hashlib.sha256(raw).hexdigest()
+        # Include graph schema generation so an unchanged YAML is reseeded after node UID/property changes.
+        digest = hashlib.sha256(raw + f"\n{library_name}:schema-v2".encode()).hexdigest()
         library = yaml.safe_load(raw) or {}
         version = str(library.get("version") or "unversioned")
         defaults = library.get("requirement_defaults") or {}
         revision = (await db.execute(select(KnowledgeGraphRevision).where(
             KnowledgeGraphRevision.graph_name == self.graph_name,
-            KnowledgeGraphRevision.library_name == LIBRARY_NAME,
+            KnowledgeGraphRevision.library_name == library_name,
         ))).scalar_one_or_none()
         if revision and revision.content_sha256 == digest:
             return {"status": "current", "version": version, "nodes": revision.node_count, "edges": revision.edge_count}
         if not await self.prepare(db):
             return {"status": "disabled", "version": version, "nodes": 0, "edges": 0}
 
-        standard_uid = f"standard:{version}"
+        standard_uid = f"standard:{library_name}:{version}"
         basis = library.get("basis") or []
-        await self._cypher(db, "MATCH (s:StandardEdition) SET s.active = false")
+        await self._cypher(db, f"MATCH (s:StandardEdition) WHERE s.library_name = {_literal(library_name)} SET s.active = false")
         await self._cypher(db, f"""
             MERGE (s:StandardEdition {{uid: {_literal(standard_uid)}}})
             SET s.version = {_literal(version)},
                 s.basis = {_literal(basis)},
+                s.library_name = {_literal(library_name)},
                 s.digest = {_literal(digest)},
                 s.active = true
         """)
         node_count = 1
         edge_count = 0
         for document_key, document in (library.get("documents") or {}).items():
-            document_uid = f"document:{version}:{document_key}"
+            document_uid = f"document:{library_name}:{version}:{document_key}"
             await self._cypher(db, f"""
                 MATCH (s:StandardEdition {{uid: {_literal(standard_uid)}}})
                 MERGE (d:DocumentType {{uid: {_literal(document_uid)}}})
@@ -118,7 +131,7 @@ class KnowledgeGraphService:
             edge_count += 1
             for control in document.get("controls") or []:
                 control_id = str(control["id"])
-                control_uid = f"control:{version}:{control_id}"
+                control_uid = f"control:{library_name}:{version}:{control_id}"
                 await self._cypher(db, f"""
                     MATCH (d:DocumentType {{uid: {_literal(document_uid)}}})
                     MERGE (c:Control {{uid: {_literal(control_uid)}}})
@@ -129,7 +142,7 @@ class KnowledgeGraphService:
                 node_count += 1
                 edge_count += 1
                 for point in control.get("required_points") or []:
-                    requirement_uid = f"requirement:{version}:{control_id}:{point['id']}"
+                    requirement_uid = f"requirement:{library_name}:{version}:{control_id}:{point['id']}"
                     required_evidence = point.get("required_evidence") or defaults.get("required_evidence") or point.get("evidence_keywords") or []
                     completeness = point.get("completeness") or defaults.get("completeness") or "必须存在可定位的支持证据且无矛盾证据"
                     negative_conditions = point.get("negative_conditions") or defaults.get("negative_conditions") or []
@@ -137,8 +150,8 @@ class KnowledgeGraphService:
                     remediation = point.get("remediation") or str(
                         defaults.get("remediation_template") or "补充“{requirement}”相关制度条款和可审计证据。"
                     ).format(requirement=point.get("text") or "该要求")
-                    decision_uid = f"decision:{version}:{control_id}:{point['id']}"
-                    remediation_uid = f"remediation:{version}:{control_id}:{point['id']}"
+                    decision_uid = f"decision:{library_name}:{version}:{control_id}:{point['id']}"
+                    remediation_uid = f"remediation:{library_name}:{version}:{control_id}:{point['id']}"
                     await self._cypher(db, f"""
                         MATCH (c:Control {{uid: {_literal(control_uid)}}})
                         MERGE (r:EvidenceRequirement {{uid: {_literal(requirement_uid)}}})
@@ -171,7 +184,7 @@ class KnowledgeGraphService:
         else:
             db.add(KnowledgeGraphRevision(
                 graph_name=self.graph_name,
-                library_name=LIBRARY_NAME,
+                library_name=library_name,
                 version=version,
                 content_sha256=digest,
                 node_count=node_count,
@@ -180,12 +193,12 @@ class KnowledgeGraphService:
         await db.flush()
         return {"status": "seeded", "version": version, "nodes": node_count, "edges": edge_count}
 
-    async def load_standard_library(self, db: AsyncSession) -> dict[str, Any]:
-        rows = await self._cypher_rows(db, """
+    async def load_standard_library(self, db: AsyncSession, library_name: str = LIBRARY_NAME) -> dict[str, Any]:
+        rows = await self._cypher_rows(db, f"""
             MATCH (s:StandardEdition)-[:DEFINES]->(d:DocumentType)-[:CONTAINS]->(c:Control)-[:REQUIRES]->(r:EvidenceRequirement)
             MATCH (r)-[:DECIDED_BY]->(rule:DecisionRule)
             MATCH (r)-[:REMEDIATED_BY]->(guidance:RemediationGuidance)
-            WHERE s.active = true
+            WHERE s.active = true AND s.library_name = {_literal(library_name)}
             RETURN s.version, s.basis, d.key, d.name, d.aliases,
                    c.uid, c.control_id, c.title,
                    r.uid, r.point_id, r.text, r.keywords, r.required_evidence,

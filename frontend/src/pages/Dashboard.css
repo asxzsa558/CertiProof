@@ -259,6 +259,25 @@
 .member-role-list .ant-select { min-width: 124px; }
 .empty-panel { padding: 12px 4px; color: var(--muted); font-size: 12px; }
 
+.ops-alert-summary { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 9px; flex: 1; min-height: 0; }
+.ops-alert-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid rgba(137, 185, 207, 0.12); background: rgba(2, 10, 24, 0.34); }
+.ops-alert-metrics > span { display: grid; min-width: 0; gap: 4px; padding: 8px; border-right: 1px solid rgba(137, 185, 207, 0.1); }
+.ops-alert-metrics > span:last-child { border-right: 0; }
+.ops-alert-metrics strong { color: #f1fbff; font-family: var(--font-mono); font-size: 17px; }
+.ops-alert-metrics em { overflow: hidden; color: rgba(167, 186, 207, 0.7); font-size: 9px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.ops-alert-metrics .hot strong { color: #ffb36b; }
+.ops-alert-list { display: grid; align-content: start; gap: 6px; }
+.ops-alert-list > div { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 7px; min-height: 38px; align-items: center; padding: 6px 7px; border: 1px solid rgba(244, 189, 79, 0.16); background: rgba(87, 57, 10, 0.13); }
+.ops-alert-list .anticon { color: #f4bd4f; }
+.ops-alert-list span { min-width: 0; }
+.ops-alert-list strong,
+.ops-alert-list small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ops-alert-list strong { color: #f3f8fb; font-size: 10px; }
+.ops-alert-list small { margin-top: 3px; color: rgba(177, 199, 214, 0.68); font-size: 9px; }
+.ops-alert-list .ops-alert-clear { display: flex; justify-content: center; color: #a7d8c0; border-color: rgba(55, 217, 150, 0.16); background: rgba(20, 93, 64, 0.12); font-size: 11px; }
+.ops-alert-list .ops-alert-clear .anticon { color: #37d996; }
+.ops-alert-summary > .ant-btn { justify-self: start; height: 24px; padding: 0; color: #a6edf6; font-size: 11px; }
+
 .risk-panel { min-height: 0; }
 .risk-filter-bar { display: flex; gap: 7px; margin-bottom: 10px; overflow-x: auto; }
 .risk-filter-bar button { display: inline-flex; align-items: center; gap: 6px; min-height: 29px; padding: 0 9px; color: rgba(211, 226, 237, 0.8); border: 1px solid rgba(137, 185, 207, 0.13); border-radius: 4px; background: rgba(2, 10, 24, 0.36); cursor: pointer; font-size: 11px; white-space: nowrap; }

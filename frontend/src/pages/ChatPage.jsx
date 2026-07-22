@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { Layout, Avatar, Dropdown, Space, Button, Tooltip, Modal, Form, Input, Select, message, Tag, Popconfirm, Table, Badge, Tabs } from 'antd'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Layout, Avatar, Dropdown, Space, Button, Tooltip, Modal, Form, Input, Select, Segmented, message, Tag, Popconfirm, Table, Badge, Tabs, Checkbox } from 'antd'
 import {
   ProjectOutlined,
   LogoutOutlined,
@@ -19,6 +19,7 @@ import {
   FileTextOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  LockOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../store/authStore'
 import SystemConfig from '../components/SystemConfig'
@@ -42,6 +43,8 @@ const PERMISSION_LABELS = {
   'scan:execute': '执行检测',
   'scan:read': '查看检测',
   'scan:cancel': '取消检测',
+  'node:read': '查看扫描节点',
+  'node:manage': '管理扫描节点',
   'assessment:read': '查看测评',
   'assessment:manage': '管理测评',
   'evidence:manage': '管理证据',
@@ -57,6 +60,7 @@ const PERMISSION_LABELS = {
 
 function ChatPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { projectId: urlProjectId } = useParams()
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
@@ -78,6 +82,45 @@ function ChatPage() {
   const [workspaceSummary, setWorkspaceSummary] = useState({})
   const [profileVisible, setProfileVisible] = useState(false)
   const [currentPermissions, setCurrentPermissions] = useState([])
+  const [assessmentCode, setAssessmentCode] = useState(searchParams.get('assessment') || 'dengbao')
+  const [assessmentDraft, setAssessmentDraft] = useState({})
+
+  const assessmentTypes = (selectedProject?.assessment_types || [])
+    .map(item => item.assessment_type)
+    .filter(item => ['dengbao', 'miping'].includes(item?.code))
+  const assessmentTypeCodes = assessmentTypes.map(item => item.code)
+  const assessmentLabel = assessmentCode === 'miping' ? '密评自查' : '等保自查'
+  const currentProjectAssessment = (managerProject?.assessment_types || []).find(
+    item => item.assessment_type?.code === assessmentCode
+  )
+  const selectedProjectAssessment = (selectedProject?.assessment_types || []).find(
+    item => item.assessment_type?.code === assessmentCode
+  )
+
+  useEffect(() => {
+    if (!selectedProject) return
+    const requested = searchParams.get('assessment')
+    const next = assessmentTypeCodes.includes(requested)
+      ? requested
+      : assessmentTypeCodes.includes(assessmentCode)
+        ? assessmentCode
+        : assessmentTypeCodes.includes('dengbao') ? 'dengbao' : assessmentTypeCodes[0]
+    if (!next) return
+    if (next !== assessmentCode) setAssessmentCode(next)
+    if (requested !== next) {
+      const params = new URLSearchParams(searchParams)
+      params.set('assessment', next)
+      setSearchParams(params, { replace: true })
+    }
+  }, [selectedProject?.id, assessmentTypeCodes.join(','), searchParams.get('assessment')])
+
+  const switchAssessment = (code) => {
+    setWorkspaceSummary({})
+    setAssessmentCode(code)
+    const params = new URLSearchParams(searchParams)
+    params.set('assessment', code)
+    setSearchParams(params, { replace: true })
+  }
 
   useEffect(() => {
     fetchProjects()
@@ -286,17 +329,25 @@ function ChatPage() {
     projectForm.setFieldsValue({
       name: project.name,
       description: project.description,
-      compliance_level: project.compliance_level,
     })
+    setAssessmentDraft(Object.fromEntries(
+      (project.assessment_types || []).map(item => [
+        item.assessment_type?.code,
+        item.level?.includes('二') ? '二级' : '三级',
+      ]).filter(([code]) => code)
+    ))
     setProjectModalVisible(true)
   }
 
   const handleSubmitProject = async () => {
     try {
       const values = await projectForm.validateFields()
-      await api.put(`/projects/${managerProject.id}`, values)
+      const response = await api.put(`/projects/${managerProject.id}`, {
+        ...values,
+        assessment_configs: Object.entries(assessmentDraft).map(([code, level]) => ({ code, level })),
+      })
       message.success('项目更新成功')
-      const updated = { ...managerProject, ...values }
+      const updated = response.data
       setManagerProject(updated)
       setSelectedProject(updated)
       setProjectModalVisible(false)
@@ -415,7 +466,7 @@ function ChatPage() {
     { key: 'dashboard', title: '态势总览', label: '总览', icon: <DashboardOutlined />, action: () => navigate('/dashboard') },
     { key: 'projects', title: '项目与资产', label: '项目', icon: <ProjectOutlined />, action: () => navigate('/projects') },
     { key: 'assets', title: '资产清单', label: '资产', icon: <CloudServerOutlined />, action: () => navigate('/projects?view=assets') },
-    { key: 'assessment', title: '等保测评', label: '测评', icon: <SafetyCertificateOutlined />, active: true, action: () => setSiderCollapsed(false) },
+    { key: 'assessment', title: `${assessmentLabel}流程`, label: '测评', icon: assessmentCode === 'miping' ? <LockOutlined /> : <SafetyCertificateOutlined />, active: true, action: () => setSiderCollapsed(false) },
     { key: 'results', title: '检测结果', label: '结果', icon: <FileSearchOutlined />, action: () => selectedProject && navigate(`/projects/${selectedProject.id}/results`) },
     { key: 'reports', title: '报告中心', label: '报告', icon: <FileTextOutlined />, action: () => navigate('/reports') },
   ]
@@ -445,7 +496,7 @@ function ChatPage() {
           <>
             <div className="workspace-header-metrics">
               <div className="workspace-online"><i />在线</div>
-              <div><span>合规分</span><strong style={{ color: getScoreColor(workspaceSummary.score ?? selectedProject?.compliance_score ?? 0) }}>{workspaceSummary.score ?? selectedProject?.compliance_score ?? '—'}</strong></div>
+              <div><span>合规分</span><strong style={{ color: getScoreColor(workspaceSummary.score ?? selectedProjectAssessment?.score ?? 0) }}>{workspaceSummary.score ?? selectedProjectAssessment?.score ?? '—'}</strong></div>
               <div><span>可靠覆盖率</span><strong className="good">{Number.isFinite(workspaceSummary.coverage) ? `${workspaceSummary.coverage}%` : '—'}</strong></div>
               <div><span>待处理</span><strong className="danger">{workspaceSummary.open ?? '—'}</strong></div>
             </div>
@@ -514,12 +565,12 @@ function ChatPage() {
 
       {siderCollapsed && (
         <div className="assessment-reopen-rail">
-          <Tooltip title="展开等保自查流程" placement="right">
+          <Tooltip title={`展开${assessmentLabel}流程`} placement="right">
             <Button
               type="text"
               icon={<MenuUnfoldOutlined />}
               onClick={() => setSiderCollapsed(false)}
-              aria-label="展开等保自查流程"
+              aria-label={`展开${assessmentLabel}流程`}
             />
           </Tooltip>
         </div>
@@ -532,7 +583,18 @@ function ChatPage() {
           className="workspace-assessment-sider"
         >
           <div className="assessment-drawer-header">
-            <strong className="assessment-drawer-kicker">等保自查流程</strong>
+            <div>
+              <strong className="assessment-drawer-kicker">{assessmentLabel}流程</strong>
+              {assessmentTypes.length > 1 && (
+                <Segmented
+                  size="small"
+                  value={assessmentCode}
+                  onChange={switchAssessment}
+                  options={assessmentTypes.map(item => ({ label: item.name, value: item.code }))}
+                  className="assessment-type-switch"
+                />
+              )}
+            </div>
             <Tooltip title="收起测评栏">
               <Button type="text" icon={<MenuFoldOutlined />} onClick={() => setSiderCollapsed(true)} aria-label="收起测评栏" />
             </Tooltip>
@@ -545,6 +607,7 @@ function ChatPage() {
                   projectName={selectedProject.name}
                   variant="cockpit"
                   openIssues={workspaceSummary.open}
+                  assessmentCode={assessmentCode}
                 />
               </div>
             )}
@@ -593,14 +656,11 @@ function ChatPage() {
                     <span className="info-label">项目名称</span>
                     <span className="info-value">{managerProject?.name}</span>
                   </div>
+                  <div className="info-item"><span className="info-label">当前测评等级</span><span className="info-value">{currentProjectAssessment?.level || '未配置'}</span></div>
                   <div className="info-item">
-                    <span className="info-label">等保等级</span>
-                    <span className="info-value">{managerProject?.compliance_level}</span>
-                  </div>
-                  <div className="info-item">
-                    <span className="info-label">合规分数</span>
-                    <span className="info-value" style={{ color: getScoreColor(managerProject?.compliance_score || 0) }}>
-                      {managerProject?.compliance_score ?? '未检测'} 分
+                    <span className="info-label">{assessmentCode === 'miping' ? '密评分数' : '等保分数'}</span>
+                    <span className="info-value" style={{ color: getScoreColor(currentProjectAssessment?.score || 0) }}>
+                      {currentProjectAssessment?.score ?? '未检测'}{currentProjectAssessment?.score == null ? '' : ' 分'}
                     </span>
                   </div>
                   <div className="info-item">
@@ -608,6 +668,28 @@ function ChatPage() {
                     <span className="info-value">{managerProject?.description || '无'}</span>
                   </div>
                 </div>
+              </div>
+
+              <div className="manager-section">
+                <div className="manager-section-header">
+                  <div>
+                    <h3><SafetyCertificateOutlined style={{ marginRight: 8 }} />项目测评</h3>
+                    <p className="manager-section-context">同一项目共用资产范围，等保与密评的进度、问题、复测和报告相互独立。</p>
+                  </div>
+                </div>
+                <Space wrap>
+                  {assessmentTypes.map(item => (
+                    <Tag key={item.code} color={item.code === 'miping' ? 'purple' : 'cyan'}>
+                      {item.name} · {(managerProject?.assessment_types || []).find(config => config.assessment_type?.code === item.code)?.level || '已启用'}
+                    </Tag>
+                  ))}
+                  {!assessmentTypeCodes.includes('dengbao') && (
+                    <Button icon={<SafetyCertificateOutlined />} onClick={() => handleEditProject(managerProject)}>配置等保</Button>
+                  )}
+                  {!assessmentTypeCodes.includes('miping') && (
+                    <Button icon={<LockOutlined />} onClick={() => handleEditProject(managerProject)}>配置密评</Button>
+                  )}
+                </Space>
               </div>
 
               <div className="manager-section">
@@ -645,6 +727,7 @@ function ChatPage() {
               modelId={selectedModel}
               onOpenResults={() => selectedProject && navigate(`/projects/${selectedProject.id}/results`)}
               onWorkspaceSummary={setWorkspaceSummary}
+              assessmentCode={assessmentCode}
             />
           )}
         </Content>
@@ -667,11 +750,32 @@ function ChatPage() {
           <Form.Item name="description" label="项目描述">
             <Input.TextArea placeholder="描述项目的用途和特点（可选）" rows={3} />
           </Form.Item>
-          <Form.Item name="compliance_level" label="等保等级" rules={[{ required: true, message: '请选择等保等级' }]}>
-            <Select placeholder="选择等保等级">
-              <Select.Option value="二级">等保二级</Select.Option>
-              <Select.Option value="三级">等保三级</Select.Option>
-            </Select>
+          <Form.Item label="测评类型与等级" required>
+            <div className="assessment-config-editor">
+              {[{ code: 'dengbao', name: '等保' }, { code: 'miping', name: '密评' }].map((item) => {
+                const enabled = Boolean(assessmentDraft[item.code])
+                const locked = assessmentTypeCodes.includes(item.code)
+                return <div className="assessment-config-row" key={item.code}>
+                  <Checkbox
+                    checked={enabled}
+                    disabled={locked}
+                    onChange={(event) => setAssessmentDraft((current) => {
+                      const next = { ...current }
+                      if (event.target.checked) next[item.code] = managerProject?.compliance_level || '三级'
+                      else delete next[item.code]
+                      return next
+                    })}
+                  >{item.name}自查{locked ? '（已创建）' : ''}</Checkbox>
+                  <Select
+                    value={assessmentDraft[item.code] || '三级'}
+                    disabled={!enabled || locked}
+                    onChange={(level) => setAssessmentDraft((current) => ({ ...current, [item.code]: level }))}
+                    options={[{ value: '二级', label: '第二级' }, { value: '三级', label: '第三级' }]}
+                  />
+                </div>
+              })}
+              <p className="assessment-config-hint">已有测评保持原等级；可为当前项目新增另一套独立测评。</p>
+            </div>
           </Form.Item>
         </Form>
       </Modal>

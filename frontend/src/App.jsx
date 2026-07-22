@@ -15,6 +15,8 @@ const ProjectsList = lazy(() => import('./pages/ProjectsList'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const OrganizationSettings = lazy(() => import('./pages/OrganizationSettings'))
 const DataLifecycleSettings = lazy(() => import('./pages/DataLifecycleSettings'))
+const OperationsCenter = lazy(() => import('./pages/OperationsCenter'))
+const ScanNodes = lazy(() => import('./pages/ScanNodes'))
 
 function AppLoading() {
   return (
@@ -154,6 +156,22 @@ function App() {
               element={
                 <ProtectedRoute>
                   <ResultDetailPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/operations"
+              element={
+                <ProtectedRoute>
+                  <OperationsCenter />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings/scan-nodes"
+              element={
+                <ProtectedRoute>
+                  <ScanNodes />
                 </ProtectedRoute>
               }
             />
